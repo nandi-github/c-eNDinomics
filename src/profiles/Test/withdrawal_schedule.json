@@ -1,0 +1,12 @@
+
+{
+  "floor_k": 100,
+  "schedule": [
+    { "years": "1-2", "amount_k": 150 },
+    { "years": "3-5", "amount_k": 150 },
+    { "years": "6-10", "amount_k": 200 },
+    { "years": "11-20", "amount_k": 200 },
+    { "years": "21-30", "amount_k": 200 }
+  ]
+}
+

@@ -1,0 +1,10 @@
+cd ui
+rm -rf dist
+rm -rf node_modules package-lock.json
+npm install
+npm run build
+cd ..
+#SIM_TEST_PURE=1 SIM_DEBUG=1 SIM_USE_CORE_INV=1 python -m uvicorn api:app --reload
+python -m uvicorn api:app --reload
+
+

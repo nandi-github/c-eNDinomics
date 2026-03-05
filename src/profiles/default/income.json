@@ -1,0 +1,21 @@
+{
+  "w2": [
+    { "years": "1-30", "amount_nom": 0 }
+  ],
+  "rental": [
+    { "years": "1-30", "amount_nom": 0 }
+  ],
+  "interest": [
+    { "years": "1-30", "amount_nom": 0 }
+  ],
+  "ordinary_other": [
+    { "years": "1-30", "amount_nom": 0 }
+  ],
+  "qualified_div": [
+    { "years": "1-30", "amount_nom": 0 }
+  ],
+  "cap_gains": [
+    { "years": "1-30", "amount_nom": 0 }
+  ]
+}
+

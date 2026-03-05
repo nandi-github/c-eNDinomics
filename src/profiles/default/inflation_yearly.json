@@ -1,0 +1,11 @@
+
+{
+  "inflation": [
+    { "years": "1-2",  "rate_pct": 3.00 },
+    { "years": "3-5",  "rate_pct": 2.30 },
+    { "years": "6-10", "rate_pct": 2.30 },
+    { "years": "11-20","rate_pct": 2.40 },
+    { "years": "21-30","rate_pct": 2.20 }
+  ]
+}
+

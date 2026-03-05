@@ -1,0 +1,7 @@
+Rebuild the UI and restart backend:
+
+- cd ui && rm -rf dist && npm install && npm run build
+
+- cd .. && python -m uvicorn api:app –reload
+
+- Shift+Reload the UI page to see changes.

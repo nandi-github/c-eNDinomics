@@ -1,0 +1,61 @@
+cd ui
+rm -rf dist
+npm install
+npm run build
+cd ..
+python -m uvicorn api:app --reload
+
+Do this exactly:
+
+1. Clean install with npm (not yarn/pnpm).
+
+cd ui
+rm -rf node_modules package-lock.json
+npm cache clean --force
+npm install
+
+2. Pin your package.json scripts to the real bin path to bypass a bad shim.
+
+- Edit ui/package.json scripts to:
+
+ ▫ “dev”: “node ./node_modules/vite/bin/vite.js”
+
+ ▫ “build”: “node ./node_modules/vite/bin/vite.js build”
+
+ ▫ “preview”: “node ./node_modules/vite/bin/vite.js preview”
+
+3. Verify the vite bin exists.
+
+- ls ui/node_modules/vite/bin/vite.js
+
+- It should print the file path. If not, installation failed; run npm install again.
+
+4. Ensure you’re using npm with a compatible Node version.
+
+- Vite 7 requires Node ≥ 20.19 or ≥ 22.12; your Node v24.12.0 is fine.
+
+- Avoid mixing package managers. Stick to npm since you have a package-lock.json:
+
+ ▫ Use npm ci for a clean, reproducible install if you keep package-lock.json committed.
+
+5. Check the broken shim and PATH issues.
+
+- Inspect the bad shim:
+
+ ▫ cat ui/node_modules/.bin/vite
+
+ ▫ It should reference ../vite/bin/vite.js; if it references ../dist/node/cli.js, the install was corrupted.
+
+- After reinstall, the shim should be corrected; but keeping the direct script path in step 2 guarantees it works.
+
+6. If it still fails, force-install a known-good Vite version.
+
+- npm install vite@7.3.0 –save-dev
+
+- Then repeat steps 2–3.
+
+Once Vite runs, open the dev URL (http://localhost:5173), make your .tsx edits, and when ready to serve from FastAPI:
+
+- npm run build in ui to refresh ui/dist
+
+- Restart your FastAPI server and hard-refresh the browser.

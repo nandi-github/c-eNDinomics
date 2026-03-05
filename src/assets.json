@@ -1,0 +1,46 @@
+{
+  "assets": {
+    "SPY": { "class": "US_STOCKS", "mu_annual": 0.065, "sigma_annual": 0.16, "expense_ratio": 0.0009, "tracking_error": 0.01, "dist": { "yield_annual": 0.018, "qualified_ratio": 0.90 } },
+    "VTI": { "class": "US_STOCKS", "mu_annual": 0.065, "sigma_annual": 0.16, "expense_ratio": 0.0003, "tracking_error": 0.01, "dist": { "yield_annual": 0.017, "qualified_ratio": 0.90 } },
+    "QQQ": { "class": "US_STOCKS", "mu_annual": 0.075, "sigma_annual": 0.22, "expense_ratio": 0.0020, "tracking_error": 0.02, "dist": { "yield_annual": 0.009, "qualified_ratio": 0.90 } },
+    "VUG": { "class": "US_STOCKS", "mu_annual": 0.072, "sigma_annual": 0.21, "expense_ratio": 0.0004, "tracking_error": 0.02, "dist": { "yield_annual": 0.010, "qualified_ratio": 0.90 } },
+    "VTV": { "class": "US_STOCKS", "mu_annual": 0.060, "sigma_annual": 0.17, "expense_ratio": 0.0004, "tracking_error": 0.01, "dist": { "yield_annual": 0.023, "qualified_ratio": 0.90 } },
+    "XLK": { "class": "US_STOCKS", "mu_annual": 0.075, "sigma_annual": 0.22, "expense_ratio": 0.0013, "tracking_error": 0.02, "dist": { "yield_annual": 0.008, "qualified_ratio": 0.90 } },
+    "XLF": { "class": "US_STOCKS", "mu_annual": 0.060, "sigma_annual": 0.19, "expense_ratio": 0.0013, "tracking_error": 0.01, "dist": { "yield_annual": 0.025, "qualified_ratio": 0.90 } },
+    "XLE": { "class": "US_STOCKS", "mu_annual": 0.060, "sigma_annual": 0.23, "expense_ratio": 0.0013, "tracking_error": 0.02, "dist": { "yield_annual": 0.035, "qualified_ratio": 0.70 } },
+    "AAPL": { "class": "US_STOCKS", "mu_annual": 0.075, "sigma_annual": 0.25, "expense_ratio": 0.0000, "tracking_error": 0.03, "dist": { "yield_annual": 0.006, "qualified_ratio": 0.90 } },
+    "MSFT": { "class": "US_STOCKS", "mu_annual": 0.072, "sigma_annual": 0.23, "expense_ratio": 0.0000, "tracking_error": 0.02, "dist": { "yield_annual": 0.009, "qualified_ratio": 0.90 } },
+    "AMZN": { "class": "US_STOCKS", "mu_annual": 0.078, "sigma_annual": 0.30, "expense_ratio": 0.0000, "tracking_error": 0.03, "dist": { "yield_annual": 0.000, "qualified_ratio": 0.00 } },
+    "NVDA": { "class": "US_STOCKS", "mu_annual": 0.085, "sigma_annual": 0.35, "expense_ratio": 0.0000, "tracking_error": 0.04, "dist": { "yield_annual": 0.002, "qualified_ratio": 0.90 } },
+
+    "VXUS": { "class": "INTL_STOCKS", "mu_annual": 0.055, "sigma_annual": 0.18, "expense_ratio": 0.0007, "tracking_error": 0.01, "dist": { "yield_annual": 0.025, "qualified_ratio": 0.80 } },
+    "EFA":  { "class": "INTL_STOCKS", "mu_annual": 0.053, "sigma_annual": 0.17, "expense_ratio": 0.0003, "tracking_error": 0.01, "dist": { "yield_annual": 0.026, "qualified_ratio": 0.80 } },
+    "EEM":  { "class": "INTL_STOCKS", "mu_annual": 0.060, "sigma_annual": 0.24, "expense_ratio": 0.0065, "tracking_error": 0.02, "dist": { "yield_annual": 0.022, "qualified_ratio": 0.70 } },
+
+    "TLT": { "class": "LONG_TREAS", "mu_annual": 0.020, "sigma_annual": 0.12, "expense_ratio": 0.00015, "tracking_error": 0.00, "dist": { "yield_annual": 0.030, "qualified_ratio": 0.00 } },
+    "IEF": { "class": "INT_TREAS",  "mu_annual": 0.018, "sigma_annual": 0.08, "expense_ratio": 0.00015, "tracking_error": 0.00, "dist": { "yield_annual": 0.028, "qualified_ratio": 0.00 } },
+    "BND": { "class": "INT_TREAS",  "mu_annual": 0.020, "sigma_annual": 0.07, "expense_ratio": 0.0003,  "tracking_error": 0.00, "dist": { "yield_annual": 0.028, "qualified_ratio": 0.00 } },
+    "LQD": { "class": "INT_TREAS",  "mu_annual": 0.022, "sigma_annual": 0.10, "expense_ratio": 0.0009,  "tracking_error": 0.015, "dist": { "yield_annual": 0.032, "qualified_ratio": 0.00 } },
+    "TIP": { "class": "TIPS",       "mu_annual": 0.018, "sigma_annual": 0.06, "expense_ratio": 0.00019, "tracking_error": 0.00, "dist": { "yield_annual": 0.024, "qualified_ratio": 0.00 } },
+
+    "GLD": { "class": "GOLD", "mu_annual": 0.030, "sigma_annual": 0.15, "expense_ratio": 0.0004, "tracking_error": 0.01 },
+    "IAU": { "class": "GOLD", "mu_annual": 0.030, "sigma_annual": 0.15, "expense_ratio": 0.00025, "tracking_error": 0.01 },
+
+    "DBC": { "class": "COMMOD", "mu_annual": 0.028, "sigma_annual": 0.20, "expense_ratio": 0.0009, "tracking_error": 0.02 },
+    "PDBC": { "class": "COMMOD", "mu_annual": 0.028, "sigma_annual": 0.19, "expense_ratio": 0.0009, "tracking_error": 0.02 }
+  },
+  "correlations": {
+    "assets_order": [
+      "SPY","VTI","QQQ","VUG","VTV","XLK","XLF","XLE","AAPL","MSFT","AMZN","NVDA",
+      "VXUS","EFA","EEM",
+      "TLT","IEF","BND","LQD","TIP",
+      "GLD","IAU",
+      "DBC","PDBC"
+    ]
+  },
+  "overrides": [
+    { "where": { "assets": ["XLE"] }, "set": { "mu_annual": 0.060, "sigma_annual": 0.23 } },
+    { "where": { "assets": ["LQD"] }, "set": { "tracking_error": 0.015 } }
+  ]
+}
+

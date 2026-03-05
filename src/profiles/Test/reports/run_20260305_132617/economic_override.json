@@ -1,0 +1,137 @@
+{
+  "defaults": {
+    "bad_market": {
+      "drawdown_threshold": 0.15,
+      "use_recession_flag": true
+    },
+    "cash_reserve": {
+      "months": 6,
+      "allow_dip_below_reserve": false,
+      "use_cash_only_in_bad_markets": false
+    },
+    "rebalancing": {
+      "global_drift_threshold": 0.12,
+      "require_cash_above_reserve_to_rebalance": true,
+      "suppress_in_bad_market": true,
+      "brokerage_capgain_limit_k": 10.0,
+      "brokerage_enabled": true
+    },
+    "withdrawal_sequence": {
+      "order_good_market": [
+        "BROKERAGE:equities",
+        "BROKERAGE:bonds",
+        "TRAD_IRA",
+        "ROTH_IRA"
+      ],
+      "order_bad_market": [
+        "BROKERAGE:equities",
+        "BROKERAGE:bonds",
+        "TRAD_IRA",
+        "ROTH_IRA"
+      ],
+      "tira_age_gate": 59.5,
+      "roth_last_resort": true
+    },
+    "withdrawals": {
+      "shock_scaling_enabled": true,
+      "drawdown_threshold": 0.15,
+      "min_scaling_factor": 0.65,
+      "scale_curve": "linear",
+      "scale_poly_alpha": 1.2,
+      "scale_exp_lambda": 0.8,
+      "use_recession_flag": true,
+      "makeup_enabled": true,
+      "makeup_ratio": 0.3,
+      "makeup_cap_per_year": 0.1
+    }
+  },
+  "overrides": [
+    {
+      "years": "1-5",
+      "cash_reserve": {
+        "months": 6,
+        "allow_dip_below_reserve": false,
+        "use_cash_only_in_bad_markets": false
+      },
+      "rebalancing": {
+        "global_drift_threshold": 0.12,
+        "require_cash_above_reserve_to_rebalance": true,
+        "suppress_in_bad_market": true,
+        "brokerage_capgain_limit_k": 10.0,
+        "brokerage_enabled": true
+      },
+      "bad_market": {
+        "drawdown_threshold": 0.15,
+        "use_recession_flag": true
+      },
+      "withdrawals": {
+        "shock_scaling_enabled": true,
+        "drawdown_threshold": 0.15,
+        "min_scaling_factor": 0.65,
+        "scale_curve": "linear",
+        "use_recession_flag": true,
+        "makeup_enabled": true,
+        "makeup_ratio": 0.3,
+        "makeup_cap_per_year": 0.1
+      }
+    },
+    {
+      "years": "6-15",
+      "cash_reserve": {
+        "months": 6,
+        "allow_dip_below_reserve": false,
+        "use_cash_only_in_bad_markets": false
+      },
+      "rebalancing": {
+        "global_drift_threshold": 0.12,
+        "require_cash_above_reserve_to_rebalance": true,
+        "suppress_in_bad_market": true,
+        "brokerage_capgain_limit_k": 12.5,
+        "brokerage_enabled": true
+      },
+      "bad_market": {
+        "drawdown_threshold": 0.15,
+        "use_recession_flag": true
+      },
+      "withdrawals": {
+        "shock_scaling_enabled": true,
+        "drawdown_threshold": 0.15,
+        "min_scaling_factor": 0.65,
+        "scale_curve": "linear",
+        "use_recession_flag": true,
+        "makeup_enabled": true,
+        "makeup_ratio": 0.3,
+        "makeup_cap_per_year": 0.1
+      }
+    },
+    {
+      "years": "16-30",
+      "cash_reserve": {
+        "months": 5,
+        "allow_dip_below_reserve": false,
+        "use_cash_only_in_bad_markets": false
+      },
+      "rebalancing": {
+        "global_drift_threshold": 0.14,
+        "require_cash_above_reserve_to_rebalance": true,
+        "suppress_in_bad_market": true,
+        "brokerage_capgain_limit_k": 15.0,
+        "brokerage_enabled": true
+      },
+      "bad_market": {
+        "drawdown_threshold": 0.15,
+        "use_recession_flag": true
+      },
+      "withdrawals": {
+        "shock_scaling_enabled": true,
+        "drawdown_threshold": 0.15,
+        "min_scaling_factor": 0.6,
+        "scale_curve": "linear",
+        "use_recession_flag": true,
+        "makeup_enabled": true,
+        "makeup_ratio": 0.3,
+        "makeup_cap_per_year": 0.1
+      }
+    }
+  ]
+}

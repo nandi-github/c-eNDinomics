@@ -1,0 +1,7 @@
+# filename: hash_test.txt
+# Start of file
+Line A
+Line B
+Line C
+# End of file
+

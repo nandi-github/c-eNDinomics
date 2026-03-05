@@ -1,0 +1,9 @@
+
+python3 ~/workspace/research/Modular-Retire/modularisedv105/analyze_and_recommend.py \
+  --snapshot reports/run_20251203_003220/raw_snapshot_20251203_003548.json \
+  --alloc allocation_yearly.json \
+  --economic economic.json \
+  --target-success 80.0 \
+  --out-dir recommendations
+
+

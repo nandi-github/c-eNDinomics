@@ -1,0 +1,18 @@
+{
+  "profile": "Test",
+  "run_id": "run_20260305_132320",
+  "run_info": {
+    "paths": 200,
+    "steps_per_year": 2,
+    "dollars": "current",
+    "base_year": 2026,
+    "state": "California",
+    "filing": "MFJ",
+    "shocks_mode": "none",
+    "flags": {
+      "ignore_withdrawals": false,
+      "ignore_rmds": false,
+      "ignore_conversions": true
+    }
+  }
+}

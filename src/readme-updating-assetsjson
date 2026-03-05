@@ -1,0 +1,9 @@
+You can just share your current assets.json and list the new tickers you want added. I’ll update the file by inserting those assets with sensible defaults or parameters you provide.
+
+A smooth way to do it:
+
+- Send the existing assets.json and a list of symbols with any known details like class, expense ratio, and, if you have them, estimated drift/volatility or a benchmark to infer from.
+
+- If you don’t have parameters, say “derive from history.” I’ll generate μ/σ/correlations from recent total-return data and plug them in, keeping the format identical.
+
+- If you want the assets placed in the common location, specify that it should overwrite APP_ROOT/assets.json; otherwise I’ll return a new JSON you can drop in.
