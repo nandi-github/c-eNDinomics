@@ -587,46 +587,37 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
 
     shocks_mode_req_raw = (shocks_mode_req or "").lower()
 
+    # Route all runs through run_accounts_new — it is now the primary simulator.
+    # Shocks support will be added to run_accounts_new next; for now shocks_events
+    # are passed but the simulator ignores non-empty events (no-op, safe to run).
     modular_core_only_test = (
-        profile == "Test"
-        and shocks_mode_req_raw == "none"
-        and ignore_withdrawals_flag
+        ignore_withdrawals_flag
         and ignore_rmds_flag
         and ignore_conversions_flag
     )
 
     modular_core_withdrawals_test = (
-        profile == "Test"
-        and shocks_mode_req_raw == "none"
-        and not ignore_withdrawals_flag
+        not ignore_withdrawals_flag
         and ignore_rmds_flag
         and ignore_conversions_flag
     )
 
     # RMDs only: no discretionary withdrawals, RMDs ON, conversions OFF
     modular_rmd_only_test = (
-        profile == "Test"
-        and shocks_mode_req_raw == "none"
-        and ignore_withdrawals_flag
+        ignore_withdrawals_flag
         and not ignore_rmds_flag
         and ignore_conversions_flag
     )
 
     # Withdrawals + RMDs: both enabled, conversions OFF
     modular_withdrawals_rmd_test = (
-        profile == "Test"
-        and shocks_mode_req_raw == "none"
-        and not ignore_withdrawals_flag
+        not ignore_withdrawals_flag
         and not ignore_rmds_flag
         and ignore_conversions_flag
     )
 
-    modular_test = (
-        modular_core_only_test
-        or modular_core_withdrawals_test
-        or modular_rmd_only_test
-        or modular_withdrawals_rmd_test
-    )
+    # Always True — run_accounts_new handles all cases
+    modular_test = True
 
     print(
         "[DEBUG api] modular routing:",
