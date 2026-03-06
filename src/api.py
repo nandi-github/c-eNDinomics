@@ -548,9 +548,8 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
             if shocks_path_effective
             else ([], raw_shocks_mode, [])
         )
-        internal_shocks_mode = (
-            shocks_mode_file or raw_shocks_mode or "augment"
-        )
+        # UI choice always wins over JSON file mode
+        internal_shocks_mode = raw_shocks_mode or shocks_mode_file or "augment"
 
     alloc_accounts = load_allocation_yearly_accounts(alloc_path)
     validate_alloc_accounts(alloc_accounts)
@@ -786,6 +785,8 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
             rmd_table_path=rmd_path,
             conversion_per_year_nom=None,
             rmds_enabled=rmds_enabled,
+            shocks_events=shocks_events,
+            shocks_mode=str(internal_shocks_mode),
         )
     else:
         res = run_accounts(
