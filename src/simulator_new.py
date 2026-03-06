@@ -63,6 +63,7 @@ def run_accounts_new(
     alloc_accounts: Dict[str, Any],
     assets_path: Optional[str] = None,
     sched: Optional[np.ndarray] = None,
+    sched_base: Optional[np.ndarray] = None,   # per-year minimum (floor) withdrawal
     apply_withdrawals: bool = False,
     withdraw_sequence: Optional[list] = None,
     tax_cfg: Optional[Dict[str, Any]] = None,
@@ -389,6 +390,12 @@ def run_accounts_new(
         for acct, bal in acct_eoy_nom.items()
     }
 
+    # Per-account withdrawal outflow tracker (paths × YEARS).
+    # Accumulated inside the STEP 3 loop; available in STEP 6 for per-account stats.
+    withdrawal_out_nom_per_acct: Dict[str, np.ndarray] = {
+        acct: np.zeros((paths, YEARS), dtype=float) for acct in acct_eoy_nom.keys()
+    }
+
     if apply_withdrawals and sched is not None:
         sched_vec = np.asarray(sched, dtype=float).reshape(-1)
         if sched_vec.size < YEARS:
@@ -419,6 +426,26 @@ def run_accounts_new(
         else:
             # Flat list — use same sequence every year
             _seq_per_year = [withdraw_sequence] * YEARS
+
+        # ---------------------------------------------------------------
+        # IRS age gate: before 59.5, TRAD IRA and ROTH withdrawals incur
+        # a 10% early-withdrawal penalty.  Hard-enforce brokerage-only
+        # regardless of what the withdrawal_sequence config says.
+        # After 59.5 the configured sequence is used as-is.
+        # ---------------------------------------------------------------
+        owner_age_y0 = float(person_cfg.get("current_age", 60.0)) if person_cfg else 60.0
+        brokerage_only_seq = [a for a in _fallback_seq if _is_brokerage(a)]
+        if not brokerage_only_seq:
+            brokerage_only_seq = [a for a in acct_eoy_nom.keys() if _is_brokerage(a)]
+
+        _seq_per_year = [
+            brokerage_only_seq if (owner_age_y0 + y) < 59.5 else
+            (_seq_per_year[y] if y < len(_seq_per_year) else _fallback_seq)
+            for y in range(YEARS)
+        ]
+
+        # Base (floor) withdrawal schedule — use zeros if not supplied
+        _sched_base = sched_base if sched_base is not None else np.zeros(YEARS, dtype=float)
 
         for y in range(YEARS):
             extra_nom = extra_cur[y] * deflator[y]
@@ -454,6 +481,9 @@ def run_accounts_new(
                     acct_eoy_nom[acct][:, y] = np.maximum(
                         acct_eoy_nom[acct][:, y] - sold_arr, 0.0
                     )
+                # Accumulate withdrawal outflow for STEP 6 per-account reporting
+                if acct in withdrawal_out_nom_per_acct:
+                    withdrawal_out_nom_per_acct[acct][:, y] = sold_arr
 
             if y == 0:
                 for _a in list(acct_eoy_nom.keys())[:3]:
@@ -483,6 +513,10 @@ def run_accounts_new(
         withdrawals["realized_current_mean"]  = total_realized_cur.tolist()
         withdrawals["shortfall_current_mean"] = shortfall_cur.tolist()
         withdrawals["realized_future_mean"]   = (total_realized_cur * deflator).tolist()
+        # Base (floor) schedule — useful for tax engine and UI to show desired vs minimum
+        _base_cur = _sched_base if '_sched_base' in dir() else np.zeros(YEARS, dtype=float)
+        withdrawals["base_current"]           = _base_cur.tolist()
+        withdrawals["base_future_mean"]       = (_base_cur * deflator).tolist()
 
     # rmd_extra_current: mean surplus RMD beyond plan (candidate for reinvest).
     # Computed here (not inside apply_withdrawals block) so it's always valid —
@@ -515,18 +549,32 @@ def run_accounts_new(
         and rmd_total_nom_paths is not None
         and brokerage_accounts
     ):
-        primary_brokerage = brokerage_accounts[0]
-        acct_b = acct_eoy_nom[primary_brokerage]
-
         for y in range(YEARS):
             # Spending plan in nominal dollars (scalar, mean-basis)
             plan_nom_y = planned_cur[y] * deflator[y]
-            # Per-path nominal RMD
+            # Per-path surplus RMD above the plan
             rmd_nom_y = rmd_total_nom_paths[:, y]
-            # Per-path surplus above the plan
             extra_rmd_nom_y = np.maximum(rmd_nom_y - plan_nom_y, 0.0)
-            acct_b[:, y] = acct_b[:, y] + extra_rmd_nom_y
-            reinvest_nom_per_acct[primary_brokerage][:, y] = extra_rmd_nom_y
+
+            # Proportional split across brokerage accounts by their current balance.
+            # Each brokerage receives: surplus * (its balance / total brokerage balance).
+            brok_bals = np.stack(
+                [np.maximum(acct_eoy_nom[b][:, y], 0.0) for b in brokerage_accounts],
+                axis=1
+            )  # shape (paths, n_brok)
+            total_brok = brok_bals.sum(axis=1, keepdims=True)  # (paths, 1)
+            # Equal split when all balances are zero (edge case)
+            n_brok = len(brokerage_accounts)
+            fracs = np.where(
+                total_brok > 1e-12,
+                brok_bals / np.maximum(total_brok, 1e-12),
+                np.full_like(brok_bals, 1.0 / n_brok)
+            )  # (paths, n_brok)
+
+            for i, b in enumerate(brokerage_accounts):
+                share = extra_rmd_nom_y * fracs[:, i]          # (paths,)
+                acct_eoy_nom[b][:, y] = acct_eoy_nom[b][:, y] + share
+                reinvest_nom_per_acct[b][:, y] = share
 
     # If cash_out policy: nothing was reinvested — zero out the reinvested arrays.
     # Also patch realized: surplus RMD is received as cash (not reinvested),
@@ -569,6 +617,31 @@ def run_accounts_new(
     inv_real_levels_p10_acct:    Dict[str, Any] = {}
     inv_real_levels_p90_acct:    Dict[str, Any] = {}
 
+    # -----------------------------------------------------------------------
+    # Pre-compute: how much of each year's plan each TRAD account's RMD covers.
+    # Uses proportional attribution: each account's share = its RMD / total RMD.
+    # Both accounts independently owe RMDs regardless of each other, so the
+    # plan spending funded by RMDs is attributed proportionally.
+    # Withdrawal Out = proportional plan share + any extra discretionary sold.
+    # Reinvested    = RMD Out - Withdrawal Out (surplus above plan, per account).
+    # -----------------------------------------------------------------------
+    rmd_covers_plan_per_acct: Dict[str, np.ndarray] = {}
+    if rmd_nom_per_acct is not None and rmd_total_nom_paths is not None:
+        for y in range(YEARS):
+            plan_nom_y  = planned_cur[y] * deflator[y]            # scalar
+            rmd_total_y = rmd_total_nom_paths[:, y]               # per-path total RMD
+            rmd_covers_total_y = np.minimum(rmd_total_y, plan_nom_y)  # per-path plan covered
+
+            for a, rmd_arr in rmd_nom_per_acct.items():
+                acct_rmd_y = rmd_arr[:, y]
+                # Fraction of total RMD from this account (per path)
+                frac_y = np.where(rmd_total_y > 1e-12,
+                                  acct_rmd_y / np.maximum(rmd_total_y, 1e-12),
+                                  0.0)
+                if a not in rmd_covers_plan_per_acct:
+                    rmd_covers_plan_per_acct[a] = np.zeros((paths, YEARS), dtype=float)
+                rmd_covers_plan_per_acct[a][:, y] = frac_y * rmd_covers_total_y
+
     for acct in list(acct_eoy_nom.keys()):
         lvl_nom  = acct_eoy_nom[acct]
         lvl_real = lvl_nom / deflator
@@ -608,6 +681,47 @@ def run_accounts_new(
         reinvest_fut_mean = reinvest_nom.mean(axis=0)
         inv_nom_levels_mean_acct[acct + "__reinvest_cur"] = reinvest_cur_mean.tolist()
         inv_nom_levels_mean_acct[acct + "__reinvest_fut"] = reinvest_fut_mean.tolist()
+
+        # RMD outflow per account (non-zero for TRAD IRAs only)
+        rmd_out_nom = (rmd_nom_per_acct or {}).get(acct, np.zeros((paths, YEARS), dtype=float))
+        rmd_out_cur_mean = (rmd_out_nom / np.maximum(deflator, 1e-12)).mean(axis=0)
+        rmd_out_fut_mean = rmd_out_nom.mean(axis=0)
+        inv_nom_levels_mean_acct[acct + "__rmd_out_cur"] = rmd_out_cur_mean.tolist()
+        inv_nom_levels_mean_acct[acct + "__rmd_out_fut"] = rmd_out_fut_mean.tolist()
+
+        # Withdrawal outflow per account:
+        #   = discretionary sold (plan > RMD years)
+        #   + portion of RMD that funded the plan (RMD >= plan years)
+        #
+        # When RMD > plan: the full planned spend is embedded in the RMD deduction.
+        #   Attribute it proportionally across TRAD accounts by their RMD share.
+        # When plan > RMD: RMD covers plan up to its amount, discretionary sold covers the rest.
+        #
+        # Reinvested (surplus) = RMD Out - rmd_covers_plan = max(RMD - plan, 0) * frac
+        discretionary_nom = withdrawal_out_nom_per_acct.get(acct, np.zeros((paths, YEARS), dtype=float))
+
+        if _is_trad(acct) and rmd_nom_per_acct is not None:
+            # Use waterfall pre-computed coverage (sequential, not proportional)
+            rmd_covers_plan_nom = rmd_covers_plan_per_acct.get(
+                acct, np.zeros((paths, YEARS), dtype=float)
+            )
+            # Total withdrawal = RMD-covered plan portion + any extra discretionary sold
+            withdrawal_out_nom   = rmd_covers_plan_nom + discretionary_nom
+            # Reinvested surplus = RMD beyond what covered the plan
+            reinvest_surplus_nom = np.maximum(rmd_out_nom - rmd_covers_plan_nom, 0.0)
+        else:
+            withdrawal_out_nom   = discretionary_nom
+            reinvest_surplus_nom = np.zeros((paths, YEARS), dtype=float)
+
+        withdrawal_out_cur_mean = (withdrawal_out_nom / np.maximum(deflator, 1e-12)).mean(axis=0)
+        withdrawal_out_fut_mean = withdrawal_out_nom.mean(axis=0)
+        inv_nom_levels_mean_acct[acct + "__withdrawal_out_cur"] = withdrawal_out_cur_mean.tolist()
+        inv_nom_levels_mean_acct[acct + "__withdrawal_out_fut"] = withdrawal_out_fut_mean.tolist()
+
+        # For TRAD accounts: reinvest_nom is now the RMD surplus (overrides the zero default).
+        # For brokerage: reinvest_nom remains as the inflow received from TRAD surplus.
+        if _is_trad(acct):
+            reinvest_nom = reinvest_surplus_nom
 
         inv_nom_levels_mean_acct[acct]  = lvl_nom.mean(axis=0).tolist()
         inv_real_levels_mean_acct[acct] = lvl_real.mean(axis=0).tolist()

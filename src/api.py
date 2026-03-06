@@ -516,12 +516,15 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
 
     # 6) Load configs
     tax_cfg = load_tax_unified(tax_path, state=state, filing=filing)
-    sched_arr, floor_k = load_sched(withdraw_path_effective)
+    sched_arr, sched_base = load_sched(withdraw_path_effective)
+    # Derive scalar floor_k for legacy run_accounts path
+    floor_k = float(sched_base.min()) if sched_base is not None and sched_base.size > 0 else 0.0
 
     # DEBUG: see what schedule we really loaded
     print("[DEBUG api] withdraw_path_effective:", withdraw_path_effective)
     print("[DEBUG api] sched_arr[0:10]:", sched_arr[:10])
-    print("[DEBUG api] floor_k:", floor_k)
+    print("[DEBUG api] sched_base[0:10]:", sched_base[:10])
+    print("[DEBUG api] floor_k (legacy scalar):", floor_k)
 
 
     infl_yearly = load_inflation_yearly(infl_path, years_count=30)
@@ -692,26 +695,30 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
         # Core-only: no withdrawals, no RMDs → sched=None, apply_withdrawals=False
         if modular_core_only_test:
             sched_for_modular = None
+            sched_base_for_modular = None
             apply_withdrawals_flag = False
 
         # Withdrawals-only: discretionary schedule ON, RMDs ignored
         elif modular_core_withdrawals_test:
             sched_for_modular = sched_arr
+            sched_base_for_modular = sched_base
             apply_withdrawals_flag = True
 
         # RMD-only: RMDs ON, no discretionary withdrawals
         elif modular_rmd_only_test:
             sched_for_modular = None
+            sched_base_for_modular = None
             apply_withdrawals_flag = False
 
         # Withdrawals + RMDs: both ON
         elif modular_withdrawals_rmd_test:
             sched_for_modular = sched_arr
+            sched_base_for_modular = sched_base
             apply_withdrawals_flag = True
 
         # Build per-year age-gated withdrawal sequence from economic policy
         acct_names    = list(alloc_accounts.get("per_year_portfolios", {}).keys())
-        starting_age  = int(person_cfg.get("age", 70)) if person_cfg else 70
+        starting_age  = int(person_cfg.get("current_age", 70)) if person_cfg else 70
         tira_age_gate = float(econ_policy.get("tira_age_gate", 59.5))
 
         # Pick the correct bad-market sequence based on conversion policy
@@ -776,6 +783,7 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
             alloc_accounts=alloc_accounts,
             assets_path=assets_path,
             sched=sched_for_modular,
+            sched_base=sched_base_for_modular,
             apply_withdrawals=apply_withdrawals_flag,
             withdraw_sequence=withdraw_seq_per_year,
             tax_cfg=tax_cfg,

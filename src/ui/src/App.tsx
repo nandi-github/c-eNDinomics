@@ -1337,7 +1337,11 @@ const App: React.FC = () => {
                       <th>Real Portfolio YoY - mean</th>
                       <th>Nominal Inv YoY - mean</th>
                       <th>Real Inv YoY - mean</th>
-                      <th>Reinvested Future USD mean</th>
+                      <th>Reinvested Out Future USD</th>
+                      <th>Reinvested In Future USD</th>
+                      <th>RMD Out Future USD</th>
+                      <th>Withdrawal Out Future USD</th>
+                      <th>Total Out Future USD</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1374,9 +1378,23 @@ const App: React.FC = () => {
                           rets?.inv_nom_yoy_mean_pct_acct[name + "__agg_nom"] || [];
                         const yoyRealAgg =
                           rets?.inv_nom_yoy_mean_pct_acct[name + "__agg_real"] || [];
-                        const reinvestedFut =
+                        const reinvestedFutRaw =
                           levels?.inv_nom_levels_mean_acct[name + "__reinvest_fut"] || [];
+                        const rmdOutFut =
+                          levels?.inv_nom_levels_mean_acct[name + "__rmd_out_fut"] || [];
+                        const withdrawalOutFut =
+                          levels?.inv_nom_levels_mean_acct[name + "__withdrawal_out_fut"] || [];
                         snapshot.years.forEach((yr, idx) => {
+                          // TRAD_IRA: Reinvested = RMD Out - Withdrawal Out (surplus above plan).
+                          // Brokerage: inflow received from TRAD surplus (raw from simulator).
+                          const reinvestedFutDisplay = acct.type === "traditional_ira"
+                            ? Math.max((rmdOutFut[idx] || 0) - (withdrawalOutFut[idx] || 0), 0)
+                            : (reinvestedFutRaw[idx] || 0);
+                          // Total Out for TRAD_IRA = RMD Out (withdrawal + reinvested are subsets of it).
+                          // For brokerage/roth = withdrawal out only.
+                          const totalOutFut = acct.type === "traditional_ira"
+                            ? (rmdOutFut[idx] || 0)
+                            : (withdrawalOutFut[idx] || 0);
                           rows.push(
                             <tr key={`${name}-${yr}`}>
                               <td>{idx === 0 ? name : ""}</td>
@@ -1389,7 +1407,11 @@ const App: React.FC = () => {
                               <td>{formatPct(yoyRealAgg[idx])}</td>
                               <td>{formatPct(yoyNom[idx])}</td>
                               <td>{formatPct(yoyReal[idx])}</td>
-                              <td>{formatUSD(reinvestedFut[idx])}</td>
+                              <td>{acct.type === "traditional_ira" ? formatUSD(reinvestedFutDisplay) : "—"}</td>
+                              <td>{acct.type !== "traditional_ira" ? formatUSD(reinvestedFutDisplay) : "—"}</td>
+                              <td>{acct.type === "traditional_ira" ? formatUSD(rmdOutFut[idx]) : "—"}</td>
+                              <td>{formatUSD(withdrawalOutFut[idx])}</td>
+                              <td>{totalOutFut > 0 ? formatUSD(totalOutFut) : "0"}</td>
                             </tr>,
                           );
                         });
@@ -1434,7 +1456,11 @@ const App: React.FC = () => {
                       <th>Real Portfolio YoY - mean</th>
                       <th>Nominal Inv YoY - mean</th>
                       <th>Real Inv YoY - mean</th>
-                      <th>Reinvested Current USD mean</th>
+                      <th>Reinvested Out Current USD</th>
+                      <th>Reinvested In Current USD</th>
+                      <th>RMD Out Current USD</th>
+                      <th>Withdrawal Out Current USD</th>
+                      <th>Total Out Current USD</th>
                     </tr>
                   </thead>
 
@@ -1472,9 +1498,19 @@ const App: React.FC = () => {
                           rets?.inv_nom_yoy_mean_pct_acct[name + "__agg_nom"] || [];
                         const yoyRealAggCur =
                           rets?.inv_nom_yoy_mean_pct_acct[name + "__agg_real"] || [];
-                        const reinvestedCur =
+                        const reinvestedCurRaw =
                           levels?.inv_nom_levels_mean_acct[name + "__reinvest_cur"] || [];
+                        const rmdOutCur =
+                          levels?.inv_nom_levels_mean_acct[name + "__rmd_out_cur"] || [];
+                        const withdrawalOutCur =
+                          levels?.inv_nom_levels_mean_acct[name + "__withdrawal_out_cur"] || [];
                         snapshot.years.forEach((yr, idx) => {
+                          const reinvestedCurDisplay = acct.type === "traditional_ira"
+                            ? Math.max((rmdOutCur[idx] || 0) - (withdrawalOutCur[idx] || 0), 0)
+                            : (reinvestedCurRaw[idx] || 0);
+                          const totalOutCur = acct.type === "traditional_ira"
+                            ? (rmdOutCur[idx] || 0)
+                            : (withdrawalOutCur[idx] || 0);
                           rows.push(
                             <tr key={`cur-${name}-${yr}`}>
                               <td>{idx === 0 ? name : ""}</td>
@@ -1487,7 +1523,11 @@ const App: React.FC = () => {
                               <td>{formatPct(yoyRealAggCur[idx])}</td>
                               <td>{formatPct(yoyNom[idx])}</td>
                               <td>{formatPct(yoyReal[idx])}</td>
-                              <td>{formatUSD(reinvestedCur[idx])}</td>
+                              <td>{acct.type === "traditional_ira" ? formatUSD(reinvestedCurDisplay) : "—"}</td>
+                              <td>{acct.type !== "traditional_ira" ? formatUSD(reinvestedCurDisplay) : "—"}</td>
+                              <td>{acct.type === "traditional_ira" ? formatUSD(rmdOutCur[idx]) : "—"}</td>
+                              <td>{formatUSD(withdrawalOutCur[idx])}</td>
+                              <td>{totalOutCur > 0 ? formatUSD(totalOutCur) : "0"}</td>
                             </tr>,
                           );
                         });

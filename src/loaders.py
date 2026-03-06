@@ -106,26 +106,38 @@ def load_tax_unified(path: str, state: str, filing: str) -> Dict[str, Any]:
 # -----------------------------
 # Withdrawals schedule
 # -----------------------------
-def load_sched(path: str) -> Tuple[np.ndarray, float]:
-    data = _load_json(path)
-    out = np.zeros(YEARS, dtype=float)
+def load_sched(path: str) -> Tuple[np.ndarray, np.ndarray]:
+    """Load withdrawal schedule.
 
-    # floor_k is already expressed in "thousands of dollars" in JSON
-    floor_k = _safe_num(data.get("floor_k", 0.0), 0.0)
+    Returns
+    -------
+    desired : np.ndarray (YEARS,)
+        Desired (target) withdrawal amount per year in dollars.
+    base : np.ndarray (YEARS,)
+        Minimum acceptable (floor) withdrawal per year in dollars.
+        Per-row ``base_k`` takes priority; falls back to the global
+        ``floor_k`` field, then zero.
+    """
+    data = _load_json(path)
+    desired = np.zeros(YEARS, dtype=float)
+    base    = np.zeros(YEARS, dtype=float)
+
+    # Global floor fallback (used when a row has no base_k)
+    global_floor_k = _safe_num(data.get("floor_k", 0.0), 0.0)
 
     rows = data.get("schedule", []) or []
     for row in rows:
-        yrs = _years_range(str(row.get("years", "*")))
-
-        # JSON uses "amount_k" (thousands of dollars), not "amount_current"
+        yrs   = _years_range(str(row.get("years", "*")))
         amt_k = _safe_num(row.get("amount_k", 0.0), 0.0)
-        amt = amt_k * 1000.0  # convert k → actual dollars
+        # Per-row base_k overrides global floor_k; if absent use global floor
+        row_base_k = _safe_num(row.get("base_k", global_floor_k), global_floor_k)
 
         for y in yrs:
             if 1 <= y <= YEARS:
-                out[y - 1] = amt
+                desired[y - 1] = amt_k    * 1000.0
+                base[y - 1]    = row_base_k * 1000.0
 
-    return out, floor_k
+    return desired, base
 
 # -----------------------------
 # Inflation
