@@ -15,6 +15,7 @@ from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
+from refresh_assets import refresh_assets_if_stale
 from loaders import (
     load_tax_unified,
     load_sched,
@@ -62,6 +63,7 @@ _GLOBAL_ONLY_NAMES = {
 }
 
 app = FastAPI(title="eNDinomics API", version="1.0.0")
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -548,7 +550,7 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
     elif raw_shocks_mode in SYSTEM_SHOCK_PRESETS:
         # System preset: load from system_shocks.json, ignore user shocks file
         shocks_events, _, _ = load_system_shocks(SYSTEM_SHOCKS_PATH, raw_shocks_mode)
-        internal_shocks_mode = "augment"  # system presets always use augment
+        internal_shocks_mode = "override"  # system presets always use override
     else:
         shocks_events, shocks_mode_file, _ = (
             load_shocks(shocks_path_effective)
@@ -560,6 +562,15 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
 
     alloc_accounts = load_allocation_yearly_accounts(alloc_path)
     validate_alloc_accounts(alloc_accounts)
+
+    # Refresh assets.json if stale — run-time so it picks up any allocation edits
+    try:
+        refresh_assets_if_stale(
+            assets_path=COMMON_ASSETS_JSON,
+            profiles_root=PROFILES_ROOT,
+        )
+    except Exception as _e:
+        print(f"[run] assets refresh skipped: {_e}")
 
     person_cfg = load_person(person_path)
     print("[DEBUG api] person_cfg.rmd_policy:", person_cfg.get("rmd_policy") if person_cfg else None)

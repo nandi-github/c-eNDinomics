@@ -3,7 +3,7 @@
   "presets": {
     "average": {
       "description": "Mild market correction \u2014 brief dip, quick recovery",
-      "mode": "augment",
+      "mode": "override",
       "events": [
         {
           "class": "US_STOCKS",
@@ -62,7 +62,7 @@
     },
     "below_average": {
       "description": "Moderate downturn \u2014 2011-style correction with slower recovery",
-      "mode": "augment",
+      "mode": "override",
       "events": [
         {
           "class": "US_STOCKS",
@@ -153,7 +153,7 @@
     },
     "bad": {
       "description": "Significant recession \u2014 2001 dotcom style, broad decline",
-      "mode": "augment",
+      "mode": "override",
       "events": [
         {
           "class": "US_STOCKS",
@@ -235,7 +235,7 @@
     },
     "worst": {
       "description": "Severe crash \u2014 2008 GFC style, deep and prolonged",
-      "mode": "augment",
+      "mode": "override",
       "events": [
         {
           "class": "US_STOCKS",
