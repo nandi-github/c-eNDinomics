@@ -131,6 +131,10 @@ def run_accounts_new(
     total_nom_paths_core = total_nom_paths.copy()
     total_real_paths_core = total_real_paths.copy()
 
+    # Per-account pre-cashflow snapshot (before RMDs, withdrawals, reinvestments).
+    # Used in STEP 6 to compute pure-investment YoY that is unaffected by cashflows.
+    acct_eoy_nom_core = {acct: bal.copy() for acct, bal in acct_eoy_nom.items()}
+
     # Investment-only YoY from pure core path (before withdrawals/RMDs/etc.)
     # deflator not yet built here — compute year-1 inflation factor inline
     _infl_arr = np.asarray(infl_yearly, dtype=float).reshape(-1) if (
@@ -376,6 +380,15 @@ def run_accounts_new(
     #   plan > RMD  →  pull (plan - RMD) from brokerage/IRA accounts
     #   plan <= RMD →  RMD already covers the plan; nothing extra to pull
     # =========================================================================
+    # Ensure all account arrays are writable C-contiguous copies before any
+    # slice assignment.  simulate_balances (or upstream reassignments) may
+    # return read-only or Fortran-order views; in-place assignment silently
+    # fails on read-only arrays.
+    acct_eoy_nom = {
+        acct: np.array(bal, dtype=float, order='C', copy=True)
+        for acct, bal in acct_eoy_nom.items()
+    }
+
     if apply_withdrawals and sched is not None:
         sched_vec = np.asarray(sched, dtype=float).reshape(-1)
         if sched_vec.size < YEARS:
@@ -395,11 +408,29 @@ def run_accounts_new(
         withdrawals["realized_current_per_acct_mean"]  = {}
         withdrawals["shortfall_current_per_acct_mean"] = {}
 
-        seq = withdraw_sequence if withdraw_sequence is not None else list(acct_eoy_nom.keys())
+        # withdraw_sequence may be a flat list (same every year) or a list-of-lists (per year).
+        # Normalise to per-year so the simulator always uses seq_y for year y.
+        _fallback_seq = list(acct_eoy_nom.keys())
+        if withdraw_sequence is None:
+            _seq_per_year = [_fallback_seq] * YEARS
+        elif withdraw_sequence and isinstance(withdraw_sequence[0], list):
+            # Already per-year list-of-lists
+            _seq_per_year = withdraw_sequence
+        else:
+            # Flat list — use same sequence every year
+            _seq_per_year = [withdraw_sequence] * YEARS
 
         for y in range(YEARS):
             extra_nom = extra_cur[y] * deflator[y]
             amount_nom_paths = np.full(paths, extra_nom, dtype=float)
+            seq = _seq_per_year[y] if y < len(_seq_per_year) else _fallback_seq
+
+            if y == 0:
+                print(f"[WDEBUG y=0] extra_cur[0]={extra_cur[0]:.2f} deflator[0]={deflator[0]:.4f} extra_nom={extra_nom:.2f}")
+                print(f"[WDEBUG y=0] seq[:3]={seq[:3]}")
+                for _a in list(acct_eoy_nom.keys())[:3]:
+                    _arr = acct_eoy_nom[_a]
+                    print(f"[WDEBUG y=0] acct={_a} flags={_arr.flags['WRITEABLE']} mean_y0={_arr[:, 0].mean():.2f}")
 
             (
                 realized_total_nom,
@@ -410,6 +441,23 @@ def run_accounts_new(
             ) = apply_withdrawals_nominal_per_account(
                 acct_eoy_nom, y, amount_nom_paths, seq,
             )
+
+            if y == 0:
+                for _a in list(sold_per_acct_nom.keys())[:4]:
+                    print(f"[WDEBUG y=0] sold_per_acct[{_a}] sum={sold_per_acct_nom[_a].sum():.2f}")
+
+            # Explicitly deduct sold amounts from each account's balance for year y.
+            # withdrawals_core no longer mutates the arrays itself; we own that here
+            # to guarantee the deduction persists into STEP 5 / STEP 6 statistics.
+            for acct, sold_arr in sold_per_acct_nom.items():
+                if acct in acct_eoy_nom and np.any(sold_arr > 0):
+                    acct_eoy_nom[acct][:, y] = np.maximum(
+                        acct_eoy_nom[acct][:, y] - sold_arr, 0.0
+                    )
+
+            if y == 0:
+                for _a in list(acct_eoy_nom.keys())[:3]:
+                    print(f"[WDEBUG post-deduct y=0] acct={_a} mean_y0={acct_eoy_nom[_a][:, 0].mean():.2f}")
 
             scale = max(deflator[y], 1e-12)
             realized_cur[y]  = (realized_total_nom / scale).mean()
@@ -507,6 +555,9 @@ def run_accounts_new(
     # =========================================================================
     # STEP 6: Per-account levels and YoY stats (post-cashflow account balances)
     # 'starting' needed here for per-account year-1 YoY prior_col    # =========================================================================
+    if apply_withdrawals and sched is not None:
+        for _a in list(acct_eoy_nom.keys())[:3]:
+            print(f"[WDEBUG STEP6] acct={_a} mean_y0={acct_eoy_nom[_a][:, 0].mean():.2f}")
     inv_nom_yoy_mean_pct_acct:   Dict[str, Any] = {}
     inv_real_yoy_mean_pct_acct:  Dict[str, Any] = {}
     inv_nom_levels_mean_acct:    Dict[str, Any] = {}
@@ -522,11 +573,14 @@ def run_accounts_new(
         lvl_nom  = acct_eoy_nom[acct]
         lvl_real = lvl_nom / deflator
 
-        # Pure-investment YoY: strip out reinvestment inflows before computing ratio
-        # lvl_nom_inv[y] = lvl_nom[y] - reinvest[y]  (what balance would be without inflow)
-        reinvest_nom = reinvest_nom_per_acct.get(acct, np.zeros((paths, YEARS), dtype=float))
-        lvl_nom_inv  = lvl_nom - reinvest_nom
+        # Pure-investment YoY: use pre-cashflow snapshot (captured right after
+        # simulate_balances, before RMDs / withdrawals / reinvestments).
+        # Subtracting reinvest_nom from the post-withdrawal balance was wrong —
+        # it left the withdrawal drag baked into the ratio denominator.
+        lvl_nom_inv  = acct_eoy_nom_core.get(acct, lvl_nom)
         lvl_real_inv = lvl_nom_inv / deflator
+        # Keep reinvest_nom available for the reinvestment summary below
+        reinvest_nom = reinvest_nom_per_acct.get(acct, np.zeros((paths, YEARS), dtype=float))
 
         acct_start = float(starting.get(acct, 0.0))
         acct_start_nom = np.full(paths, acct_start, dtype=float)
