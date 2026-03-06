@@ -215,10 +215,13 @@ def run_accounts_new(
     ):
  
         owner_current_age = float(person_cfg.get("current_age", 60.0))
+        # birth_year determines SECURE 2.0 RMD bracket only — independent of current_age
+        owner_birth_year = int(person_cfg.get("birth_year", 0) or 0) or None
         rmd_factors = build_rmd_factors(
             rmd_table_path=rmd_table_path,
             owner_current_age=owner_current_age,
             years=YEARS,
+            owner_birth_year=owner_birth_year,
         )
     
         rmd_total_nom_paths, rmd_nom_per_acct = compute_rmd_schedule_nominal(

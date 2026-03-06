@@ -60,23 +60,43 @@ def load_rmd_table(path: str) -> Dict[str, Any]:
     except Exception:
         return _default_uniform_table()
 
-    # Validate presence of uniform_lifetime.factors list
-    ul = (data.get("uniform_lifetime", {}) or {})
-    factors = ul.get("factors")
-    if not isinstance(factors, list) or len(factors) == 0:
-        # Fallback to built-in if not provided
-        return _default_uniform_table()
+    # Support two JSON schemas:
+    #
+    #   Schema A — legacy list under uniform_lifetime.factors:
+    #     {"uniform_lifetime": {"factors": [{"age": 73, "factor": 26.5}, ...]}}
+    #
+    #   Schema B — flat dict at top level (profile rmd.json):
+    #     {"table_name": "...", "factors": {"73": 26.5, "74": 25.5, ...}}
+    #
+    # Schema B is tried first; Schema A is the fallback.
 
-    # Normalize to a map for quick lookup
     out_map = {}
-    for row in factors:
-        try:
-            age = int(row.get("age"))
-            factor = float(row.get("factor"))
-        except Exception:
-            continue
-        if age > 0 and factor > 0.0:
-            out_map[age] = factor
+
+    # --- Schema B: flat dict {"factors": {"73": 26.5, ...}} ---
+    top_factors = data.get("factors")
+    if isinstance(top_factors, dict) and top_factors:
+        for age_str, factor_val in top_factors.items():
+            try:
+                age = int(str(age_str).rstrip("+"))  # handle "120+" keys
+                factor = float(factor_val)
+            except Exception:
+                continue
+            if age > 0 and factor > 0.0:
+                out_map[age] = factor
+
+    # --- Schema A: nested list under uniform_lifetime.factors ---
+    if not out_map:
+        ul = (data.get("uniform_lifetime", {}) or {})
+        factors = ul.get("factors")
+        if isinstance(factors, list) and len(factors) > 0:
+            for row in factors:
+                try:
+                    age = int(row.get("age"))
+                    factor = float(row.get("factor"))
+                except Exception:
+                    continue
+                if age > 0 and factor > 0.0:
+                    out_map[age] = factor
 
     if not out_map:
         return _default_uniform_table()

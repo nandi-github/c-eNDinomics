@@ -172,7 +172,33 @@ def _default_scaffold(name: str) -> Dict[str, Any]:
         # Global file - should not be scaffolded per-profile; return empty sentinel
         return {"federal": {}, "states": {}}
     if name == "person.json":
-        return {"current_age": 65, "conversion_policy": {"enabled": False}}
+        return {
+            "current_age": 65,
+            "birth_year": 0,
+            "assumed_death_age": 90,
+            "filing_status": "MFJ",
+            "spouse": {
+                "name": "",
+                "birth_year": 0,
+                "sole_beneficiary_for_ira": false
+            },
+            "beneficiaries": {
+                "primary": [],
+                "contingent": []
+            },
+            "rmd_policy": {
+                "extra_handling": "reinvest_in_brokerage"
+            },
+            "roth_conversion_policy": {
+                "enabled": False,
+                "window_years": ["now-75"],
+                "keepit_below_max_marginal_fed_rate": "fill the bracket",
+                "avoid_niit": True,
+                "rmd_assist": "convert",
+                "tax_payment_source": "BROKERAGE",
+                "irmaa_guard": {"enabled": False}
+            }
+        }
     if name == "income.json":
         return {
             "w2": [],

@@ -1,18 +1,20 @@
-
 {
-  "current_age": 58,
+  "current_age": 55,
+  "birth_year": 1971,
   "assumed_death_age": 88,
   "filing_status": "MFJ",
-
   "spouse": {
     "name": "Spouse",
     "birth_year": 1975,
     "sole_beneficiary_for_ira": true
   },
-
   "beneficiaries": {
     "primary": [
-      { "name": "Spouse", "relationship": "spouse", "share_percent": 100 }
+      {
+        "name": "Spouse",
+        "relationship": "spouse",
+        "share_percent": 100
+      }
     ],
     "contingent": [
       {
@@ -33,19 +35,20 @@
       }
     ]
   },
-
   "rmd_policy": {
     "extra_handling": "reinvest_in_brokerage"
   },
-
   "roth_conversion_policy": {
     "enabled": true,
-    "window_years": ["now-75"],
+    "window_years": [
+      "now-75"
+    ],
     "keepit_below_max_marginal_fed_rate": "fill the bracket",
     "avoid_niit": true,
     "rmd_assist": "convert",
     "tax_payment_source": "BROKERAGE",
-    "irmaa_guard": { "enabled": false }
+    "irmaa_guard": {
+      "enabled": false
+    }
   }
 }
-
