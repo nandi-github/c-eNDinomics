@@ -737,9 +737,17 @@ const App: React.FC = () => {
                 value={runShocksMode}
                 onChange={(e) => setRunShocksMode(e.target.value)}
               >
-                <option value="augment">augment</option>
-                <option value="override">override</option>
-                <option value="none">none</option>
+                <optgroup label="User-defined">
+                  <option value="augment">augment</option>
+                  <option value="override">override</option>
+                  <option value="none">none</option>
+                </optgroup>
+                <optgroup label="System Presets">
+                  <option value="average">average — mild correction</option>
+                  <option value="below_average">below_average — moderate downturn</option>
+                  <option value="bad">bad — significant recession</option>
+                  <option value="worst">worst — severe crash (2008-style)</option>
+                </optgroup>
               </select>
             </div>
 

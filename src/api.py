@@ -20,6 +20,7 @@ from loaders import (
     load_sched,
     load_inflation_yearly,
     load_shocks,
+    load_system_shocks,
     load_allocation_yearly_accounts,
     validate_alloc_accounts,
     load_person,
@@ -49,6 +50,8 @@ DEFAULT_PROFILE = "default"
 ECONOMIC_GLOBAL_PATH = os.path.join(APP_ROOT, "economicglobal.json")
 TAX_GLOBAL_PATH      = os.path.join(APP_ROOT, "taxes_states_mfj_single.json")
 BENCHMARKS_GLOBAL_PATH = os.path.join(APP_ROOT, "benchmarks.json")
+SYSTEM_SHOCKS_PATH   = os.path.join(APP_ROOT, "system_shocks.json")
+SYSTEM_SHOCK_PRESETS = {"average", "below_average", "bad", "worst"}
 
 # Names that must NOT appear in the Configure tab (global/hidden files)
 _GLOBAL_ONLY_NAMES = {
@@ -542,6 +545,10 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
         # User requested no shocks: pass no events to the engine
         shocks_events = []
         internal_shocks_mode = "augment"  # internal label; with no events, this does nothing
+    elif raw_shocks_mode in SYSTEM_SHOCK_PRESETS:
+        # System preset: load from system_shocks.json, ignore user shocks file
+        shocks_events, _, _ = load_system_shocks(SYSTEM_SHOCKS_PATH, raw_shocks_mode)
+        internal_shocks_mode = "augment"  # system presets always use augment
     else:
         shocks_events, shocks_mode_file, _ = (
             load_shocks(shocks_path_effective)

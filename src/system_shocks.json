@@ -1,0 +1,319 @@
+{
+  "_comment": "System-defined shock presets. Read-only. Mode is always augment. Do not edit.",
+  "presets": {
+    "average": {
+      "description": "Mild market correction \u2014 brief dip, quick recovery",
+      "mode": "augment",
+      "events": [
+        {
+          "class": "US_STOCKS",
+          "start_year": 3,
+          "start_quarter": 1,
+          "depth": 0.1,
+          "dip_quarters": 1,
+          "recovery_quarters": 4,
+          "override_mode": "strict",
+          "recovery_to": "baseline",
+          "dip_profile": {
+            "type": "linear"
+          },
+          "rise_profile": {
+            "type": "poly",
+            "alpha": 1.3
+          },
+          "coimpact_down": {
+            "mode": "limited",
+            "classes": [
+              "COMMOD"
+            ],
+            "scale": 0.15
+          },
+          "corecovery_up": {
+            "mode": "broad",
+            "classes": [
+              "COMMOD"
+            ],
+            "scale": 0.4,
+            "organic": true,
+            "organic_profile": {
+              "type": "poly",
+              "alpha": 1.2
+            }
+          }
+        },
+        {
+          "class": "INTL_STOCKS",
+          "start_year": 3,
+          "start_quarter": 2,
+          "depth": 0.08,
+          "dip_quarters": 1,
+          "recovery_quarters": 4,
+          "override_mode": "strict",
+          "recovery_to": "baseline",
+          "dip_profile": {
+            "type": "linear"
+          },
+          "rise_profile": {
+            "type": "poly",
+            "alpha": 1.3
+          }
+        }
+      ]
+    },
+    "below_average": {
+      "description": "Moderate downturn \u2014 2011-style correction with slower recovery",
+      "mode": "augment",
+      "events": [
+        {
+          "class": "US_STOCKS",
+          "start_year": 3,
+          "start_quarter": 1,
+          "depth": 0.2,
+          "dip_quarters": 2,
+          "recovery_quarters": 8,
+          "override_mode": "strict",
+          "recovery_to": "baseline",
+          "dip_profile": {
+            "type": "poly",
+            "alpha": 1.3
+          },
+          "rise_profile": {
+            "type": "poly",
+            "alpha": 1.5
+          },
+          "coimpact_down": {
+            "mode": "limited",
+            "classes": [
+              "COMMOD"
+            ],
+            "scale": 0.25
+          },
+          "corecovery_up": {
+            "mode": "broad",
+            "classes": [
+              "COMMOD"
+            ],
+            "scale": 0.5,
+            "organic": true,
+            "organic_profile": {
+              "type": "poly",
+              "alpha": 1.3
+            }
+          }
+        },
+        {
+          "class": "INTL_STOCKS",
+          "start_year": 3,
+          "start_quarter": 1,
+          "depth": 0.18,
+          "dip_quarters": 2,
+          "recovery_quarters": 10,
+          "override_mode": "strict",
+          "recovery_to": "baseline",
+          "dip_profile": {
+            "type": "poly",
+            "alpha": 1.3
+          },
+          "rise_profile": {
+            "type": "poly",
+            "alpha": 1.4
+          },
+          "corecovery_up": {
+            "mode": "broad",
+            "classes": [
+              "US_STOCKS"
+            ],
+            "scale": 0.3,
+            "organic": true,
+            "organic_profile": {
+              "type": "exp",
+              "lambda": 0.7
+            }
+          }
+        },
+        {
+          "class": "COMMOD",
+          "start_year": 3,
+          "start_quarter": 1,
+          "depth": 0.12,
+          "dip_quarters": 2,
+          "recovery_quarters": 6,
+          "override_mode": "augment",
+          "recovery_to": "baseline",
+          "correlated_to": "US_STOCKS",
+          "scale": 0.5,
+          "dip_profile": {
+            "type": "linear"
+          },
+          "rise_profile": {
+            "type": "linear"
+          }
+        }
+      ]
+    },
+    "bad": {
+      "description": "Significant recession \u2014 2001 dotcom style, broad decline",
+      "mode": "augment",
+      "events": [
+        {
+          "class": "US_STOCKS",
+          "start_year": 3,
+          "start_quarter": 1,
+          "depth": 0.35,
+          "dip_quarters": 4,
+          "recovery_quarters": 12,
+          "override_mode": "strict",
+          "recovery_to": "baseline",
+          "dip_profile": {
+            "type": "poly",
+            "alpha": 1.4
+          },
+          "rise_profile": {
+            "type": "poly",
+            "alpha": 1.6
+          },
+          "coimpact_down": {
+            "mode": "broad",
+            "classes": [
+              "INTL_STOCKS",
+              "COMMOD"
+            ],
+            "scale": 0.6
+          },
+          "corecovery_up": {
+            "mode": "broad",
+            "classes": [
+              "INTL_STOCKS",
+              "COMMOD"
+            ],
+            "scale": 0.55,
+            "organic": true,
+            "organic_profile": {
+              "type": "poly",
+              "alpha": 1.4
+            }
+          }
+        },
+        {
+          "class": "INTL_STOCKS",
+          "start_year": 3,
+          "start_quarter": 1,
+          "depth": 0.3,
+          "dip_quarters": 4,
+          "recovery_quarters": 14,
+          "override_mode": "strict",
+          "recovery_to": "baseline",
+          "dip_profile": {
+            "type": "poly",
+            "alpha": 1.3
+          },
+          "rise_profile": {
+            "type": "poly",
+            "alpha": 1.5
+          }
+        },
+        {
+          "class": "COMMOD",
+          "start_year": 3,
+          "start_quarter": 2,
+          "depth": 0.25,
+          "dip_quarters": 3,
+          "recovery_quarters": 8,
+          "override_mode": "augment",
+          "recovery_to": "baseline",
+          "correlated_to": "US_STOCKS",
+          "scale": 0.6,
+          "dip_profile": {
+            "type": "poly",
+            "alpha": 1.2
+          },
+          "rise_profile": {
+            "type": "linear"
+          }
+        }
+      ]
+    },
+    "worst": {
+      "description": "Severe crash \u2014 2008 GFC style, deep and prolonged",
+      "mode": "augment",
+      "events": [
+        {
+          "class": "US_STOCKS",
+          "start_year": 3,
+          "start_quarter": 1,
+          "depth": 0.5,
+          "dip_quarters": 4,
+          "recovery_quarters": 20,
+          "override_mode": "strict",
+          "recovery_to": "baseline",
+          "dip_profile": {
+            "type": "poly",
+            "alpha": 1.5
+          },
+          "rise_profile": {
+            "type": "poly",
+            "alpha": 1.7
+          },
+          "coimpact_down": {
+            "mode": "broad",
+            "classes": [
+              "INTL_STOCKS",
+              "COMMOD"
+            ],
+            "scale": 0.8
+          },
+          "corecovery_up": {
+            "mode": "broad",
+            "classes": [
+              "INTL_STOCKS",
+              "COMMOD"
+            ],
+            "scale": 0.65,
+            "organic": true,
+            "organic_profile": {
+              "type": "exp",
+              "lambda": 0.6
+            }
+          }
+        },
+        {
+          "class": "INTL_STOCKS",
+          "start_year": 3,
+          "start_quarter": 1,
+          "depth": 0.55,
+          "dip_quarters": 4,
+          "recovery_quarters": 24,
+          "override_mode": "strict",
+          "recovery_to": "baseline",
+          "dip_profile": {
+            "type": "poly",
+            "alpha": 1.5
+          },
+          "rise_profile": {
+            "type": "poly",
+            "alpha": 1.6
+          }
+        },
+        {
+          "class": "COMMOD",
+          "start_year": 3,
+          "start_quarter": 1,
+          "depth": 0.4,
+          "dip_quarters": 3,
+          "recovery_quarters": 10,
+          "override_mode": "augment",
+          "recovery_to": "baseline",
+          "correlated_to": "US_STOCKS",
+          "scale": 0.7,
+          "dip_profile": {
+            "type": "poly",
+            "alpha": 1.4
+          },
+          "rise_profile": {
+            "type": "linear"
+          }
+        }
+      ]
+    }
+  }
+}

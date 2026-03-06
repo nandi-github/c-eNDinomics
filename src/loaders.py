@@ -179,6 +179,21 @@ def load_shocks(path: Optional[str]) -> Tuple[List[Dict[str, Any]], str, List[st
     class_list = sorted({str(e.get("class", "")).strip() for e in events if str(e.get("class", "")).strip()})
     return events, "", class_list
 
+def load_system_shocks(path: Optional[str], preset: str) -> Tuple[List[Dict[str, Any]], str, List[str]]:
+    """Load a named system shock preset from system_shocks.json.
+    These are read-only presets; mode is always augment.
+    Returns (events, "augment", class_list)."""
+    if not path or not os.path.isfile(path):
+        return [], "augment", []
+    data = _load_json(path)
+    presets = data.get("presets", {})
+    preset_data = presets.get(preset)
+    if not preset_data:
+        return [], "augment", []
+    events = preset_data.get("events", []) or []
+    class_list = sorted({str(e.get("class", "")).strip() for e in events if str(e.get("class", "")).strip()})
+    return events, "augment", class_list
+
 # -----------------------------
 # Allocation (begin + overrides → expanded per_year_portfolios)
 # -----------------------------
