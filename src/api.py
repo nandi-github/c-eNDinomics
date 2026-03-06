@@ -45,6 +45,19 @@ COMMON_ASSETS_JSON = os.path.join(APP_ROOT, "assets.json")
 PROFILES_ROOT = os.path.join(APP_ROOT, "profiles")
 DEFAULT_PROFILE = "default"
 
+# Files that live at APP_ROOT, not per-profile
+ECONOMIC_GLOBAL_PATH = os.path.join(APP_ROOT, "economicglobal.json")
+TAX_GLOBAL_PATH      = os.path.join(APP_ROOT, "taxes_states_mfj_single.json")
+BENCHMARKS_GLOBAL_PATH = os.path.join(APP_ROOT, "benchmarks.json")
+
+# Names that must NOT appear in the Configure tab (global/hidden files)
+_GLOBAL_ONLY_NAMES = {
+    "economicglobal.json",
+    "taxes_states_mfj_single.json",
+    "benchmarks.json",
+    "assets.json",
+}
+
 app = FastAPI(title="eNDinomics API", version="1.0.0")
 
 app.add_middleware(
@@ -116,17 +129,16 @@ def _write_run_meta(run_dir: str, profile: str, run_id: str, run_info: Dict[str,
 
 
 def _default_json_names() -> List[str]:
+    # Only per-profile files; global files (taxes, benchmarks, economicglobal) live at APP_ROOT
     return [
         "allocation_yearly.json",
         "withdrawal_schedule.json",
         "shocks_yearly.json",
         "inflation_yearly.json",
-        "taxes_states_mfj_single.json",
         "person.json",
         "income.json",
         "rmd.json",
         "economic.json",
-        "benchmarks.json",
     ]
 
 
@@ -152,6 +164,7 @@ def _default_scaffold(name: str) -> Dict[str, Any]:
     if name == "shocks_yearly.json":
         return {"mode": "augment", "events": []}
     if name == "taxes_states_mfj_single.json":
+        # Global file - should not be scaffolded per-profile; return empty sentinel
         return {"federal": {}, "states": {}}
     if name == "person.json":
         return {"current_age": 65, "conversion_policy": {"enabled": False}}
@@ -399,7 +412,7 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
     def P(name: str) -> str:
         return _profile_json_path(profile, name)
 
-    tax_path = payload.get("tax") or P("taxes_states_mfj_single.json")
+    tax_path = payload.get("tax") or TAX_GLOBAL_PATH
     withdraw_path = payload.get("withdraw") or P("withdrawal_schedule.json")
     infl_path = payload.get("inflation") or P("inflation_yearly.json")
     shocks_path = payload.get("shocks") or P("shocks_yearly.json")
@@ -407,9 +420,10 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
     person_path = payload.get("person") or P("person.json")
     income_path = payload.get("income") or P("income.json")
     rmd_path = payload.get("rmd") or P("rmd.json")
-    economic_path = payload.get("economic") or P("economic.json")
-    #assets_path = payload.get("assets")
-    assets_path = "assets.json"
+    economic_path        = payload.get("economic") or P("economic.json")
+    economic_global_path = ECONOMIC_GLOBAL_PATH if os.path.isfile(ECONOMIC_GLOBAL_PATH) else None
+    # Always resolve assets.json from APP_ROOT (global file, never per-profile)
+    assets_path = payload.get("assets") or COMMON_ASSETS_JSON
 
     paths = int(payload.get("paths", 500))
     steps_per_year = int(payload.get("steps_per_year", payload.get("spy", 2)))
@@ -476,10 +490,25 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
     # 5) Economic override marker if ignoring RMDs or conversions
     economic_path_effective = economic_path
     if (ignore_rmds or ignore_conversions) and economic_path:
-        base_e: Dict[str, Any] = {}
+        # Merge global + profile BEFORE writing the override file so withdrawal_sequence is preserved
+        global_e: Dict[str, Any] = {}
+        if economic_global_path and os.path.isfile(economic_global_path):
+            with open(economic_global_path, "r", encoding="utf-8") as f:
+                global_e = json.load(f) or {}
+        profile_e: Dict[str, Any] = {}
         if os.path.isfile(economic_path):
             with open(economic_path, "r", encoding="utf-8") as f:
-                base_e = json.load(f) or {}
+                profile_e = json.load(f) or {}
+        # Deep merge: global base, profile on top
+        def _merge(base, over):
+            r = dict(base)
+            for k, v in over.items():
+                if k in r and isinstance(r[k], dict) and isinstance(v, dict):
+                    r[k] = _merge(r[k], v)
+                else:
+                    r[k] = v
+            return r
+        base_e = _merge(global_e, profile_e)
         economic_override_path = os.path.join(run_dir, "economic_override.json")
         with open(economic_override_path, "w", encoding="utf-8") as f:
             json.dump(base_e, f, indent=2)
@@ -527,7 +556,7 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
     print("[DEBUG api] person_cfg.rmd_policy:", person_cfg.get("rmd_policy") if person_cfg else None)
 
     income_cfg = load_income(income_path)
-    econ_policy = load_economic_policy(economic_path_effective)
+    econ_policy = load_economic_policy(economic_path_effective, global_path=economic_global_path)
 
     # 7) Run simulation
     ignore_withdrawals_flag = bool(ignore_withdrawals)
@@ -680,7 +709,65 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
             sched_for_modular = sched_arr
             apply_withdrawals_flag = True
 
+        # Build per-year age-gated withdrawal sequence from economic policy
+        acct_names    = list(alloc_accounts.get("per_year_portfolios", {}).keys())
+        starting_age  = int(person_cfg.get("age", 70)) if person_cfg else 70
+        tira_age_gate = float(econ_policy.get("tira_age_gate", 59.5))
 
+        # Pick the correct bad-market sequence based on conversion policy
+        conversion_enabled = bool(
+            (person_cfg or {}).get("conversion_policy", {}).get("enabled", False)
+        )
+        order_good = econ_policy.get("order_good_market", [])
+        order_bad  = (
+            econ_policy.get("order_bad_market_with_conversion", [])
+            if conversion_enabled
+            else econ_policy.get("order_bad_market", [])
+        )
+
+        def _is_brokerage(n): u = n.upper(); return "BROKERAGE" in u or "TAXABLE" in u
+        def _is_trad(n):      u = n.upper(); return ("TRAD" in u or "TRADITIONAL" in u) and "ROTH" not in u
+        def _is_roth(n):      return "ROTH" in n.upper()
+
+        def _expand(tmpl, accts, allow_trad, allow_roth):
+            seen, result = set(), []
+            for token in tmpl:
+                t = token.upper()
+                if "BROKERAGE" in t or "TAXABLE" in t:
+                    for a in accts:
+                        if _is_brokerage(a) and a not in seen:
+                            result.append(a); seen.add(a)
+                elif ("TRAD" in t) and allow_trad:
+                    for a in accts:
+                        if _is_trad(a) and a not in seen:
+                            result.append(a); seen.add(a)
+                elif "ROTH" in t and allow_roth:
+                    for a in accts:
+                        if _is_roth(a) and a not in seen:
+                            result.append(a); seen.add(a)
+            return result if result else [a for a in accts if _is_brokerage(a)]
+
+        # Build good/bad sequences per year — simulator picks based on market condition
+        seq_good_per_year = []
+        seq_bad_per_year  = []
+        for y in range(YEARS):
+            age_y      = starting_age + y
+            allow_trad = age_y >= tira_age_gate
+            allow_roth = age_y >= tira_age_gate
+            seq_good_per_year.append(_expand(order_good, acct_names, allow_trad, allow_roth))
+            seq_bad_per_year.append( _expand(order_bad,  acct_names, allow_trad, allow_roth))
+
+        # TODO: simulator_new.py needs per-path bad-market flag support to use seq_bad_per_year.
+        # When implemented, pass {"good": seq_good_per_year, "bad": seq_bad_per_year} and
+        # the simulator will pick the sequence per year per path based on drawdown detection.
+        # For now, good-market sequence is used for all years.
+        withdraw_seq_per_year = seq_good_per_year
+
+        print("[DEBUG api] conversion_enabled:", conversion_enabled)
+        print("[DEBUG api] seq_good year 0:", seq_good_per_year[0])
+        print("[DEBUG api] seq_bad  year 0:", seq_bad_per_year[0])
+        print("[DEBUG api] seq_good year 14:", seq_good_per_year[14] if len(seq_good_per_year) > 14 else "N/A")
+        print("[DEBUG api] seq_bad  year 14:", seq_bad_per_year[14]  if len(seq_bad_per_year)  > 14 else "N/A")
 
         res = run_accounts_new(
             paths=paths,
@@ -690,7 +777,7 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
             assets_path=assets_path,
             sched=sched_for_modular,
             apply_withdrawals=apply_withdrawals_flag,
-            withdraw_sequence=None,
+            withdraw_sequence=withdraw_seq_per_year,
             tax_cfg=tax_cfg,
             ordinary_income_cur_paths=ordinary_income_cur_paths,
             qual_div_cur_paths=qual_div_cur_paths,
@@ -789,8 +876,8 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
             alloc_accounts=alloc_accounts,
             tax_cfg=tax_cfg,
             person_cfg=person_cfg,
-            benchmarks_path=os.path.join(APP_ROOT, "benchmarks.json")
-            if os.path.isfile(os.path.join(APP_ROOT, "benchmarks.json"))
+            benchmarks_path=BENCHMARKS_GLOBAL_PATH
+            if os.path.isfile(BENCHMARKS_GLOBAL_PATH)
             else None,
         )
     except Exception:

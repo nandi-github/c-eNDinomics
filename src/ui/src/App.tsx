@@ -143,17 +143,16 @@ async function apiPost<T>(path: string, body: unknown): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+// Global files (taxes, benchmarks, assets, economicglobal) live at APP_ROOT and are not shown here.
 const CONFIG_FILES = [
   "allocation_yearly.json",
   "withdrawal_schedule.json",
   "inflation_yearly.json",
   "shocks_yearly.json",
-  "taxes_states_mfj_single.json",
   "person.json",
   "income.json",
   "rmd.json",
   "economic.json",
-  "benchmarks.json",
 ];
 
 const App: React.FC = () => {
@@ -1335,10 +1334,8 @@ const App: React.FC = () => {
                       <th>$ Future - p10</th>
                       <th>$ Future - p90</th>
                       <th>Nominal Portfolio YoY - mean</th>
-                      <th>Nominal Portfolio YoY - median</th>
                       <th>Real Portfolio YoY - mean</th>
                       <th>Nominal Inv YoY - mean</th>
-                      <th>Nominal Inv YoY - median</th>
                       <th>Real Inv YoY - mean</th>
                       <th>Reinvested Future USD mean</th>
                     </tr>
@@ -1371,14 +1368,10 @@ const App: React.FC = () => {
                           levels?.inv_nom_levels_p90_acct[name] || [];
                         const yoyNom =
                           rets?.inv_nom_yoy_mean_pct_acct[name] || [];
-                        const yoyNomMed =
-                          rets?.inv_nom_yoy_mean_pct_acct[name + "__inv_med"] || [];
                         const yoyReal =
                           rets?.inv_real_yoy_mean_pct_acct[name] || [];
                         const yoyNomAgg =
                           rets?.inv_nom_yoy_mean_pct_acct[name + "__agg_nom"] || [];
-                        const yoyNomAggMed =
-                          rets?.inv_nom_yoy_mean_pct_acct[name + "__agg_nom_med"] || [];
                         const yoyRealAgg =
                           rets?.inv_nom_yoy_mean_pct_acct[name + "__agg_real"] || [];
                         const reinvestedFut =
@@ -1393,10 +1386,8 @@ const App: React.FC = () => {
                               <td>{formatUSD(p10[idx])}</td>
                               <td>{formatUSD(p90[idx])}</td>
                               <td>{formatPct(yoyNomAgg[idx])}</td>
-                              <td>{formatPct(yoyNomAggMed[idx])}</td>
                               <td>{formatPct(yoyRealAgg[idx])}</td>
                               <td>{formatPct(yoyNom[idx])}</td>
-                              <td>{formatPct(yoyNomMed[idx])}</td>
                               <td>{formatPct(yoyReal[idx])}</td>
                               <td>{formatUSD(reinvestedFut[idx])}</td>
                             </tr>,
@@ -1440,10 +1431,8 @@ const App: React.FC = () => {
                       <th>$ Current - p10</th>
                       <th>$ Current - p90</th>
                       <th>Nominal Portfolio YoY - mean</th>
-                      <th>Nominal Portfolio YoY - median</th>
                       <th>Real Portfolio YoY - mean</th>
                       <th>Nominal Inv YoY - mean</th>
-                      <th>Nominal Inv YoY - median</th>
                       <th>Real Inv YoY - mean</th>
                       <th>Reinvested Current USD mean</th>
                     </tr>
@@ -1477,14 +1466,10 @@ const App: React.FC = () => {
                           levels?.inv_real_levels_p90_acct[name] || [];
                         const yoyNom =
                           rets?.inv_nom_yoy_mean_pct_acct[name] || [];
-                        const yoyNomMed =
-                          rets?.inv_nom_yoy_mean_pct_acct[name + "__inv_med"] || [];
                         const yoyReal =
                           rets?.inv_real_yoy_mean_pct_acct[name] || [];
                         const yoyNomAggCur =
                           rets?.inv_nom_yoy_mean_pct_acct[name + "__agg_nom"] || [];
-                        const yoyNomAggMedCur =
-                          rets?.inv_nom_yoy_mean_pct_acct[name + "__agg_nom_med"] || [];
                         const yoyRealAggCur =
                           rets?.inv_nom_yoy_mean_pct_acct[name + "__agg_real"] || [];
                         const reinvestedCur =
@@ -1499,10 +1484,8 @@ const App: React.FC = () => {
                               <td>{formatUSD(p10[idx])}</td>
                               <td>{formatUSD(p90[idx])}</td>
                               <td>{formatPct(yoyNomAggCur[idx])}</td>
-                              <td>{formatPct(yoyNomAggMedCur[idx])}</td>
                               <td>{formatPct(yoyRealAggCur[idx])}</td>
                               <td>{formatPct(yoyNom[idx])}</td>
-                              <td>{formatPct(yoyNomMed[idx])}</td>
                               <td>{formatPct(yoyReal[idx])}</td>
                               <td>{formatUSD(reinvestedCur[idx])}</td>
                             </tr>,

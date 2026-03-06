@@ -1,0 +1,61 @@
+{
+  "_comment": "Global market assumptions shared across ALL profiles. No withdrawal sequences here — those are per-profile in economic.json.",
+
+  "defaults": {
+    "bad_market": {
+      "drawdown_threshold": 0.15,
+      "use_recession_flag": true
+    },
+    "cash_reserve": {
+      "months": 6,
+      "allow_dip_below_reserve": false,
+      "use_cash_only_in_bad_markets": false
+    },
+    "rebalancing": {
+      "global_drift_threshold": 0.12,
+      "require_cash_above_reserve_to_rebalance": true,
+      "suppress_in_bad_market": true,
+      "brokerage_capgain_limit_k": 10.0,
+      "brokerage_enabled": true
+    },
+    "withdrawals": {
+      "shock_scaling_enabled": true,
+      "drawdown_threshold": 0.15,
+      "min_scaling_factor": 0.65,
+      "scale_curve": "linear",
+      "scale_poly_alpha": 1.2,
+      "scale_exp_lambda": 0.8,
+      "use_recession_flag": true,
+      "makeup_enabled": true,
+      "makeup_ratio": 0.30,
+      "makeup_cap_per_year": 0.10
+    }
+  },
+
+  "overrides": [
+    {
+      "_comment": "Years 1-5: conservative rebalancing, standard cash reserve",
+      "years": "1-5",
+      "bad_market": { "drawdown_threshold": 0.15, "use_recession_flag": true },
+      "cash_reserve": { "months": 6, "allow_dip_below_reserve": false, "use_cash_only_in_bad_markets": false },
+      "rebalancing": { "global_drift_threshold": 0.12, "require_cash_above_reserve_to_rebalance": true, "suppress_in_bad_market": true, "brokerage_capgain_limit_k": 10.0, "brokerage_enabled": true },
+      "withdrawals": { "shock_scaling_enabled": true, "drawdown_threshold": 0.15, "min_scaling_factor": 0.65, "scale_curve": "linear", "use_recession_flag": true, "makeup_enabled": true, "makeup_ratio": 0.30, "makeup_cap_per_year": 0.10 }
+    },
+    {
+      "_comment": "Years 6-15: slightly relaxed capgain limit as brokerage grows",
+      "years": "6-15",
+      "bad_market": { "drawdown_threshold": 0.15, "use_recession_flag": true },
+      "cash_reserve": { "months": 6, "allow_dip_below_reserve": false, "use_cash_only_in_bad_markets": false },
+      "rebalancing": { "global_drift_threshold": 0.12, "require_cash_above_reserve_to_rebalance": true, "suppress_in_bad_market": true, "brokerage_capgain_limit_k": 12.5, "brokerage_enabled": true },
+      "withdrawals": { "shock_scaling_enabled": true, "drawdown_threshold": 0.15, "min_scaling_factor": 0.65, "scale_curve": "linear", "use_recession_flag": true, "makeup_enabled": true, "makeup_ratio": 0.30, "makeup_cap_per_year": 0.10 }
+    },
+    {
+      "_comment": "Years 16-30: reduced cash reserve months, higher capgain limit",
+      "years": "16-30",
+      "bad_market": { "drawdown_threshold": 0.15, "use_recession_flag": true },
+      "cash_reserve": { "months": 5, "allow_dip_below_reserve": false, "use_cash_only_in_bad_markets": false },
+      "rebalancing": { "global_drift_threshold": 0.14, "require_cash_above_reserve_to_rebalance": true, "suppress_in_bad_market": true, "brokerage_capgain_limit_k": 15.0, "brokerage_enabled": true },
+      "withdrawals": { "shock_scaling_enabled": true, "drawdown_threshold": 0.15, "min_scaling_factor": 0.60, "scale_curve": "linear", "use_recession_flag": true, "makeup_enabled": true, "makeup_ratio": 0.30, "makeup_cap_per_year": 0.10 }
+    }
+  ]
+}

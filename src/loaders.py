@@ -497,15 +497,52 @@ def load_income(path: str) -> Dict[str, Any]:
 # -----------------------------
 # Economic policy
 # -----------------------------
-def load_economic_policy(path: str) -> Dict[str, Any]:
-    data = _load_json(path)
-    defaults = data.get("defaults", {}) or {}
-    order_good = data.get("order_good_market", []) or []
-    order_bad = data.get("order_bad_market", []) or []
+def _deep_merge(base: Dict, override: Dict) -> Dict:
+    """Merge override on top of base, recursively for dict values. Override wins on conflict."""
+    result = dict(base)
+    for k, v in override.items():
+        if k in result and isinstance(result[k], dict) and isinstance(v, dict):
+            result[k] = _deep_merge(result[k], v)
+        else:
+            result[k] = v
+    return result
+
+
+def load_economic_policy(path: str, global_path: Optional[str] = None) -> Dict[str, Any]:
+    """Load economic policy, optionally merging a global base file.
+    global_path (economicglobal.json) is loaded first; per-profile economic.json
+    is merged on top — profile keys always win on conflict.
+    """
+    import os as _os
+    global_data  = _load_json(global_path)  if global_path and _os.path.isfile(global_path)  else {}
+    profile_data = _load_json(path)          if path        and _os.path.isfile(path)          else {}
+
+    merged_defaults  = _deep_merge(
+        global_data.get("defaults", {}) or {},
+        profile_data.get("defaults", {}) or {},
+    )
+    # Global overrides are the base; profile overrides appended on top
+    merged_overrides = (global_data.get("overrides", []) or []) + (profile_data.get("overrides", []) or [])
+
+    defaults = merged_defaults
+    ws = defaults.get("withdrawal_sequence", {}) or {}
+    order_good            = ws.get("order_good_market",              []) or []
+    order_bad             = ws.get("order_bad_market",               []) or []
+    order_bad_conversion  = ws.get("order_bad_market_with_conversion", []) or order_bad
+    tira_age_gate         = float(ws.get("tira_age_gate",    59.5))
+    roth_last_resort      = bool(ws.get("roth_last_resort",  True))
+    print("[DEBUG loaders] order_good_market:", order_good)
+    print("[DEBUG loaders] order_bad_market:", order_bad)
+    print("[DEBUG loaders] order_bad_market_with_conversion:", order_bad_conversion)
+    print("[DEBUG loaders] tira_age_gate:", tira_age_gate)
     return {
-        "defaults": defaults,
-        "order_good_market": order_good,
-        "order_bad_market": order_bad,
+        "defaults":                       defaults,
+        "overrides":                      merged_overrides,
+        "order_good_market":              order_good,
+        "order_bad_market":               order_bad,
+        "order_bad_market_with_conversion": order_bad_conversion,
+        "tira_age_gate":                  tira_age_gate,
+        "roth_last_resort":               roth_last_resort,
     }
 # --- End of file ---
 
