@@ -44,7 +44,8 @@ def apply_withdrawals_nominal_per_account(
             0.0,
         )
         take = np.minimum(bal, remaining)
-        acct_eoy_nom[acct][:, y] = bal - take
+        # Balance deduction is handled by the caller via sold_per_acct.
+        # Do NOT mutate acct_eoy_nom here — the caller owns the array lifecycle.
         realized_per_acct[acct] += take
         sold_per_acct[acct] += take
         realized_total += take
