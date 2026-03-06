@@ -75,12 +75,14 @@ def run_accounts_new(
     rmd_table_path: Optional[str] = None,
     conversion_per_year_nom: Optional[float] = None,  # NEW
     rmds_enabled: bool = True,
+    shocks_events: Optional[list] = None,
+    shocks_mode: str = "augment",
 ) -> Dict[str, Any]:
 
 
     """
-    Minimal simulator: Monte Carlo + inflation only.
-    No shocks (we pass empty events), no withdrawals, no taxes,
+    Monte Carlo simulator with shocks, withdrawals, RMDs, and reinvestment.
+    No taxes,
     no RMDs, no conversions.
 
     Returns a res dict with the same high-level shape as the app expects:
@@ -105,8 +107,8 @@ def run_accounts_new(
         spy=spy,
         alloc_accounts=alloc_accounts,
         assets_path=assets_path,
-        shocks_events=[],         # no shocks
-        shocks_mode="augment",    # mode unused when events=[]
+        shocks_events=shocks_events or [],
+        shocks_mode=shocks_mode,
         infl_yearly=infl_yearly,
     )
 

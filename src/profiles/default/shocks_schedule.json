@@ -1,0 +1,153 @@
+{
+  "events": [
+    {
+      "class": "US_STOCKS",
+      "start_year": 26,
+      "start_quarter": 1,
+      "depth": 0.1,
+      "dip_quarters": 2,
+      "recovery_quarters": 2,
+      "override_mode": "strict",
+      "recovery_to": "baseline",
+      "dip_profile": {
+        "type": "poly",
+        "alpha": 1.3
+      },
+      "rise_profile": {
+        "type": "poly",
+        "alpha": 1.6
+      },
+      "coimpact_down": {
+        "mode": "limited",
+        "classes": [
+          "COMMOD"
+        ],
+        "scale": 0.2
+      },
+      "corecovery_up": {
+        "mode": "broad",
+        "classes": [
+          "COMMOD"
+        ],
+        "scale": 0.6,
+        "organic": true,
+        "organic_profile": {
+          "type": "exp",
+          "lambda": 0.8
+        }
+      }
+    },
+    {
+      "class": "INTL_STOCKS",
+      "start_year": 16,
+      "start_quarter": 1,
+      "depth": 0.1,
+      "dip_quarters": 2,
+      "recovery_quarters": 6,
+      "override_mode": "strict",
+      "recovery_to": "baseline",
+      "dip_profile": {
+        "type": "poly",
+        "alpha": 1.3
+      },
+      "rise_profile": {
+        "type": "poly",
+        "alpha": 1.6
+      },
+      "corecovery_up": {
+        "mode": "broad",
+        "classes": [
+          "US_STOCKS",
+          "COMMOD"
+        ],
+        "scale": 0.35,
+        "organic": true,
+        "organic_profile": {
+          "type": "exp",
+          "lambda": 0.7
+        }
+      }
+    },
+    {
+      "class": "US_STOCKS",
+      "start_year": 18,
+      "start_quarter": 4,
+      "depth": 0.1,
+      "dip_quarters": 1,
+      "recovery_quarters": 3,
+      "override_mode": "strict",
+      "recovery_to": "baseline",
+      "dip_profile": {
+        "type": "linear"
+      },
+      "rise_profile": {
+        "type": "linear"
+      },
+      "coimpact_down": {
+        "mode": "limited",
+        "classes": [
+          "COMMOD"
+        ],
+        "scale": 0.3
+      },
+      "corecovery_up": {
+        "mode": "broad",
+        "classes": [
+          "COMMOD"
+        ],
+        "scale": 0.5,
+        "organic": true,
+        "organic_profile": {
+          "type": "poly",
+          "alpha": 1.2
+        }
+      }
+    },
+    {
+      "class": "INTL_STOCKS",
+      "start_year": 23,
+      "start_quarter": 4,
+      "depth": 0.1,
+      "dip_quarters": 1,
+      "recovery_quarters": 3,
+      "override_mode": "strict",
+      "recovery_to": "baseline",
+      "dip_profile": {
+        "type": "linear"
+      },
+      "rise_profile": {
+        "type": "linear"
+      },
+      "corecovery_up": {
+        "mode": "broad",
+        "classes": [
+          "US_STOCKS"
+        ],
+        "scale": 0.25,
+        "organic": true,
+        "organic_profile": {
+          "type": "poly",
+          "alpha": 1.3
+        }
+      }
+    },
+    {
+      "class": "COMMOD",
+      "start_year": 7,
+      "start_quarter": 1,
+      "depth": 0.1,
+      "dip_quarters": 1,
+      "recovery_quarters": 3,
+      "override_mode": "augment",
+      "recovery_to": "baseline",
+      "correlated_to": "US_STOCKS",
+      "scale": 0.5,
+      "dip_profile": {
+        "type": "linear"
+      },
+      "rise_profile": {
+        "type": "linear"
+      }
+    }
+  ]
+}

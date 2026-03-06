@@ -169,15 +169,15 @@ def load_inflation_yearly(path: Optional[str], years_count: int = YEARS) -> Opti
 # Shocks
 # -----------------------------
 def load_shocks(path: Optional[str]) -> Tuple[List[Dict[str, Any]], str, List[str]]:
+    """Load shock events from JSON. Mode is ignored from file — UI run parameter always wins.
+    Returns (events, "", class_list) — mode field intentionally empty so api.py uses UI choice."""
     if not path:
-        return [], "augment", []
+        return [], "", []
     data = _load_json(path)
-    mode = str(data.get("mode", "augment")).strip().lower()
-    if mode not in ("augment", "override"):
-        mode = "augment"
+    # Intentionally do NOT read "mode" from JSON — mode comes from the UI run parameter only
     events = data.get("events", []) or []
     class_list = sorted({str(e.get("class", "")).strip() for e in events if str(e.get("class", "")).strip()})
-    return events, mode, class_list
+    return events, "", class_list
 
 # -----------------------------
 # Allocation (begin + overrides → expanded per_year_portfolios)
