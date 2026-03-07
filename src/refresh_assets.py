@@ -11,7 +11,7 @@ when the file is missing or stale (older than STALE_DAYS).
 - Called at server startup from api.py via refresh_assets_if_stale().
 
 Usage (standalone):
-    python refresh_assets.py --out src/config/assets.json --years 20 --days 30
+    python refresh_assets.py --out src/assets.json --years 20 --days 30
 """
 
 import argparse
@@ -86,8 +86,8 @@ def extract_tickers_from_alloc(alloc_path: str) -> Dict[str, str]:
                     if ticker:
                         ticker_class[ticker] = cls
 
-    # begin section
-    for acct_data in data.get("begin", {}).values():
+    # global_allocation section (begin is the legacy key name)
+    for acct_data in (data.get("global_allocation") or data.get("begin") or {}).values():
         for port_data in acct_data.get("portfolios", {}).values():
             _walk_holdings(port_data.get("holdings_pct", {}))
 
@@ -136,19 +136,26 @@ def is_stale(assets_path: str, stale_days: int = STALE_DAYS) -> bool:
 
 def _estimate_return_and_vol(prices) -> Tuple[float, float]:
     import pandas as pd
+    # Squeeze DataFrame to Series if needed (newer yfinance compat)
+    if isinstance(prices, pd.DataFrame):
+        prices = prices.iloc[:, 0]
     prices = prices.dropna()
     if len(prices) < 64:
         return 0.0, 0.0
     rets = prices.pct_change().dropna()
     if rets.empty:
         return 0.0, 0.0
-    mu_annual = float((1.0 + rets.mean()) ** 252 - 1.0)
-    sigma_annual = float(np.sqrt(rets.var() * 252))
+    mu_annual = float((1.0 + float(rets.mean())) ** 252 - 1.0)
+    sigma_annual = float(np.sqrt(float(rets.var()) * 252))
     return mu_annual, sigma_annual
 
 
 def _estimate_dividend_yield(dividends, prices) -> float:
     import pandas as pd
+    if isinstance(dividends, pd.DataFrame):
+        dividends = dividends.iloc[:, 0]
+    if isinstance(prices, pd.DataFrame):
+        prices = prices.iloc[:, 0]
     dividends = dividends.dropna()
     prices = prices.dropna()
     if prices.empty or dividends.empty:
@@ -165,15 +172,20 @@ def _download(ticker: str, start: dt.date, end: dt.date):
     """Download price + dividends via yfinance. Returns (prices, dividends)."""
     try:
         import yfinance as yf
+        import pandas as pd
         data = yf.download(ticker, start=start, end=end,
                            auto_adjust=False, progress=False)
         if data.empty:
             return None, None
+        # Newer yfinance returns a MultiIndex column DataFrame — flatten to Series
+        if isinstance(data.columns, pd.MultiIndex):
+            data.columns = data.columns.get_level_values(0)
         price_col = "Adj Close" if "Adj Close" in data.columns else "Close"
-        prices = data[price_col]
+        prices = data[price_col].squeeze()
         dividends = data.get("Dividends", None)
-        import pandas as pd
-        if dividends is None:
+        if dividends is not None:
+            dividends = dividends.squeeze()
+        if dividends is None or (hasattr(dividends, "empty") and dividends.empty):
             dividends = pd.Series(dtype=float)
         return prices, dividends
     except Exception as e:
@@ -326,7 +338,7 @@ def refresh_assets_if_stale(
 def main():
     p = argparse.ArgumentParser(description="Regenerate assets.json from live market data")
     p.add_argument("--profiles", default="profiles", help="Path to profiles root directory")
-    p.add_argument("--out", default="config/assets.json", help="Output assets.json path")
+    p.add_argument("--out", default="assets.json", help="Output assets.json path")
     p.add_argument("--years", type=int, default=LOOKBACK_YEARS, help="Lookback years")
     p.add_argument("--days", type=int, default=0,
                    help="Stale threshold in days (0 = force regenerate)")

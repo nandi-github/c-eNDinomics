@@ -26,7 +26,7 @@
     }
   ],
   "starting": {
-    "BROKERAGE-1": 1500000,
+    "BROKERAGE-1": 500000,
     "BROKERAGE-2": 250000,
     "TRAD_IRA-1": 3500000,
     "TRAD_IRA-2": 1300000,
