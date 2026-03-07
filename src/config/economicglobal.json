@@ -1,6 +1,5 @@
 {
-  "_comment": "Global market assumptions shared across ALL profiles. No withdrawal sequences here — those are per-profile in economic.json.",
-
+  "_comment": "Global market assumptions shared across ALL profiles. No withdrawal sequences here \u2014 those are per-profile in economic.json.",
   "defaults": {
     "bad_market": {
       "drawdown_threshold": 0.15,
@@ -27,35 +26,134 @@
       "scale_exp_lambda": 0.8,
       "use_recession_flag": true,
       "makeup_enabled": true,
-      "makeup_ratio": 0.30,
-      "makeup_cap_per_year": 0.10
+      "makeup_ratio": 0.3,
+      "makeup_cap_per_year": 0.1
     }
   },
-
   "overrides": [
     {
       "_comment": "Years 1-5: conservative rebalancing, standard cash reserve",
       "years": "1-5",
-      "bad_market": { "drawdown_threshold": 0.15, "use_recession_flag": true },
-      "cash_reserve": { "months": 6, "allow_dip_below_reserve": false, "use_cash_only_in_bad_markets": false },
-      "rebalancing": { "global_drift_threshold": 0.12, "require_cash_above_reserve_to_rebalance": true, "suppress_in_bad_market": true, "brokerage_capgain_limit_k": 10.0, "brokerage_enabled": true },
-      "withdrawals": { "shock_scaling_enabled": true, "drawdown_threshold": 0.15, "min_scaling_factor": 0.65, "scale_curve": "linear", "use_recession_flag": true, "makeup_enabled": true, "makeup_ratio": 0.30, "makeup_cap_per_year": 0.10 }
+      "bad_market": {
+        "drawdown_threshold": 0.15,
+        "use_recession_flag": true
+      },
+      "cash_reserve": {
+        "months": 6,
+        "allow_dip_below_reserve": false,
+        "use_cash_only_in_bad_markets": false
+      },
+      "rebalancing": {
+        "global_drift_threshold": 0.12,
+        "require_cash_above_reserve_to_rebalance": true,
+        "suppress_in_bad_market": true,
+        "brokerage_capgain_limit_k": 10.0,
+        "brokerage_enabled": true
+      },
+      "withdrawals": {
+        "shock_scaling_enabled": true,
+        "drawdown_threshold": 0.15,
+        "min_scaling_factor": 0.65,
+        "scale_curve": "linear",
+        "use_recession_flag": true,
+        "makeup_enabled": true,
+        "makeup_ratio": 0.3,
+        "makeup_cap_per_year": 0.1
+      }
     },
     {
       "_comment": "Years 6-15: slightly relaxed capgain limit as brokerage grows",
       "years": "6-15",
-      "bad_market": { "drawdown_threshold": 0.15, "use_recession_flag": true },
-      "cash_reserve": { "months": 6, "allow_dip_below_reserve": false, "use_cash_only_in_bad_markets": false },
-      "rebalancing": { "global_drift_threshold": 0.12, "require_cash_above_reserve_to_rebalance": true, "suppress_in_bad_market": true, "brokerage_capgain_limit_k": 12.5, "brokerage_enabled": true },
-      "withdrawals": { "shock_scaling_enabled": true, "drawdown_threshold": 0.15, "min_scaling_factor": 0.65, "scale_curve": "linear", "use_recession_flag": true, "makeup_enabled": true, "makeup_ratio": 0.30, "makeup_cap_per_year": 0.10 }
+      "bad_market": {
+        "drawdown_threshold": 0.15,
+        "use_recession_flag": true
+      },
+      "cash_reserve": {
+        "months": 6,
+        "allow_dip_below_reserve": false,
+        "use_cash_only_in_bad_markets": false
+      },
+      "rebalancing": {
+        "global_drift_threshold": 0.12,
+        "require_cash_above_reserve_to_rebalance": true,
+        "suppress_in_bad_market": true,
+        "brokerage_capgain_limit_k": 12.5,
+        "brokerage_enabled": true
+      },
+      "withdrawals": {
+        "shock_scaling_enabled": true,
+        "drawdown_threshold": 0.15,
+        "min_scaling_factor": 0.65,
+        "scale_curve": "linear",
+        "use_recession_flag": true,
+        "makeup_enabled": true,
+        "makeup_ratio": 0.3,
+        "makeup_cap_per_year": 0.1
+      }
     },
     {
       "_comment": "Years 16-30: reduced cash reserve months, higher capgain limit",
       "years": "16-30",
-      "bad_market": { "drawdown_threshold": 0.15, "use_recession_flag": true },
-      "cash_reserve": { "months": 5, "allow_dip_below_reserve": false, "use_cash_only_in_bad_markets": false },
-      "rebalancing": { "global_drift_threshold": 0.14, "require_cash_above_reserve_to_rebalance": true, "suppress_in_bad_market": true, "brokerage_capgain_limit_k": 15.0, "brokerage_enabled": true },
-      "withdrawals": { "shock_scaling_enabled": true, "drawdown_threshold": 0.15, "min_scaling_factor": 0.60, "scale_curve": "linear", "use_recession_flag": true, "makeup_enabled": true, "makeup_ratio": 0.30, "makeup_cap_per_year": 0.10 }
+      "bad_market": {
+        "drawdown_threshold": 0.15,
+        "use_recession_flag": true
+      },
+      "cash_reserve": {
+        "months": 5,
+        "allow_dip_below_reserve": false,
+        "use_cash_only_in_bad_markets": false
+      },
+      "rebalancing": {
+        "global_drift_threshold": 0.14,
+        "require_cash_above_reserve_to_rebalance": true,
+        "suppress_in_bad_market": true,
+        "brokerage_capgain_limit_k": 15.0,
+        "brokerage_enabled": true
+      },
+      "withdrawals": {
+        "shock_scaling_enabled": true,
+        "drawdown_threshold": 0.15,
+        "min_scaling_factor": 0.6,
+        "scale_curve": "linear",
+        "use_recession_flag": true,
+        "makeup_enabled": true,
+        "makeup_ratio": 0.3,
+        "makeup_cap_per_year": 0.1
+      }
     }
-  ]
+  ],
+  "readme": {
+    "purpose": "Global market behavior settings shared across ALL profiles. Overrides section lets you change these per year-range. Profile economic.json is merged on top for profile-specific overrides.",
+    "bad_market": {
+      "drawdown_threshold": "Portfolio decline fraction that triggers 'bad market' mode. E.g. 0.15 = 15% below peak triggers bad-market withdrawal sequencing and rebalancing suppression.",
+      "use_recession_flag": "true = also trigger bad-market mode if macroeconomic recession flag is set in the stochastic model, even if drawdown threshold not yet hit."
+    },
+    "cash_reserve": {
+      "months": "Months of withdrawal target kept as cash buffer. E.g. 6 = half-year buffer always maintained.",
+      "allow_dip_below_reserve": "false = never withdraw below cash floor even if it means falling short of withdrawal target.",
+      "use_cash_only_in_bad_markets": "true = only draw from cash reserve during bad markets; use investment accounts otherwise."
+    },
+    "rebalancing": {
+      "global_drift_threshold": "Maximum allowed class drift as fraction of target before rebalancing triggers. E.g. 0.12 = 12% drift band (\u00b112% of target weight). Overrides the per-class \u00b110% default in allocation_yearly.json if set here.",
+      "require_cash_above_reserve_to_rebalance": "true = do not rebalance if cash is below reserve threshold.",
+      "suppress_in_bad_market": "true = pause rebalancing entirely during bad-market periods to avoid locking in losses.",
+      "brokerage_capgain_limit_k": "Maximum realized capital gains in $k per year from brokerage rebalancing. Prevents large unexpected tax bills from a single rebalance.",
+      "brokerage_enabled": "true/false. Master switch for brokerage rebalancing. TRAD/Roth always rebalance costlessly."
+    },
+    "withdrawals": {
+      "shock_scaling_enabled": "true = scale down withdrawals during bad markets. false = always withdraw full target regardless of market.",
+      "drawdown_threshold": "Portfolio drawdown fraction at which scaling begins. Should match bad_market.drawdown_threshold.",
+      "min_scaling_factor": "Minimum fraction of target withdrawal allowed. E.g. 0.65 = never withdraw less than 65% of target. Works with floor_k in withdrawal_schedule.json.",
+      "scale_curve_options": {
+        "linear": "Withdrawal scales linearly from 100% at threshold to min_scaling_factor at full drawdown.",
+        "poly": "Polynomial scaling. scale_poly_alpha > 1 = gentler at first, sharper near bottom.",
+        "exp": "Exponential scaling. scale_exp_lambda controls decay rate."
+      },
+      "use_recession_flag": "Same as bad_market \u2014 also scale withdrawals if recession flag is set.",
+      "makeup_enabled": "true = in good years following a scaled-down year, make up missed withdrawals.",
+      "makeup_ratio": "Fraction of missed amount to recover per good year. E.g. 0.3 = recover 30% of the deficit each year.",
+      "makeup_cap_per_year": "Maximum makeup as fraction of annual target. E.g. 0.1 = makeup never exceeds 10% of that year's target."
+    },
+    "overrides_note": "Time-bounded only. Each override applies for its years range then reverts to defaults above. No permanent overrides \u2014 change the defaults block instead."
+  }
 }

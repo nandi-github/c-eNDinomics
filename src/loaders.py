@@ -290,7 +290,7 @@ def load_allocation_yearly_accounts(path: str) -> Dict[str, Any]:
         }
 
     # Else expand begin + overrides
-    begin = cfg.get("begin", {}) or {}
+    begin = cfg.get("global_allocation") or cfg.get("begin") or {}
     per_year_portfolios: Dict[str, List[Dict[str, Any]]] = {acct: [] for acct in acct_names}
     for acct in acct_names:
         src0 = begin.get(acct, {}) or {}

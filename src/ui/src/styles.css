@@ -224,10 +224,9 @@ button:hover:not(:disabled) {
   border-color: #0f172a;
 }
 
-/* Editor container */
+/* Editor container — height follows the textarea when user drags to resize */
 .config-editor {
-  display: flex;
-  flex-direction: column;
+  display: block;
   min-height: 320px;
 }
 
@@ -250,7 +249,9 @@ button:hover:not(:disabled) {
 
 /* Dark, code-like JSON textarea */
 .config-editor textarea {
-  flex: 1;
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
   font-family: "SF Mono", Menlo, Monaco, Consolas, monospace;
   font-size: 12px;
   line-height: 1.4;
@@ -258,7 +259,8 @@ button:hover:not(:disabled) {
   border: 1px solid #1f2933;
   padding: 10px 12px;
   resize: vertical;
-  min-height: 260px;
+  height: 260px;
+  min-height: 120px;
 
   background: #0b1020;
   color: #e3e7ff;
@@ -274,6 +276,109 @@ button:hover:not(:disabled) {
   justify-content: flex-start;
   gap: 8px;
   margin-top: 6px;
+}
+
+/* ── Readme field-reference panel ── */
+.config-readme {
+  margin-top: 16px;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 12.5px;
+  display: flex;
+  flex-direction: column;
+  max-height: 280px;
+}
+
+.config-readme-scroll {
+  overflow-y: auto;
+  flex: 1;
+  scrollbar-width: thin;
+  scrollbar-color: #94a3b8 transparent;
+}
+
+.config-readme-title {
+  background: linear-gradient(to right, #1e3a5f, #2d4f7c);
+  color: #e2e8f0;
+  font-weight: 600;
+  font-size: 12px;
+  padding: 6px 12px;
+  letter-spacing: 0.02em;
+}
+
+.readme-dl {
+  margin: 0;
+  padding: 0;
+}
+
+.readme-dl.depth-0 > .readme-row {
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.readme-dl.depth-0 > .readme-row:last-child {
+  border-bottom: none;
+}
+
+.readme-row {
+  display: grid;
+  grid-template-columns: 200px 1fr;
+  align-items: baseline;
+  padding: 5px 12px;
+  gap: 12px;
+}
+
+.readme-dl.depth-0 > .readme-row {
+  background: #f8fafc;
+}
+
+.readme-dl.depth-0 > .readme-row:nth-child(even) {
+  background: #f1f5f9;
+}
+
+.readme-key {
+  font-weight: 600;
+  color: #1e3a5f;
+  font-family: "SF Mono", Menlo, Monaco, Consolas, monospace;
+  font-size: 11.5px;
+  white-space: nowrap;
+  text-transform: none;
+  padding-top: 1px;
+}
+
+.readme-val {
+  color: #374151;
+  line-height: 1.5;
+}
+
+.readme-value {
+  color: #374151;
+}
+
+/* Nested depth gets slightly indented background */
+.readme-dl.depth-1 {
+  padding-left: 8px;
+  border-left: 2px solid #cbd5e1;
+  margin: 2px 0;
+}
+
+.readme-dl.depth-2 {
+  padding-left: 8px;
+  border-left: 2px solid #e2e8f0;
+  margin: 2px 0;
+}
+
+.readme-dl.depth-1 .readme-row,
+.readme-dl.depth-2 .readme-row {
+  padding: 2px 8px;
+  background: transparent;
+}
+
+.readme-dl.depth-1 .readme-key {
+  color: #2563eb;
+}
+
+.readme-dl.depth-2 .readme-key {
+  color: #6b7280;
+  font-weight: 500;
 }
 
 /* View-only pill warning (used in header) */

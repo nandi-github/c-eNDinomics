@@ -1,46 +1,321 @@
 {
   "assets": {
-    "SPY": { "class": "US_STOCKS", "mu_annual": 0.065, "sigma_annual": 0.16, "expense_ratio": 0.0009, "tracking_error": 0.01, "dist": { "yield_annual": 0.018, "qualified_ratio": 0.90 } },
-    "VTI": { "class": "US_STOCKS", "mu_annual": 0.065, "sigma_annual": 0.16, "expense_ratio": 0.0003, "tracking_error": 0.01, "dist": { "yield_annual": 0.017, "qualified_ratio": 0.90 } },
-    "QQQ": { "class": "US_STOCKS", "mu_annual": 0.075, "sigma_annual": 0.22, "expense_ratio": 0.0020, "tracking_error": 0.02, "dist": { "yield_annual": 0.009, "qualified_ratio": 0.90 } },
-    "VUG": { "class": "US_STOCKS", "mu_annual": 0.072, "sigma_annual": 0.21, "expense_ratio": 0.0004, "tracking_error": 0.02, "dist": { "yield_annual": 0.010, "qualified_ratio": 0.90 } },
-    "VTV": { "class": "US_STOCKS", "mu_annual": 0.060, "sigma_annual": 0.17, "expense_ratio": 0.0004, "tracking_error": 0.01, "dist": { "yield_annual": 0.023, "qualified_ratio": 0.90 } },
-    "XLK": { "class": "US_STOCKS", "mu_annual": 0.075, "sigma_annual": 0.22, "expense_ratio": 0.0013, "tracking_error": 0.02, "dist": { "yield_annual": 0.008, "qualified_ratio": 0.90 } },
-    "XLF": { "class": "US_STOCKS", "mu_annual": 0.060, "sigma_annual": 0.19, "expense_ratio": 0.0013, "tracking_error": 0.01, "dist": { "yield_annual": 0.025, "qualified_ratio": 0.90 } },
-    "XLE": { "class": "US_STOCKS", "mu_annual": 0.060, "sigma_annual": 0.23, "expense_ratio": 0.0013, "tracking_error": 0.02, "dist": { "yield_annual": 0.035, "qualified_ratio": 0.70 } },
-    "AAPL": { "class": "US_STOCKS", "mu_annual": 0.075, "sigma_annual": 0.25, "expense_ratio": 0.0000, "tracking_error": 0.03, "dist": { "yield_annual": 0.006, "qualified_ratio": 0.90 } },
-    "MSFT": { "class": "US_STOCKS", "mu_annual": 0.072, "sigma_annual": 0.23, "expense_ratio": 0.0000, "tracking_error": 0.02, "dist": { "yield_annual": 0.009, "qualified_ratio": 0.90 } },
-    "AMZN": { "class": "US_STOCKS", "mu_annual": 0.078, "sigma_annual": 0.30, "expense_ratio": 0.0000, "tracking_error": 0.03, "dist": { "yield_annual": 0.000, "qualified_ratio": 0.00 } },
-    "NVDA": { "class": "US_STOCKS", "mu_annual": 0.085, "sigma_annual": 0.35, "expense_ratio": 0.0000, "tracking_error": 0.04, "dist": { "yield_annual": 0.002, "qualified_ratio": 0.90 } },
-
-    "VXUS": { "class": "INTL_STOCKS", "mu_annual": 0.055, "sigma_annual": 0.18, "expense_ratio": 0.0007, "tracking_error": 0.01, "dist": { "yield_annual": 0.025, "qualified_ratio": 0.80 } },
-    "EFA":  { "class": "INTL_STOCKS", "mu_annual": 0.053, "sigma_annual": 0.17, "expense_ratio": 0.0003, "tracking_error": 0.01, "dist": { "yield_annual": 0.026, "qualified_ratio": 0.80 } },
-    "EEM":  { "class": "INTL_STOCKS", "mu_annual": 0.060, "sigma_annual": 0.24, "expense_ratio": 0.0065, "tracking_error": 0.02, "dist": { "yield_annual": 0.022, "qualified_ratio": 0.70 } },
-
-    "TLT": { "class": "LONG_TREAS", "mu_annual": 0.020, "sigma_annual": 0.12, "expense_ratio": 0.00015, "tracking_error": 0.00, "dist": { "yield_annual": 0.030, "qualified_ratio": 0.00 } },
-    "IEF": { "class": "INT_TREAS",  "mu_annual": 0.018, "sigma_annual": 0.08, "expense_ratio": 0.00015, "tracking_error": 0.00, "dist": { "yield_annual": 0.028, "qualified_ratio": 0.00 } },
-    "BND": { "class": "INT_TREAS",  "mu_annual": 0.020, "sigma_annual": 0.07, "expense_ratio": 0.0003,  "tracking_error": 0.00, "dist": { "yield_annual": 0.028, "qualified_ratio": 0.00 } },
-    "LQD": { "class": "INT_TREAS",  "mu_annual": 0.022, "sigma_annual": 0.10, "expense_ratio": 0.0009,  "tracking_error": 0.015, "dist": { "yield_annual": 0.032, "qualified_ratio": 0.00 } },
-    "TIP": { "class": "TIPS",       "mu_annual": 0.018, "sigma_annual": 0.06, "expense_ratio": 0.00019, "tracking_error": 0.00, "dist": { "yield_annual": 0.024, "qualified_ratio": 0.00 } },
-
-    "GLD": { "class": "GOLD", "mu_annual": 0.030, "sigma_annual": 0.15, "expense_ratio": 0.0004, "tracking_error": 0.01 },
-    "IAU": { "class": "GOLD", "mu_annual": 0.030, "sigma_annual": 0.15, "expense_ratio": 0.00025, "tracking_error": 0.01 },
-
-    "DBC": { "class": "COMMOD", "mu_annual": 0.028, "sigma_annual": 0.20, "expense_ratio": 0.0009, "tracking_error": 0.02 },
-    "PDBC": { "class": "COMMOD", "mu_annual": 0.028, "sigma_annual": 0.19, "expense_ratio": 0.0009, "tracking_error": 0.02 }
+    "SPY": {
+      "class": "US_STOCKS",
+      "mu_annual": 0.065,
+      "sigma_annual": 0.16,
+      "expense_ratio": 0.0009,
+      "tracking_error": 0.01,
+      "dist": {
+        "yield_annual": 0.018,
+        "qualified_ratio": 0.9
+      }
+    },
+    "VTI": {
+      "class": "US_STOCKS",
+      "mu_annual": 0.065,
+      "sigma_annual": 0.16,
+      "expense_ratio": 0.0003,
+      "tracking_error": 0.01,
+      "dist": {
+        "yield_annual": 0.017,
+        "qualified_ratio": 0.9
+      }
+    },
+    "QQQ": {
+      "class": "US_STOCKS",
+      "mu_annual": 0.075,
+      "sigma_annual": 0.22,
+      "expense_ratio": 0.002,
+      "tracking_error": 0.02,
+      "dist": {
+        "yield_annual": 0.009,
+        "qualified_ratio": 0.9
+      }
+    },
+    "VUG": {
+      "class": "US_STOCKS",
+      "mu_annual": 0.072,
+      "sigma_annual": 0.21,
+      "expense_ratio": 0.0004,
+      "tracking_error": 0.02,
+      "dist": {
+        "yield_annual": 0.01,
+        "qualified_ratio": 0.9
+      }
+    },
+    "VTV": {
+      "class": "US_STOCKS",
+      "mu_annual": 0.06,
+      "sigma_annual": 0.17,
+      "expense_ratio": 0.0004,
+      "tracking_error": 0.01,
+      "dist": {
+        "yield_annual": 0.023,
+        "qualified_ratio": 0.9
+      }
+    },
+    "XLK": {
+      "class": "US_STOCKS",
+      "mu_annual": 0.075,
+      "sigma_annual": 0.22,
+      "expense_ratio": 0.0013,
+      "tracking_error": 0.02,
+      "dist": {
+        "yield_annual": 0.008,
+        "qualified_ratio": 0.9
+      }
+    },
+    "XLF": {
+      "class": "US_STOCKS",
+      "mu_annual": 0.06,
+      "sigma_annual": 0.19,
+      "expense_ratio": 0.0013,
+      "tracking_error": 0.01,
+      "dist": {
+        "yield_annual": 0.025,
+        "qualified_ratio": 0.9
+      }
+    },
+    "XLE": {
+      "class": "US_STOCKS",
+      "mu_annual": 0.06,
+      "sigma_annual": 0.23,
+      "expense_ratio": 0.0013,
+      "tracking_error": 0.02,
+      "dist": {
+        "yield_annual": 0.035,
+        "qualified_ratio": 0.7
+      }
+    },
+    "AAPL": {
+      "class": "US_STOCKS",
+      "mu_annual": 0.075,
+      "sigma_annual": 0.25,
+      "expense_ratio": 0.0,
+      "tracking_error": 0.03,
+      "dist": {
+        "yield_annual": 0.006,
+        "qualified_ratio": 0.9
+      }
+    },
+    "MSFT": {
+      "class": "US_STOCKS",
+      "mu_annual": 0.072,
+      "sigma_annual": 0.23,
+      "expense_ratio": 0.0,
+      "tracking_error": 0.02,
+      "dist": {
+        "yield_annual": 0.009,
+        "qualified_ratio": 0.9
+      }
+    },
+    "AMZN": {
+      "class": "US_STOCKS",
+      "mu_annual": 0.078,
+      "sigma_annual": 0.3,
+      "expense_ratio": 0.0,
+      "tracking_error": 0.03,
+      "dist": {
+        "yield_annual": 0.0,
+        "qualified_ratio": 0.0
+      }
+    },
+    "NVDA": {
+      "class": "US_STOCKS",
+      "mu_annual": 0.085,
+      "sigma_annual": 0.35,
+      "expense_ratio": 0.0,
+      "tracking_error": 0.04,
+      "dist": {
+        "yield_annual": 0.002,
+        "qualified_ratio": 0.9
+      }
+    },
+    "VXUS": {
+      "class": "INTL_STOCKS",
+      "mu_annual": 0.055,
+      "sigma_annual": 0.18,
+      "expense_ratio": 0.0007,
+      "tracking_error": 0.01,
+      "dist": {
+        "yield_annual": 0.025,
+        "qualified_ratio": 0.8
+      }
+    },
+    "EFA": {
+      "class": "INTL_STOCKS",
+      "mu_annual": 0.053,
+      "sigma_annual": 0.17,
+      "expense_ratio": 0.0003,
+      "tracking_error": 0.01,
+      "dist": {
+        "yield_annual": 0.026,
+        "qualified_ratio": 0.8
+      }
+    },
+    "EEM": {
+      "class": "INTL_STOCKS",
+      "mu_annual": 0.06,
+      "sigma_annual": 0.24,
+      "expense_ratio": 0.0065,
+      "tracking_error": 0.02,
+      "dist": {
+        "yield_annual": 0.022,
+        "qualified_ratio": 0.7
+      }
+    },
+    "TLT": {
+      "class": "LONG_TREAS",
+      "mu_annual": 0.02,
+      "sigma_annual": 0.12,
+      "expense_ratio": 0.00015,
+      "tracking_error": 0.0,
+      "dist": {
+        "yield_annual": 0.03,
+        "qualified_ratio": 0.0
+      }
+    },
+    "IEF": {
+      "class": "INT_TREAS",
+      "mu_annual": 0.018,
+      "sigma_annual": 0.08,
+      "expense_ratio": 0.00015,
+      "tracking_error": 0.0,
+      "dist": {
+        "yield_annual": 0.028,
+        "qualified_ratio": 0.0
+      }
+    },
+    "BND": {
+      "class": "INT_TREAS",
+      "mu_annual": 0.02,
+      "sigma_annual": 0.07,
+      "expense_ratio": 0.0003,
+      "tracking_error": 0.0,
+      "dist": {
+        "yield_annual": 0.028,
+        "qualified_ratio": 0.0
+      }
+    },
+    "LQD": {
+      "class": "INT_TREAS",
+      "mu_annual": 0.022,
+      "sigma_annual": 0.1,
+      "expense_ratio": 0.0009,
+      "tracking_error": 0.015,
+      "dist": {
+        "yield_annual": 0.032,
+        "qualified_ratio": 0.0
+      }
+    },
+    "TIP": {
+      "class": "TIPS",
+      "mu_annual": 0.018,
+      "sigma_annual": 0.06,
+      "expense_ratio": 0.00019,
+      "tracking_error": 0.0,
+      "dist": {
+        "yield_annual": 0.024,
+        "qualified_ratio": 0.0
+      }
+    },
+    "GLD": {
+      "class": "GOLD",
+      "mu_annual": 0.03,
+      "sigma_annual": 0.15,
+      "expense_ratio": 0.0004,
+      "tracking_error": 0.01
+    },
+    "IAU": {
+      "class": "GOLD",
+      "mu_annual": 0.03,
+      "sigma_annual": 0.15,
+      "expense_ratio": 0.00025,
+      "tracking_error": 0.01
+    },
+    "DBC": {
+      "class": "COMMOD",
+      "mu_annual": 0.028,
+      "sigma_annual": 0.2,
+      "expense_ratio": 0.0009,
+      "tracking_error": 0.02
+    },
+    "PDBC": {
+      "class": "COMMOD",
+      "mu_annual": 0.028,
+      "sigma_annual": 0.19,
+      "expense_ratio": 0.0009,
+      "tracking_error": 0.02
+    }
   },
   "correlations": {
     "assets_order": [
-      "SPY","VTI","QQQ","VUG","VTV","XLK","XLF","XLE","AAPL","MSFT","AMZN","NVDA",
-      "VXUS","EFA","EEM",
-      "TLT","IEF","BND","LQD","TIP",
-      "GLD","IAU",
-      "DBC","PDBC"
+      "SPY",
+      "VTI",
+      "QQQ",
+      "VUG",
+      "VTV",
+      "XLK",
+      "XLF",
+      "XLE",
+      "AAPL",
+      "MSFT",
+      "AMZN",
+      "NVDA",
+      "VXUS",
+      "EFA",
+      "EEM",
+      "TLT",
+      "IEF",
+      "BND",
+      "LQD",
+      "TIP",
+      "GLD",
+      "IAU",
+      "DBC",
+      "PDBC"
     ]
   },
   "overrides": [
-    { "where": { "assets": ["XLE"] }, "set": { "mu_annual": 0.060, "sigma_annual": 0.23 } },
-    { "where": { "assets": ["LQD"] }, "set": { "tracking_error": 0.015 } }
-  ]
+    {
+      "where": {
+        "assets": [
+          "XLE"
+        ]
+      },
+      "set": {
+        "mu_annual": 0.06,
+        "sigma_annual": 0.23
+      }
+    },
+    {
+      "where": {
+        "assets": [
+          "LQD"
+        ]
+      },
+      "set": {
+        "tracking_error": 0.015
+      }
+    }
+  ],
+  "readme": {
+    "purpose": "Per-ticker return/volatility assumptions and distribution characteristics used by the Monte Carlo simulator. Auto-regenerated by refresh_assets.py from live Yahoo Finance data on server startup if older than STALE_DAYS. Manual edits will be overwritten on next refresh unless you disable auto-refresh in api.py.",
+    "auto_refresh": "Managed by refresh_assets.py. To force a refresh: python refresh_assets.py --out src/config/assets.json --days 0. To skip refresh: set SKIP_ASSET_REFRESH=1 env var.",
+    "asset_classes": "Valid class values: 'US_STOCKS', 'INTL_STOCKS', 'GOLD', 'COMMOD', 'LONG_TREAS', 'INT_TREAS', 'TIPS', 'CASH'. Class drives correlation matrix used in Monte Carlo, not individual ticker returns.",
+    "per_ticker_fields": {
+      "class": "Asset class this ticker belongs to. Must match a class defined in assets_loader.py correlation matrix.",
+      "mu_annual": "Expected annual log return (drift). E.g. 0.065 = ~6.5% annualized. Estimated from trailing history by refresh_assets.py. Override manually to express a personal view.",
+      "sigma_annual": "Annual return volatility (standard deviation). E.g. 0.16 = 16% annualized. Higher = more Monte Carlo spread.",
+      "expense_ratio": "Annual fee as a decimal. Subtracted from returns each year. E.g. 0.0003 = 0.03% (3 basis points). 0.0 for individual stocks.",
+      "tracking_error": "Additional annual return noise for index funds vs their benchmark. ETFs: ~0.01. Individual stocks: ~0.02-0.04. Pure benchmark: 0.0.",
+      "dist": {
+        "yield_annual": "Annual distribution yield as a decimal. E.g. 0.018 = 1.8%. Used to compute taxable distributions each year in brokerage accounts.",
+        "qualified_ratio": "Fraction of distributions that qualify for LTCG tax rates. E.g. 0.9 = 90% qualified. Treasuries: 0.0 (interest, not dividends). Commodities: 0.0."
+      },
+      "dist_note": "dist field is optional. If absent (e.g. GOLD, COMMOD), no taxable distributions are generated for that ticker."
+    },
+    "adding_tickers": "Add a new ticker entry manually OR let refresh_assets.py discover it from allocation_yearly.json holdings_pct entries. refresh_assets.py reads all profiles to find referenced tickers."
+  }
 }
-

@@ -1,5 +1,4 @@
 {
-  "mode": "augment",
   "events": [
     {
       "class": "US_STOCKS",
@@ -152,37 +151,7 @@
     }
   ],
   "readme": {
-    "purpose": "Profile-specific deterministic market shocks layered on top of Monte Carlo returns. Use these to model known or assumed macro events at specific years.",
-    "mode_options": {
-      "augment": "Add these events on top of system_shocks.json preset events.",
-      "replace": "Ignore system_shocks.json entirely; only these events apply."
-    },
-    "event_fields": {
-      "class": "Asset class to shock. Options: 'US_STOCKS', 'INTL_STOCKS', 'GOLD', 'COMMOD', 'LONG_TREAS', 'INT_TREAS', 'TIPS', 'CASH'",
-      "start_year": "Simulation year the shock begins (1-indexed).",
-      "start_quarter": "Quarter within start_year. Options: 1, 2, 3, 4.",
-      "depth": "Maximum drawdown as a fraction. E.g. 0.30 = 30% peak-to-trough loss.",
-      "dip_quarters": "Number of quarters to reach maximum depth.",
-      "recovery_quarters": "Number of quarters to recover from trough.",
-      "override_mode_options": {
-        "strict": "This shock overrides any concurrent stochastic return for this class.",
-        "augment": "Shock is additive on top of the stochastic return."
-      },
-      "recovery_to_options": {
-        "baseline": "Recover to the pre-shock trend line.",
-        "none": "Recover to trough level only; no mean-reversion above trough."
-      },
-      "dip_profile_and_rise_profile": {
-        "type_options": {
-          "linear": "Constant rate of decline/recovery.",
-          "poly": "Polynomial curve. alpha > 1 = slow start then sharp. alpha < 1 = sharp start then slow.",
-          "exp": "Exponential curve. lambda controls decay rate."
-        }
-      },
-      "coimpact_down": "Other classes pulled down during the dip. mode: 'limited' (only listed classes), 'broad' (all equity classes), 'none'. scale: fraction of primary depth applied to co-impacted classes.",
-      "corecovery_up": "Other classes lifted during recovery. Same mode/scale options as coimpact_down. organic: true = co-recovering class follows its own profile shape. organic_profile: dip/rise profile for the organic recovery.",
-      "correlated_to": "For co-movement shocks: this class moves as a scaled version of another class's shock. Use with scale field.",
-      "scale": "Fraction of the correlated class's movement applied to this class."
-    }
+    "purpose": "Deterministic shock schedule applied globally across all profiles unless overridden. These represent macro scenarios you want baked into every run (e.g. a known recession stress test). Profile-level shocks_yearly.json can augment or replace these.",
+    "note": "Same event schema as shocks_yearly.json. See that file's readme for full field documentation."
   }
 }

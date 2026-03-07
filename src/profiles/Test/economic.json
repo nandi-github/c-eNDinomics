@@ -1,24 +1,21 @@
 {
-  "_comment": "Per-profile withdrawal strategy. Merged on top of economicglobal.json — profile keys win on conflict.",
-
+  "_comment": "Per-profile withdrawal strategy. Merged on top of economicglobal.json \u2014 profile keys win on conflict.",
   "defaults": {
     "withdrawal_sequence": {
-      "_comment_good": "Good market: drain TRAD_IRA first to reduce RMD timebomb while assets are up. Roth always last — tax-free growth forever.",
+      "_comment_good": "Good market: drain TRAD_IRA first to reduce RMD timebomb while assets are up. Roth always last \u2014 tax-free growth forever.",
       "order_good_market": [
         "TRAD_IRA",
         "BROKERAGE:equities",
         "BROKERAGE:bonds",
         "ROTH_IRA"
       ],
-
-      "_comment_bad": "Bad market (conversion OFF): bucket strategy — bonds first, protect depressed equities from forced sale.",
+      "_comment_bad": "Bad market (conversion OFF): bucket strategy \u2014 bonds first, protect depressed equities from forced sale.",
       "order_bad_market": [
         "BROKERAGE:bonds",
         "BROKERAGE:equities",
         "TRAD_IRA",
         "ROTH_IRA"
       ],
-
       "_comment_bad_conv": "Bad market (conversion ON): convert TRAD->Roth cheaply while assets are depressed. Use brokerage bonds to fund living expenses + conversion tax bill.",
       "order_bad_market_with_conversion": [
         "TRAD_IRA",
@@ -26,9 +23,20 @@
         "BROKERAGE:equities",
         "ROTH_IRA"
       ],
-
       "tira_age_gate": 59.5,
       "roth_last_resort": true
+    }
+  },
+  "readme": {
+    "purpose": "Per-profile withdrawal sequencing strategy. Merged on top of economicglobal.json \u2014 profile values win on any conflict. Only put things here that differ from global defaults.",
+    "withdrawal_sequence": {
+      "purpose": "Controls which accounts to draw from first in good vs bad markets. Order = drain earlier entries first.",
+      "account_tokens": "Use account names from allocation_yearly.json. For brokerage sub-buckets: 'BROKERAGE-1:equities' or 'BROKERAGE-1:bonds'. Plain 'TRAD_IRA' means all TRAD_IRA accounts in proportion.",
+      "order_good_market": "Withdrawal order when portfolio is above bad_market drawdown threshold.",
+      "order_bad_market": "Withdrawal order when portfolio is below threshold and Roth conversion is OFF.",
+      "order_bad_market_with_conversion": "Withdrawal order when portfolio is below threshold and Roth conversion is ON.",
+      "tira_age_gate": "Age below which TRAD_IRA withdrawals incur 10% early withdrawal penalty. Default 59.5. IRS rule.",
+      "roth_last_resort": "true = never draw Roth unless all other accounts are exhausted."
     }
   }
 }

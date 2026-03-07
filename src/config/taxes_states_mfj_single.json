@@ -1,43 +1,111 @@
-
 {
   "schema_version": "1.0",
   "notes": "2025 federal brackets (Rev. Proc. 2024-40) and a complete 50-state structure compatible with your loaders. Verify state values against current-year sources if you plan to model state taxes beyond CA and WA.",
   "federal": {
     "ordinary_brackets": {
       "MFJ": [
-        { "up_to": 23850,  "rate": 0.10 },
-        { "up_to": 96950,  "rate": 0.12 },
-        { "up_to": 206700, "rate": 0.22 },
-        { "up_to": 394600, "rate": 0.24 },
-        { "up_to": 501050, "rate": 0.32 },
-        { "up_to": 751600, "rate": 0.35 },
-        { "up_to": null,   "rate": 0.37 }
+        {
+          "up_to": 23850,
+          "rate": 0.1
+        },
+        {
+          "up_to": 96950,
+          "rate": 0.12
+        },
+        {
+          "up_to": 206700,
+          "rate": 0.22
+        },
+        {
+          "up_to": 394600,
+          "rate": 0.24
+        },
+        {
+          "up_to": 501050,
+          "rate": 0.32
+        },
+        {
+          "up_to": 751600,
+          "rate": 0.35
+        },
+        {
+          "up_to": null,
+          "rate": 0.37
+        }
       ],
       "Single": [
-        { "up_to": 11925,  "rate": 0.10 },
-        { "up_to": 48475,  "rate": 0.12 },
-        { "up_to": 103350, "rate": 0.22 },
-        { "up_to": 197300, "rate": 0.24 },
-        { "up_to": 250525, "rate": 0.32 },
-        { "up_to": 626350, "rate": 0.35 },
-        { "up_to": null,   "rate": 0.37 }
+        {
+          "up_to": 11925,
+          "rate": 0.1
+        },
+        {
+          "up_to": 48475,
+          "rate": 0.12
+        },
+        {
+          "up_to": 103350,
+          "rate": 0.22
+        },
+        {
+          "up_to": 197300,
+          "rate": 0.24
+        },
+        {
+          "up_to": 250525,
+          "rate": 0.32
+        },
+        {
+          "up_to": 626350,
+          "rate": 0.35
+        },
+        {
+          "up_to": null,
+          "rate": 0.37
+        }
       ]
     },
     "qualified_brackets": {
       "MFJ": [
-        { "up_to": 96700,   "rate": 0.00 },
-        { "up_to": 600050,  "rate": 0.15 },
-        { "up_to": null,    "rate": 0.20 }
+        {
+          "up_to": 96700,
+          "rate": 0.0
+        },
+        {
+          "up_to": 600050,
+          "rate": 0.15
+        },
+        {
+          "up_to": null,
+          "rate": 0.2
+        }
       ],
       "Single": [
-        { "up_to": 48350,   "rate": 0.00 },
-        { "up_to": 533400,  "rate": 0.15 },
-        { "up_to": null,    "rate": 0.20 }
+        {
+          "up_to": 48350,
+          "rate": 0.0
+        },
+        {
+          "up_to": 533400,
+          "rate": 0.15
+        },
+        {
+          "up_to": null,
+          "rate": 0.2
+        }
       ],
       "HeadOfHousehold": [
-        { "up_to": 64750,   "rate": 0.00 },
-        { "up_to": 566700,  "rate": 0.15 },
-        { "up_to": null,    "rate": 0.20 }
+        {
+          "up_to": 64750,
+          "rate": 0.0
+        },
+        {
+          "up_to": 566700,
+          "rate": 0.15
+        },
+        {
+          "up_to": null,
+          "rate": 0.2
+        }
       ]
     },
     "standard_deduction": {
@@ -47,101 +115,1087 @@
     },
     "niit": {
       "rate": 0.038,
-      "threshold": { "MFJ": 250000, "Single": 200000, "HeadOfHousehold": 200000 }
+      "threshold": {
+        "MFJ": 250000,
+        "Single": 200000,
+        "HeadOfHousehold": 200000
+      }
     }
   },
   "states": {
-    "Alabama":      { "type": "progressive", "treat_qualified_as_ordinary": true,  "ordinary_brackets": { "MFJ": [], "Single": [] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "Alaska":       { "type": "none",        "treat_qualified_as_ordinary": false, "ordinary_brackets": { "MFJ": [], "Single": [] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "Arizona":      { "type": "flat",        "treat_qualified_as_ordinary": true,  "ordinary_brackets": { "MFJ": [ { "up_to": null, "rate": 0.025 } ], "Single": [ { "up_to": null, "rate": 0.025 } ] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "Arkansas":     { "type": "progressive", "treat_qualified_as_ordinary": true,  "ordinary_brackets": { "MFJ": [], "Single": [] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-
+    "Alabama": {
+      "type": "progressive",
+      "treat_qualified_as_ordinary": true,
+      "ordinary_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "Alaska": {
+      "type": "none",
+      "treat_qualified_as_ordinary": false,
+      "ordinary_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "Arizona": {
+      "type": "flat",
+      "treat_qualified_as_ordinary": true,
+      "ordinary_brackets": {
+        "MFJ": [
+          {
+            "up_to": null,
+            "rate": 0.025
+          }
+        ],
+        "Single": [
+          {
+            "up_to": null,
+            "rate": 0.025
+          }
+        ]
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "Arkansas": {
+      "type": "progressive",
+      "treat_qualified_as_ordinary": true,
+      "ordinary_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
     "California": {
       "type": "progressive",
       "treat_qualified_as_ordinary": true,
       "ordinary_brackets": {
         "MFJ": [
-          { "up_to": 21512,   "rate": 0.01 },
-          { "up_to": 50998,   "rate": 0.02 },
-          { "up_to": 80490,   "rate": 0.04 },
-          { "up_to": 111732,  "rate": 0.06 },
-          { "up_to": 141212,  "rate": 0.08 },
-          { "up_to": 721318,  "rate": 0.093 },
-          { "up_to": 865574,  "rate": 0.103 },
-          { "up_to": 1442628, "rate": 0.113 },
-          { "up_to": null,    "rate": 0.123 }
+          {
+            "up_to": 21512,
+            "rate": 0.01
+          },
+          {
+            "up_to": 50998,
+            "rate": 0.02
+          },
+          {
+            "up_to": 80490,
+            "rate": 0.04
+          },
+          {
+            "up_to": 111732,
+            "rate": 0.06
+          },
+          {
+            "up_to": 141212,
+            "rate": 0.08
+          },
+          {
+            "up_to": 721318,
+            "rate": 0.093
+          },
+          {
+            "up_to": 865574,
+            "rate": 0.103
+          },
+          {
+            "up_to": 1442628,
+            "rate": 0.113
+          },
+          {
+            "up_to": null,
+            "rate": 0.123
+          }
         ],
         "Single": [
-          { "up_to": 10756,   "rate": 0.01 },
-          { "up_to": 25499,   "rate": 0.02 },
-          { "up_to": 40245,   "rate": 0.04 },
-          { "up_to": 55866,   "rate": 0.06 },
-          { "up_to": 70606,   "rate": 0.08 },
-          { "up_to": 360659,  "rate": 0.093 },
-          { "up_to": 432787,  "rate": 0.103 },
-          { "up_to": 721314,  "rate": 0.113 },
-          { "up_to": null,    "rate": 0.123 }
+          {
+            "up_to": 10756,
+            "rate": 0.01
+          },
+          {
+            "up_to": 25499,
+            "rate": 0.02
+          },
+          {
+            "up_to": 40245,
+            "rate": 0.04
+          },
+          {
+            "up_to": 55866,
+            "rate": 0.06
+          },
+          {
+            "up_to": 70606,
+            "rate": 0.08
+          },
+          {
+            "up_to": 360659,
+            "rate": 0.093
+          },
+          {
+            "up_to": 432787,
+            "rate": 0.103
+          },
+          {
+            "up_to": 721314,
+            "rate": 0.113
+          },
+          {
+            "up_to": null,
+            "rate": 0.123
+          }
         ]
       },
-      "qualified_brackets": { "MFJ": [], "Single": [] },
-      "standard_deduction": { "MFJ": 11080, "Single": 5540 },
-      "mental_health_surtax": { "threshold": 1000000, "rate": 0.01 }
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 11080,
+        "Single": 5540
+      },
+      "mental_health_surtax": {
+        "threshold": 1000000,
+        "rate": 0.01
+      }
     },
-
-    "Colorado":     { "type": "flat",        "treat_qualified_as_ordinary": true,  "ordinary_brackets": { "MFJ": [ { "up_to": null, "rate": 0.044 } ], "Single": [ { "up_to": null, "rate": 0.044 } ] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "Connecticut":  { "type": "progressive", "treat_qualified_as_ordinary": true,  "ordinary_brackets": { "MFJ": [], "Single": [] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "Delaware":     { "type": "progressive", "treat_qualified_as_ordinary": true,  "ordinary_brackets": { "MFJ": [], "Single": [] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "District of Columbia": { "type": "progressive", "treat_qualified_as_ordinary": true, "ordinary_brackets": { "MFJ": [], "Single": [] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "Florida":      { "type": "none",        "treat_qualified_as_ordinary": false, "ordinary_brackets": { "MFJ": [], "Single": [] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "Georgia":      { "type": "flat",        "treat_qualified_as_ordinary": true,  "ordinary_brackets": { "MFJ": [ { "up_to": null, "rate": 0.0549 } ], "Single": [ { "up_to": null, "rate": 0.0549 } ] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "Hawaii":       { "type": "progressive", "treat_qualified_as_ordinary": true,  "ordinary_brackets": { "MFJ": [], "Single": [] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "Idaho":        { "type": "flat",        "treat_qualified_as_ordinary": true,  "ordinary_brackets": { "MFJ": [ { "up_to": null, "rate": 0.055 } ], "Single": [ { "up_to": null, "rate": 0.055 } ] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "Illinois":     { "type": "flat",        "treat_qualified_as_ordinary": false, "ordinary_brackets": { "MFJ": [ { "up_to": null, "rate": 0.0495 } ], "Single": [ { "up_to": null, "rate": 0.0495 } ] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "Indiana":      { "type": "flat",        "treat_qualified_as_ordinary": true,  "ordinary_brackets": { "MFJ": [ { "up_to": null, "rate": 0.032 } ], "Single": [ { "up_to": null, "rate": 0.032 } ] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "Iowa":         { "type": "progressive", "treat_qualified_as_ordinary": true,  "ordinary_brackets": { "MFJ": [], "Single": [] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "Kansas":       { "type": "progressive", "treat_qualified_as_ordinary": true,  "ordinary_brackets": { "MFJ": [], "Single": [] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "Kentucky":     { "type": "flat",        "treat_qualified_as_ordinary": true,  "ordinary_brackets": { "MFJ": [ { "up_to": null, "rate": 0.045 } ], "Single": [ { "up_to": null, "rate": 0.045 } ] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "Louisiana":    { "type": "progressive", "treat_qualified_as_ordinary": true,  "ordinary_brackets": { "MFJ": [], "Single": [] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "Maine":        { "type": "progressive", "treat_qualified_as_ordinary": true,  "ordinary_brackets": { "MFJ": [], "Single": [] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "Maryland":     { "type": "progressive", "treat_qualified_as_ordinary": true,  "ordinary_brackets": { "MFJ": [], "Single": [] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "Massachusetts":{ "type": "flat",        "treat_qualified_as_ordinary": false, "ordinary_brackets": { "MFJ": [ { "up_to": null, "rate": 0.05 } ], "Single": [ { "up_to": null, "rate": 0.05 } ] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "Michigan":     { "type": "flat",        "treat_qualified_as_ordinary": false, "ordinary_brackets": { "MFJ": [ { "up_to": null, "rate": 0.0425 } ], "Single": [ { "up_to": null, "rate": 0.0425 } ] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "Minnesota":    { "type": "progressive", "treat_qualified_as_ordinary": true,  "ordinary_brackets": { "MFJ": [], "Single": [] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "Mississippi":  { "type": "flat",        "treat_qualified_as_ordinary": true,  "ordinary_brackets": { "MFJ": [ { "up_to": null, "rate": 0.05 } ], "Single": [ { "up_to": null, "rate": 0.05 } ] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "Missouri":     { "type": "progressive", "treat_qualified_as_ordinary": true,  "ordinary_brackets": { "MFJ": [], "Single": [] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "Montana":      { "type": "progressive", "treat_qualified_as_ordinary": true,  "ordinary_brackets": { "MFJ": [], "Single": [] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "Nebraska":     { "type": "progressive", "treat_qualified_as_ordinary": true,  "ordinary_brackets": { "MFJ": [], "Single": [] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "Nevada":       { "type": "none",        "treat_qualified_as_ordinary": false, "ordinary_brackets": { "MFJ": [], "Single": [] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "New Hampshire":{ "type": "none",        "treat_qualified_as_ordinary": false, "ordinary_brackets": { "MFJ": [], "Single": [] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "New Jersey":   { "type": "progressive", "treat_qualified_as_ordinary": true,  "ordinary_brackets": { "MFJ": [], "Single": [] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "New Mexico":   { "type": "progressive", "treat_qualified_as_ordinary": true,  "ordinary_brackets": { "MFJ": [], "Single": [] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "New York":     { "type": "progressive", "treat_qualified_as_ordinary": true,  "ordinary_brackets": { "MFJ": [], "Single": [] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "North Carolina": { "type": "flat",      "treat_qualified_as_ordinary": false, "ordinary_brackets": { "MFJ": [ { "up_to": null, "rate": 0.046 } ], "Single": [ { "up_to": null, "rate": 0.046 } ] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "North Dakota": { "type": "flat",        "treat_qualified_as_ordinary": false, "ordinary_brackets": { "MFJ": [ { "up_to": null, "rate": 0.025 } ], "Single": [ { "up_to": null, "rate": 0.025 } ] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "Ohio":         { "type": "progressive", "treat_qualified_as_ordinary": true,  "ordinary_brackets": { "MFJ": [], "Single": [] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "Oklahoma":     { "type": "progressive", "treat_qualified_as_ordinary": true,  "ordinary_brackets": { "MFJ": [], "Single": [] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "Oregon":       { "type": "progressive", "treat_qualified_as_ordinary": true,  "ordinary_brackets": { "MFJ": [], "Single": [] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "Pennsylvania": { "type": "flat",        "treat_qualified_as_ordinary": false, "ordinary_brackets": { "MFJ": [ { "up_to": null, "rate": 0.0307 } ], "Single": [ { "up_to": null, "rate": 0.0307 } ] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "Rhode Island": { "type": "progressive", "treat_qualified_as_ordinary": true,  "ordinary_brackets": { "MFJ": [], "Single": [] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "South Carolina": { "type": "progressive", "treat_qualified_as_ordinary": true, "ordinary_brackets": { "MFJ": [], "Single": [] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "South Dakota": { "type": "none",        "treat_qualified_as_ordinary": false, "ordinary_brackets": { "MFJ": [], "Single": [] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "Tennessee":    { "type": "none",        "treat_qualified_as_ordinary": false, "ordinary_brackets": { "MFJ": [], "Single": [] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "Texas":        { "type": "none",        "treat_qualified_as_ordinary": false, "ordinary_brackets": { "MFJ": [], "Single": [] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "Utah":         { "type": "flat",        "treat_qualified_as_ordinary": false, "ordinary_brackets": { "MFJ": [ { "up_to": null, "rate": 0.0495 } ], "Single": [ { "up_to": null, "rate": 0.0495 } ] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "Vermont":      { "type": "progressive", "treat_qualified_as_ordinary": true,  "ordinary_brackets": { "MFJ": [], "Single": [] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "Virginia":     { "type": "progressive", "treat_qualified_as_ordinary": true,  "ordinary_brackets": { "MFJ": [], "Single": [] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-
+    "Colorado": {
+      "type": "flat",
+      "treat_qualified_as_ordinary": true,
+      "ordinary_brackets": {
+        "MFJ": [
+          {
+            "up_to": null,
+            "rate": 0.044
+          }
+        ],
+        "Single": [
+          {
+            "up_to": null,
+            "rate": 0.044
+          }
+        ]
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "Connecticut": {
+      "type": "progressive",
+      "treat_qualified_as_ordinary": true,
+      "ordinary_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "Delaware": {
+      "type": "progressive",
+      "treat_qualified_as_ordinary": true,
+      "ordinary_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "District of Columbia": {
+      "type": "progressive",
+      "treat_qualified_as_ordinary": true,
+      "ordinary_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "Florida": {
+      "type": "none",
+      "treat_qualified_as_ordinary": false,
+      "ordinary_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "Georgia": {
+      "type": "flat",
+      "treat_qualified_as_ordinary": true,
+      "ordinary_brackets": {
+        "MFJ": [
+          {
+            "up_to": null,
+            "rate": 0.0549
+          }
+        ],
+        "Single": [
+          {
+            "up_to": null,
+            "rate": 0.0549
+          }
+        ]
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "Hawaii": {
+      "type": "progressive",
+      "treat_qualified_as_ordinary": true,
+      "ordinary_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "Idaho": {
+      "type": "flat",
+      "treat_qualified_as_ordinary": true,
+      "ordinary_brackets": {
+        "MFJ": [
+          {
+            "up_to": null,
+            "rate": 0.055
+          }
+        ],
+        "Single": [
+          {
+            "up_to": null,
+            "rate": 0.055
+          }
+        ]
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "Illinois": {
+      "type": "flat",
+      "treat_qualified_as_ordinary": false,
+      "ordinary_brackets": {
+        "MFJ": [
+          {
+            "up_to": null,
+            "rate": 0.0495
+          }
+        ],
+        "Single": [
+          {
+            "up_to": null,
+            "rate": 0.0495
+          }
+        ]
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "Indiana": {
+      "type": "flat",
+      "treat_qualified_as_ordinary": true,
+      "ordinary_brackets": {
+        "MFJ": [
+          {
+            "up_to": null,
+            "rate": 0.032
+          }
+        ],
+        "Single": [
+          {
+            "up_to": null,
+            "rate": 0.032
+          }
+        ]
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "Iowa": {
+      "type": "progressive",
+      "treat_qualified_as_ordinary": true,
+      "ordinary_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "Kansas": {
+      "type": "progressive",
+      "treat_qualified_as_ordinary": true,
+      "ordinary_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "Kentucky": {
+      "type": "flat",
+      "treat_qualified_as_ordinary": true,
+      "ordinary_brackets": {
+        "MFJ": [
+          {
+            "up_to": null,
+            "rate": 0.045
+          }
+        ],
+        "Single": [
+          {
+            "up_to": null,
+            "rate": 0.045
+          }
+        ]
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "Louisiana": {
+      "type": "progressive",
+      "treat_qualified_as_ordinary": true,
+      "ordinary_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "Maine": {
+      "type": "progressive",
+      "treat_qualified_as_ordinary": true,
+      "ordinary_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "Maryland": {
+      "type": "progressive",
+      "treat_qualified_as_ordinary": true,
+      "ordinary_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "Massachusetts": {
+      "type": "flat",
+      "treat_qualified_as_ordinary": false,
+      "ordinary_brackets": {
+        "MFJ": [
+          {
+            "up_to": null,
+            "rate": 0.05
+          }
+        ],
+        "Single": [
+          {
+            "up_to": null,
+            "rate": 0.05
+          }
+        ]
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "Michigan": {
+      "type": "flat",
+      "treat_qualified_as_ordinary": false,
+      "ordinary_brackets": {
+        "MFJ": [
+          {
+            "up_to": null,
+            "rate": 0.0425
+          }
+        ],
+        "Single": [
+          {
+            "up_to": null,
+            "rate": 0.0425
+          }
+        ]
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "Minnesota": {
+      "type": "progressive",
+      "treat_qualified_as_ordinary": true,
+      "ordinary_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "Mississippi": {
+      "type": "flat",
+      "treat_qualified_as_ordinary": true,
+      "ordinary_brackets": {
+        "MFJ": [
+          {
+            "up_to": null,
+            "rate": 0.05
+          }
+        ],
+        "Single": [
+          {
+            "up_to": null,
+            "rate": 0.05
+          }
+        ]
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "Missouri": {
+      "type": "progressive",
+      "treat_qualified_as_ordinary": true,
+      "ordinary_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "Montana": {
+      "type": "progressive",
+      "treat_qualified_as_ordinary": true,
+      "ordinary_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "Nebraska": {
+      "type": "progressive",
+      "treat_qualified_as_ordinary": true,
+      "ordinary_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "Nevada": {
+      "type": "none",
+      "treat_qualified_as_ordinary": false,
+      "ordinary_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "New Hampshire": {
+      "type": "none",
+      "treat_qualified_as_ordinary": false,
+      "ordinary_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "New Jersey": {
+      "type": "progressive",
+      "treat_qualified_as_ordinary": true,
+      "ordinary_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "New Mexico": {
+      "type": "progressive",
+      "treat_qualified_as_ordinary": true,
+      "ordinary_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "New York": {
+      "type": "progressive",
+      "treat_qualified_as_ordinary": true,
+      "ordinary_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "North Carolina": {
+      "type": "flat",
+      "treat_qualified_as_ordinary": false,
+      "ordinary_brackets": {
+        "MFJ": [
+          {
+            "up_to": null,
+            "rate": 0.046
+          }
+        ],
+        "Single": [
+          {
+            "up_to": null,
+            "rate": 0.046
+          }
+        ]
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "North Dakota": {
+      "type": "flat",
+      "treat_qualified_as_ordinary": false,
+      "ordinary_brackets": {
+        "MFJ": [
+          {
+            "up_to": null,
+            "rate": 0.025
+          }
+        ],
+        "Single": [
+          {
+            "up_to": null,
+            "rate": 0.025
+          }
+        ]
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "Ohio": {
+      "type": "progressive",
+      "treat_qualified_as_ordinary": true,
+      "ordinary_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "Oklahoma": {
+      "type": "progressive",
+      "treat_qualified_as_ordinary": true,
+      "ordinary_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "Oregon": {
+      "type": "progressive",
+      "treat_qualified_as_ordinary": true,
+      "ordinary_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "Pennsylvania": {
+      "type": "flat",
+      "treat_qualified_as_ordinary": false,
+      "ordinary_brackets": {
+        "MFJ": [
+          {
+            "up_to": null,
+            "rate": 0.0307
+          }
+        ],
+        "Single": [
+          {
+            "up_to": null,
+            "rate": 0.0307
+          }
+        ]
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "Rhode Island": {
+      "type": "progressive",
+      "treat_qualified_as_ordinary": true,
+      "ordinary_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "South Carolina": {
+      "type": "progressive",
+      "treat_qualified_as_ordinary": true,
+      "ordinary_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "South Dakota": {
+      "type": "none",
+      "treat_qualified_as_ordinary": false,
+      "ordinary_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "Tennessee": {
+      "type": "none",
+      "treat_qualified_as_ordinary": false,
+      "ordinary_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "Texas": {
+      "type": "none",
+      "treat_qualified_as_ordinary": false,
+      "ordinary_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "Utah": {
+      "type": "flat",
+      "treat_qualified_as_ordinary": false,
+      "ordinary_brackets": {
+        "MFJ": [
+          {
+            "up_to": null,
+            "rate": 0.0495
+          }
+        ],
+        "Single": [
+          {
+            "up_to": null,
+            "rate": 0.0495
+          }
+        ]
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "Vermont": {
+      "type": "progressive",
+      "treat_qualified_as_ordinary": true,
+      "ordinary_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "Virginia": {
+      "type": "progressive",
+      "treat_qualified_as_ordinary": true,
+      "ordinary_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
     "Washington": {
       "type": "none",
       "treat_qualified_as_ordinary": false,
-      "ordinary_brackets": { "MFJ": [], "Single": [] },
-      "qualified_brackets": { "MFJ": [], "Single": [] },
-      "standard_deduction": { "MFJ": 0, "Single": 0 },
-      "capital_gains_excise": { "rate": 0.07, "threshold": { "MFJ": 250000, "Single": 250000 } }
+      "ordinary_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      },
+      "capital_gains_excise": {
+        "rate": 0.07,
+        "threshold": {
+          "MFJ": 250000,
+          "Single": 250000
+        }
+      }
     },
-
-    "West Virginia":{ "type": "flat",        "treat_qualified_as_ordinary": true,  "ordinary_brackets": { "MFJ": [ { "up_to": null, "rate": 0.05 } ], "Single": [ { "up_to": null, "rate": 0.05 } ] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "Wisconsin":    { "type": "progressive", "treat_qualified_as_ordinary": true,  "ordinary_brackets": { "MFJ": [], "Single": [] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } },
-    "Wyoming":      { "type": "none",        "treat_qualified_as_ordinary": false, "ordinary_brackets": { "MFJ": [], "Single": [] }, "qualified_brackets": { "MFJ": [], "Single": [] }, "standard_deduction": { "MFJ": 0, "Single": 0 } }
+    "West Virginia": {
+      "type": "flat",
+      "treat_qualified_as_ordinary": true,
+      "ordinary_brackets": {
+        "MFJ": [
+          {
+            "up_to": null,
+            "rate": 0.05
+          }
+        ],
+        "Single": [
+          {
+            "up_to": null,
+            "rate": 0.05
+          }
+        ]
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "Wisconsin": {
+      "type": "progressive",
+      "treat_qualified_as_ordinary": true,
+      "ordinary_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    },
+    "Wyoming": {
+      "type": "none",
+      "treat_qualified_as_ordinary": false,
+      "ordinary_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "qualified_brackets": {
+        "MFJ": [],
+        "Single": []
+      },
+      "standard_deduction": {
+        "MFJ": 0,
+        "Single": 0
+      }
+    }
+  },
+  "readme": {
+    "purpose": "Federal and state tax bracket tables used by taxes_core.py. System file \u2014 lives in src/config/, shared by all profiles. Updated annually as IRS adjusts brackets for inflation.",
+    "schema_version": "Increment when adding new structural fields to maintain backward compat in loaders.",
+    "federal": {
+      "ordinary_brackets": "Progressive marginal rate brackets for wages, IRA distributions, Roth conversions, interest, rental income. Brackets are upper bounds \u2014 'up_to: null' means the top bracket has no ceiling.",
+      "qualified_brackets": "Lower rate brackets for qualified dividends and long-term capital gains. Stacked on top of ordinary income for bracket placement.",
+      "standard_deduction": "Per filing status. Applied before bracket lookup. 2025 values; update each year per IRS Rev. Proc.",
+      "niit": "Net Investment Income Tax. rate=0.038 (3.8%) applied to investment income above threshold. Applies to brokerage dividends, cap gains, and rebalancing gains. Does NOT apply to IRA/Roth distributions.",
+      "filing_status_keys": "MFJ = Married Filing Jointly, Single = Single/MFS/HOH where separate tables not defined."
+    },
+    "states": {
+      "type_options": {
+        "none": "No state income tax (e.g. Alaska, Florida, Nevada, Texas, Washington, Wyoming).",
+        "flat": "Single rate on all income. Use a single bracket with up_to: null.",
+        "progressive": "Multiple brackets like federal. Most states."
+      },
+      "treat_qualified_as_ordinary": "true = state taxes qualified dividends and LTCG at ordinary income rates (most states). false = state has its own preferential LTCG rate.",
+      "brackets_format": "Same as federal \u2014 list of {up_to, rate} objects. Empty list [] means no tax for that filing status.",
+      "populated_states": "California and Washington are fully populated. All other states have empty brackets \u2014 add actual bracket data before modeling state taxes for those states.",
+      "how_to_set_state": "State is not set in this file. It is set per-profile via a field in person.json (planned) or defaulted to the profile's home state in api.py."
+    },
+    "update_cadence": "IRS adjusts federal brackets annually in October/November for the following tax year. Update ordinary_brackets thresholds and standard_deduction each year. NIIT threshold is NOT inflation-adjusted by statute."
   }
 }

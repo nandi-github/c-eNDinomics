@@ -2,37 +2,50 @@
   "w2": [
     {
       "years": "1-30",
-      "amount_nom": 100000
+      "amount_nom": 0
     }
   ],
   "rental": [
     {
       "years": "1-30",
-      "amount_nom": 12000
+      "amount_nom": 0
     }
   ],
   "interest": [
     {
       "years": "1-30",
-      "amount_nom": 1000
+      "amount_nom": 0
     }
   ],
   "ordinary_other": [
     {
       "years": "1-30",
-      "amount_nom": 2000
+      "amount_nom": 0
     }
   ],
   "qualified_div": [
     {
       "years": "1-30",
-      "amount_nom": 3000
+      "amount_nom": 0
     }
   ],
   "cap_gains": [
     {
       "years": "1-30",
-      "amount_nom": 20000
+      "amount_nom": 0
     }
-  ]
+  ],
+  "readme": {
+    "purpose": "Non-portfolio income sources by year range. All amounts are in nominal dollars (today's dollars if year 1 is now).",
+    "years_format": "Use 'N-M' e.g. '1-5', '6-30'. Ranges must not overlap within a category. Missing years default to 0.",
+    "amount_nom": "Nominal dollar amount for that year range. Will be adjusted by inflation in the simulator.",
+    "income_types": {
+      "w2": "Wages, salary, self-employment income. Ordinary income. Subject to FICA if still working.",
+      "rental": "Net rental income after expenses. Ordinary income.",
+      "interest": "Taxable interest from bonds, CDs, savings. Ordinary income.",
+      "ordinary_other": "Any other ordinary income not in another category (annuities, pension, etc.).",
+      "qualified_div": "Qualified dividends. Taxed at LTCG rates (0/15/20%). Must meet holding period requirements.",
+      "cap_gains": "External realized capital gains not from portfolio rebalancing. Taxed at LTCG rates. Portfolio rebalancing gains are computed separately."
+    }
+  }
 }

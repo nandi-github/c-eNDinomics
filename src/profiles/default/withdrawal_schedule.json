@@ -1,10 +1,39 @@
 {
   "floor_k": 100,
   "schedule": [
-    { "years": "1-2",   "amount_k": 150, "base_k": 100 },
-    { "years": "3-5",   "amount_k": 150, "base_k": 100 },
-    { "years": "6-10",  "amount_k": 200, "base_k": 120 },
-    { "years": "11-20", "amount_k": 200, "base_k": 120 },
-    { "years": "21-30", "amount_k": 200, "base_k": 120 }
-  ]
+    {
+      "years": "1-2",
+      "amount_k": 150,
+      "base_k": 100
+    },
+    {
+      "years": "3-5",
+      "amount_k": 150,
+      "base_k": 100
+    },
+    {
+      "years": "6-10",
+      "amount_k": 200,
+      "base_k": 120
+    },
+    {
+      "years": "11-20",
+      "amount_k": 200,
+      "base_k": 120
+    },
+    {
+      "years": "21-30",
+      "amount_k": 200,
+      "base_k": 120
+    }
+  ],
+  "readme": {
+    "purpose": "Annual withdrawal targets from portfolio. Actual withdrawals may be scaled down in bad markets per economicglobal.json withdrawal shock settings.",
+    "floor_k": "Minimum withdrawal in $k regardless of market conditions. Simulator will not scale below this even in severe downturns.",
+    "schedule": {
+      "years": "Year range e.g. '1-5'. Simulation year 1 = current_age + 1.",
+      "amount_k": "Target withdrawal in $k for this period (nominal). This is the ask; market scaling may reduce it.",
+      "base_k": "Inflation base in $k. Each year the floor and target grow from this base by the inflation rate. Set equal to floor_k if you want floor to inflate with target."
+    }
+  }
 }

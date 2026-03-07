@@ -151,8 +151,38 @@ const CONFIG_FILES = [
   "shocks_yearly.json",
   "person.json",
   "income.json",
+  "rmd.json",
   "economic.json",
 ];
+
+// ── Readme renderer ──────────────────────────────────────────────────────────
+// Recursively renders a readme object as a readable field-reference panel.
+// Strings → plain prose rows. Nested objects → indented sub-sections.
+const ReadmePanel: React.FC<{ data: any; depth: number }> = ({ data, depth }) => {
+  if (typeof data === "string") {
+    return <span className="readme-value">{data}</span>;
+  }
+  if (typeof data !== "object" || data === null) {
+    return <span className="readme-value">{String(data)}</span>;
+  }
+  return (
+    <dl className={`readme-dl depth-${depth}`}>
+      {Object.entries(data).map(([key, val]) => (
+        <div className="readme-row" key={key}>
+          <dt className="readme-key">{key.replace(/_/g, " ")}</dt>
+          <dd className="readme-val">
+            {typeof val === "string" || typeof val === "number" || typeof val === "boolean" ? (
+              <span className="readme-value">{String(val)}</span>
+            ) : (
+              <ReadmePanel data={val} depth={depth + 1} />
+            )}
+          </dd>
+        </div>
+      ))}
+    </dl>
+  );
+};
+// ─────────────────────────────────────────────────────────────────────────────
 
 const App: React.FC = () => {
   const [tab, setTab] = useState<TabKey>("configure");
@@ -163,6 +193,7 @@ const App: React.FC = () => {
   const [configFile, setConfigFile] = useState<string>("allocation_yearly.json");
   const [configContent, setConfigContent] = useState<string>("");
   const [configMode, setConfigMode] = useState<"view" | "edit">("view");
+  const [configReadme, setConfigReadme] = useState<any>(null);
   const [editorDirty, setEditorDirty] = useState(false);
 
   const [runStatus, setRunStatus] = useState<"idle" | "running" | "error">(
@@ -260,6 +291,7 @@ const App: React.FC = () => {
     setEditorDirty(false);
     setConfigFile(name);
     setConfigContent("");
+    setConfigReadme(null);
 
     apiGet<any>(
       `/profile-config/${encodeURIComponent(profile)}/${encodeURIComponent(
@@ -267,12 +299,8 @@ const App: React.FC = () => {
       )}`,
     )
       .then((data) => {
-        if (
-          data &&
-          typeof data === "object" &&
-          "content" in data &&
-          typeof (data as any).content === "string"
-        ) {
+        // API now returns { content: string, readme: object|null }
+        if (data && typeof data === "object" && "content" in data) {
           const raw = (data as any).content as string;
           try {
             const parsed = JSON.parse(raw);
@@ -280,8 +308,12 @@ const App: React.FC = () => {
           } catch {
             setConfigContent(raw);
           }
+          setConfigReadme((data as any).readme ?? null);
         } else {
-          setConfigContent(JSON.stringify(data, null, 2));
+          // Fallback: old format — full object, strip readme client-side
+          const { readme, ...rest } = data as any;
+          setConfigContent(JSON.stringify(rest, null, 2));
+          setConfigReadme(readme ?? null);
         }
       })
       .catch((err) => {
@@ -685,6 +717,14 @@ const App: React.FC = () => {
                     Clear Cache (Profile Editor)
                   </button>
                 </div>
+                {configReadme && (
+                  <div className="config-readme">
+                    <div className="config-readme-title">📖 Field Reference — {configFile}</div>
+                    <div className="config-readme-scroll">
+                      <ReadmePanel data={configReadme} depth={0} />
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           )}

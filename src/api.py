@@ -42,18 +42,16 @@ from reporting import report_and_plot_accounts, compute_account_ending_balances
 APP_ROOT = os.path.abspath(os.path.dirname(__file__))
 UI_DIST = os.path.join(APP_ROOT, "ui", "dist")
 ASSETS_DIR = os.path.join(UI_DIST, "assets")
-CONFIG_ROOT = os.path.join(APP_ROOT, "config")   # global JSON — never per-profile
-
-COMMON_ASSETS_JSON     = os.path.join(CONFIG_ROOT, "assets.json")
-ECONOMIC_GLOBAL_PATH   = os.path.join(CONFIG_ROOT, "economicglobal.json")
-TAX_GLOBAL_PATH        = os.path.join(CONFIG_ROOT, "taxes_states_mfj_single.json")
-BENCHMARKS_GLOBAL_PATH = os.path.join(CONFIG_ROOT, "benchmarks.json")
-SYSTEM_SHOCKS_PATH     = os.path.join(CONFIG_ROOT, "system_shocks.json")
-RMD_TABLE_PATH         = os.path.join(CONFIG_ROOT, "rmd.json")
+COMMON_ASSETS_JSON = os.path.join(APP_ROOT, "assets.json")
 
 PROFILES_ROOT = os.path.join(APP_ROOT, "profiles")
 DEFAULT_PROFILE = "default"
 
+# Files that live at APP_ROOT, not per-profile
+ECONOMIC_GLOBAL_PATH = os.path.join(APP_ROOT, "economicglobal.json")
+TAX_GLOBAL_PATH      = os.path.join(APP_ROOT, "taxes_states_mfj_single.json")
+BENCHMARKS_GLOBAL_PATH = os.path.join(APP_ROOT, "benchmarks.json")
+SYSTEM_SHOCKS_PATH   = os.path.join(APP_ROOT, "system_shocks.json")
 SYSTEM_SHOCK_PRESETS = {"average", "below_average", "bad", "worst"}
 
 # Names that must NOT appear in the Configure tab (global/hidden files)
@@ -136,7 +134,7 @@ def _write_run_meta(run_dir: str, profile: str, run_id: str, run_info: Dict[str,
 
 
 def _default_json_names() -> List[str]:
-    # Only per-profile files; global files live in src/config/
+    # Only per-profile files; global files (taxes, benchmarks, economicglobal) live at APP_ROOT
     return [
         "allocation_yearly.json",
         "withdrawal_schedule.json",
@@ -296,17 +294,14 @@ def delete_profile(payload: Dict[str, Any] = Body(...)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/profile-config/{profile}/{name}")
-def load_profile_json_legacy(profile: str, name: str):
-    path = _profile_json_path(profile, name)
-    if not os.path.isfile(path):
-        raise HTTPException(status_code=404, detail=f"{name} not found in profile '{profile}'.")
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            content = f.read()
-        return {"profile": profile, "name": name, "content": content}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+def _strip_meta_keys(d: dict) -> dict:
+    """Return a copy of d with 'readme' and '_comment*' keys removed."""
+    return {k: v for k, v in d.items() if k != "readme" and not k.startswith("_comment")}
+
+
+def _extract_meta_keys(d: dict) -> dict:
+    """Return only 'readme' and '_comment*' keys from d."""
+    return {k: v for k, v in d.items() if k == "readme" or k.startswith("_comment")}
 
 
 @app.get("/profile-config/{profile}/{name}")
@@ -314,12 +309,22 @@ def get_profile_config(
     profile: str = Path(..., description="Profile name"),
     name: str = Path(..., description="Config file name, e.g. allocation_yearly.json"),
 ):
-    profile_dir = os.path.join(PROFILES_ROOT, profile)
-    path = os.path.join(profile_dir, name)
+    path = _profile_json_path(profile, name)
     if not os.path.isfile(path):
-        raise HTTPException(status_code=404, detail=f"{name} not found for profile {profile}")
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
+        raise HTTPException(status_code=404, detail=f"{name} not found in profile '{profile}'.")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        readme = data.get("readme")
+        editable = _strip_meta_keys(data)
+        return {
+            "profile": profile,
+            "name": name,
+            "content": json.dumps(editable, indent=2),
+            "readme": readme,  # None if not present
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/profile-config")
@@ -333,16 +338,34 @@ def save_profile_json(payload: Dict[str, Any] = Body(...)):
     if profile == DEFAULT_PROFILE:
         raise HTTPException(status_code=403, detail="Default profile is non-editable.")
 
-    if name.lower().endswith(".json"):
-        try:
-            json.loads(content)
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
+    if not name.lower().endswith(".json"):
+        raise HTTPException(status_code=400, detail="Only .json files are supported.")
+
+    try:
+        incoming = json.loads(content)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid JSON: {e}")
 
     path = _profile_json_path(profile, name)
+
+    # Re-merge readme and _comment keys from the file on disk — never lose them on save
+    if os.path.isfile(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                existing = json.load(f)
+            meta = _extract_meta_keys(existing)
+        except Exception:
+            meta = {}
+    else:
+        meta = {}
+
+    # Strip any meta keys the editor may have accidentally included, then re-apply from disk
+    merged = _strip_meta_keys(incoming)
+    merged.update(meta)
+
     try:
         with open(path, "w", encoding="utf-8") as f:
-            f.write(content)
+            json.dump(merged, f, indent=2)
         return {"ok": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -452,10 +475,10 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
     alloc_path = payload.get("alloc_yearly") or P("allocation_yearly.json")
     person_path = payload.get("person") or P("person.json")
     income_path = payload.get("income") or P("income.json")
-    rmd_path = RMD_TABLE_PATH  # system-level IRS table, lives in config/
+    rmd_path = payload.get("rmd") or P("rmd.json")
     economic_path        = payload.get("economic") or P("economic.json")
     economic_global_path = ECONOMIC_GLOBAL_PATH if os.path.isfile(ECONOMIC_GLOBAL_PATH) else None
-    # Always resolve assets.json from config/ (global file, never per-profile)
+    # Always resolve assets.json from APP_ROOT (global file, never per-profile)
     assets_path = payload.get("assets") or COMMON_ASSETS_JSON
 
     paths = int(payload.get("paths", 500))
