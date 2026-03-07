@@ -1,5 +1,9 @@
 # filename: engines.py
 
+
+import logging
+
+logger = logging.getLogger(__name__)
 """
 Engines and helpers for the simulator:
 - Per-path shock matrices (dispersion across paths)

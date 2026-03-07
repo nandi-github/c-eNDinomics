@@ -11,7 +11,7 @@ when the file is missing or stale (older than STALE_DAYS).
 - Called at server startup from api.py via refresh_assets_if_stale().
 
 Usage (standalone):
-    python refresh_assets.py --out src/assets.json --years 20 --days 30
+    python refresh_assets.py --out src/config/assets.json --years 20 --days 30
 """
 
 import argparse
@@ -326,7 +326,7 @@ def refresh_assets_if_stale(
 def main():
     p = argparse.ArgumentParser(description="Regenerate assets.json from live market data")
     p.add_argument("--profiles", default="profiles", help="Path to profiles root directory")
-    p.add_argument("--out", default="assets.json", help="Output assets.json path")
+    p.add_argument("--out", default="config/assets.json", help="Output assets.json path")
     p.add_argument("--years", type=int, default=LOOKBACK_YEARS, help="Lookback years")
     p.add_argument("--days", type=int, default=0,
                    help="Stale threshold in days (0 = force regenerate)")

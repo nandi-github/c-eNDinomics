@@ -1,9 +1,12 @@
 # filename: rmd_core.py
 
+import logging
 from typing import Dict, Optional, Tuple
 import numpy as np
 
 from rmd import load_rmd_table, uniform_factor
+
+logger = logging.getLogger(__name__)
 
 YEARS = 30
 
@@ -64,13 +67,13 @@ def build_rmd_factors(
             f = 0.0
         factors[y] = f if np.isfinite(f) and f > 0.0 else 0.0
 
-    print(
-        f"[RMD] current_age={owner_current_age}  birth_year={owner_birth_year}"
-        f"  -> start_age={start_age}"
+    logger.debug(
+        "[RMD] current_age=%s  birth_year=%s  -> start_age=%s",
+        owner_current_age, owner_birth_year, start_age,
     )
-    print(
-        "[RMD] first 10 (sim_year, age, factor):",
-        [(y + 1, int(owner_current_age + y), factors[y]) for y in range(min(10, years))]
+    logger.debug(
+        "[RMD] first 10 (sim_year, age, factor): %s",
+        [(y + 1, int(owner_current_age + y), factors[y]) for y in range(min(10, years))],
     )
 
     return factors

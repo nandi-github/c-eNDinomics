@@ -1,5 +1,9 @@
 # filename: taxes_core.py
 
+
+import logging
+
+logger = logging.getLogger(__name__)
 from typing import Dict, Tuple
 import numpy as np
 

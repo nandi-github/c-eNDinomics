@@ -1,8 +1,11 @@
 # filename: loaders.py
 
 import json
+import logging
 import os
 from typing import Any, Dict, List, Tuple, Optional
+
+logger = logging.getLogger(__name__)
 import numpy as np
 
 # Global defaults
@@ -414,8 +417,8 @@ def load_allocation_yearly_accounts(path: str) -> Dict[str, Any]:
         "per_year_portfolios": per_year_portfolios,
         "warnings": warnings,
     }
-    print("[DEBUG loaders] alloc_accounts keys:", list(result.keys()))
-    print("[DEBUG loaders] per_year_portfolios accounts:", list(per_year_portfolios.keys()))
+    logger.debug("[DEBUG loaders] alloc_accounts keys: %s", list(result.keys()))
+    logger.debug("[DEBUG loaders] per_year_portfolios accounts: %s", list(per_year_portfolios.keys()))
     return result
 
 
@@ -558,10 +561,10 @@ def load_economic_policy(path: str, global_path: Optional[str] = None) -> Dict[s
     order_bad_conversion  = ws.get("order_bad_market_with_conversion", []) or order_bad
     tira_age_gate         = float(ws.get("tira_age_gate",    59.5))
     roth_last_resort      = bool(ws.get("roth_last_resort",  True))
-    print("[DEBUG loaders] order_good_market:", order_good)
-    print("[DEBUG loaders] order_bad_market:", order_bad)
-    print("[DEBUG loaders] order_bad_market_with_conversion:", order_bad_conversion)
-    print("[DEBUG loaders] tira_age_gate:", tira_age_gate)
+    logger.debug("[DEBUG loaders] order_good_market: %s", order_good)
+    logger.debug("[DEBUG loaders] order_bad_market: %s", order_bad)
+    logger.debug("[DEBUG loaders] order_bad_market_with_conversion: %s", order_bad_conversion)
+    logger.debug("[DEBUG loaders] tira_age_gate: %s", tira_age_gate)
     return {
         "defaults":                       defaults,
         "overrides":                      merged_overrides,

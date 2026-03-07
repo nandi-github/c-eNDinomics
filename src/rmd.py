@@ -1,5 +1,9 @@
 # filename: rmd.py
 
+
+import logging
+
+logger = logging.getLogger(__name__)
 """
 RMD utilities:
 - Load IRS Uniform Lifetime Table (or other tables) from JSON.

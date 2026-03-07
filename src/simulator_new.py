@@ -1,5 +1,6 @@
 # filename: simulator_new.py
 
+import logging
 from typing import Dict, Any, Optional
 import numpy as np
 
@@ -9,6 +10,8 @@ from taxes_core import compute_annual_taxes_paths
 
 from rmd_core import build_rmd_factors, compute_rmd_schedule_nominal
 from roth_conversion_core import apply_simple_conversions
+
+logger = logging.getLogger(__name__)
 
 
 YEARS = 30
@@ -458,11 +461,13 @@ def run_accounts_new(
             seq = _seq_per_year[y] if y < len(_seq_per_year) else _fallback_seq
 
             if y == 0:
-                print(f"[WDEBUG y=0] extra_cur[0]={extra_cur[0]:.2f} deflator[0]={deflator[0]:.4f} extra_nom={extra_nom:.2f}")
-                print(f"[WDEBUG y=0] seq[:3]={seq[:3]}")
+                logger.debug("[WDEBUG y=0] extra_cur[0]=%.2f deflator[0]=%.4f extra_nom=%.2f",
+                             extra_cur[0], deflator[0], extra_nom)
+                logger.debug("[WDEBUG y=0] seq[:3]=%s", seq[:3])
                 for _a in list(acct_eoy_nom.keys())[:3]:
                     _arr = acct_eoy_nom[_a]
-                    print(f"[WDEBUG y=0] acct={_a} flags={_arr.flags['WRITEABLE']} mean_y0={_arr[:, 0].mean():.2f}")
+                    logger.debug("[WDEBUG y=0] acct=%s flags=%s mean_y0=%.2f",
+                                 _a, _arr.flags['WRITEABLE'], _arr[:, 0].mean())
 
             (
                 realized_total_nom,
@@ -476,7 +481,8 @@ def run_accounts_new(
 
             if y == 0:
                 for _a in list(sold_per_acct_nom.keys())[:4]:
-                    print(f"[WDEBUG y=0] sold_per_acct[{_a}] sum={sold_per_acct_nom[_a].sum():.2f}")
+                    logger.debug("[WDEBUG y=0] sold_per_acct[%s] sum=%.2f",
+                                 _a, sold_per_acct_nom[_a].sum())
 
             # Explicitly deduct sold amounts from each account's balance for year y.
             # withdrawals_core no longer mutates the arrays itself; we own that here
@@ -492,7 +498,8 @@ def run_accounts_new(
 
             if y == 0:
                 for _a in list(acct_eoy_nom.keys())[:3]:
-                    print(f"[WDEBUG post-deduct y=0] acct={_a} mean_y0={acct_eoy_nom[_a][:, 0].mean():.2f}")
+                    logger.debug("[WDEBUG post-deduct y=0] acct=%s mean_y0=%.2f",
+                                 _a, acct_eoy_nom[_a][:, 0].mean())
 
             scale = max(deflator[y], 1e-12)
             realized_cur[y]  = (realized_total_nom / scale).mean()
@@ -610,7 +617,8 @@ def run_accounts_new(
     # 'starting' needed here for per-account year-1 YoY prior_col    # =========================================================================
     if apply_withdrawals and sched is not None:
         for _a in list(acct_eoy_nom.keys())[:3]:
-            print(f"[WDEBUG STEP6] acct={_a} mean_y0={acct_eoy_nom[_a][:, 0].mean():.2f}")
+            logger.debug("[WDEBUG STEP6] acct=%s mean_y0=%.2f",
+                         _a, acct_eoy_nom[_a][:, 0].mean())
     inv_nom_yoy_mean_pct_acct:   Dict[str, Any] = {}
     inv_real_yoy_mean_pct_acct:  Dict[str, Any] = {}
     inv_nom_levels_mean_acct:    Dict[str, Any] = {}
@@ -922,19 +930,18 @@ def run_accounts_new(
     res["starting"] = starting
     res["accounts"] = accounts
 
-    # DEBUG: inspect modular res for Test profile
-    print("[DEBUG new-sim] summary keys:", list(res.get("summary", {}).keys()))
-    print("[DEBUG new-sim] summary YoY scalars:",
-          res["summary"].get("nominal_yoy_withdrawals_pct"),
-          res["summary"].get("real_yoy_withdrawals_pct"),
-          res["summary"].get("nominal_yoy_investment_pct"),
-          res["summary"].get("real_yoy_investment_pct"))
+    logger.debug("[DEBUG new-sim] summary keys: %s", list(res.get("summary", {}).keys()))
+    logger.debug("[DEBUG new-sim] summary YoY scalars: %s %s %s %s",
+                 res["summary"].get("nominal_yoy_withdrawals_pct"),
+                 res["summary"].get("real_yoy_withdrawals_pct"),
+                 res["summary"].get("nominal_yoy_investment_pct"),
+                 res["summary"].get("real_yoy_investment_pct"))
 
     w = res.get("withdrawals", {})
-    print("[DEBUG new-sim] withdrawals keys:", list(w.keys()))
-    print("[DEBUG new-sim] withdrawals planned_current sample:",
-          w.get("planned_current", [])[:5])
-    print("[DEBUG new-sim] withdrawals realized_current_mean sample:",
-          w.get("realized_current_mean", [])[:5])
+    logger.debug("[DEBUG new-sim] withdrawals keys: %s", list(w.keys()))
+    logger.debug("[DEBUG new-sim] withdrawals planned_current sample: %s",
+                 w.get("planned_current", [])[:5])
+    logger.debug("[DEBUG new-sim] withdrawals realized_current_mean sample: %s",
+                 w.get("realized_current_mean", [])[:5])
 
     return res

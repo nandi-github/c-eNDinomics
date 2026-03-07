@@ -151,7 +151,6 @@ const CONFIG_FILES = [
   "shocks_yearly.json",
   "person.json",
   "income.json",
-  "rmd.json",
   "economic.json",
 ];
 

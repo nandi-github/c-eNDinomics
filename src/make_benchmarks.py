@@ -40,7 +40,7 @@ benchmarks = {
         "Length must match simulation years; here we used the most recent 30 years."
     ]
 }
-with open("benchmarks.json", "w", encoding="utf-8") as f:
+with open("config/benchmarks.json", "w", encoding="utf-8") as f:
     json.dump(benchmarks, f, indent=2)
 print("Wrote benchmarks.json with S&P 500 series.")
 

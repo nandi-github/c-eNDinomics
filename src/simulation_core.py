@@ -1,11 +1,14 @@
 # filename: simulation_core.py
 
+import logging
 from typing import Dict, Any, List, Optional, Tuple
 import numpy as np
 
 from assets_loader import load_assets_model
 from engines_assets import draw_asset_log_returns, shock_yearly_log_adjustments
 from engines import build_shock_matrix_from_json
+
+logger = logging.getLogger(__name__)
 
 YEARS = 30
 
@@ -157,7 +160,7 @@ def simulate_balances(
 
             # Debug once for BROKERAGE-1 at y=0
             if not debug_class_w_printed and y == 0 and acct.upper().startswith("BROKERAGE-1"):
-                print("DEBUG core class_w", acct + ":", class_w)
+                logger.debug("core class_w %s: %s", acct, class_w)
                 debug_class_w_printed = True
 
             # Compute per-year multiplier paths (legacy logic)
