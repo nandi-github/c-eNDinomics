@@ -7,3 +7,4 @@ src/ui/dist/
 src/reports/
 *.backup
 src/profiles/*/reports/
+src/profiles/*/rmd.json
