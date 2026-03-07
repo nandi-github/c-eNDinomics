@@ -1,4 +1,35 @@
 {
+  "model_version": "1.0.0",
+  "schema_version": "2.0",
+  "released_at": "2026-03-07",
+  "valid_from": "2026-03-07",
+  "valid_until": null,
+  "training": {
+    "method": "hand_calibrated_v1",
+    "data_through": "2026-03-07",
+    "sources": [
+      "Vanguard 10-year capital market assumptions 2025",
+      "BlackRock Investment Institute 2025 long-term estimates",
+      "CRSP 1926-2024 long-run equity returns",
+      "Federal Reserve 2% long-run inflation target"
+    ],
+    "windows_used": null,
+    "event_signals_included": false,
+    "auto_refresh_enabled": false,
+    "notes": "v1.0 hand-calibrated baseline. Replace with asset_calibration.py output when asset-model pipeline is ready."
+  },
+  "readme": {
+    "purpose": "Asset model artifact \u2014 mu, sigma, correlation, and distribution parameters for Monte Carlo simulation. This is v1.0 hand-calibrated baseline. Will be superseded by asset_calibration.py pipeline output.",
+    "mu_annual": "Conservative long-run planning estimate. NOT raw historical return. Sources: Vanguard/BlackRock 10yr CMAs, CRSP long-run data.",
+    "sigma_annual": "Annualized return volatility. Long-run estimate, not recent-window.",
+    "expense_ratio": "Annual fund fee subtracted from returns.",
+    "tracking_error": "Additional annual noise above class model. 0.0 for pure index, 0.03-0.04 for single stocks.",
+    "dist.yield_annual": "Annual distribution yield. Drives taxable income in brokerage accounts.",
+    "dist.qualified_ratio": "Fraction of distributions taxed at LTCG rates. 0.0 for Treasury interest.",
+    "_provenance": "Audit trail per ticker \u2014 basis for parameter choices. Ignored by simulator.",
+    "auto_refresh_enabled": "false \u2014 asset model is now managed manually or by asset_calibration.py pipeline. Do not run refresh_assets.py against this file.",
+    "correlations": "Class-level empirical long-run correlation matrix. Conservative (less than peak crisis correlations)."
+  },
   "assets": {
     "SPY": {
       "class": "US_STOCKS",
@@ -9,6 +40,9 @@
       "dist": {
         "yield_annual": 0.018,
         "qualified_ratio": 0.9
+      },
+      "_provenance": {
+        "basis": "broad US market long-run; 6.5% real+inflation consistent with CRSP 1926-2024 ~10% minus ~3.5% inflation premium for planning"
       }
     },
     "VTI": {
@@ -20,6 +54,9 @@
       "dist": {
         "yield_annual": 0.017,
         "qualified_ratio": 0.9
+      },
+      "_provenance": {
+        "basis": "same as SPY; total market, slightly lower ER"
       }
     },
     "QQQ": {
@@ -31,6 +68,9 @@
       "dist": {
         "yield_annual": 0.009,
         "qualified_ratio": 0.9
+      },
+      "_provenance": {
+        "basis": "Nasdaq-100 tech tilt; +1% mu vs broad market, +3% sigma for concentration risk"
       }
     },
     "VUG": {
@@ -42,6 +82,9 @@
       "dist": {
         "yield_annual": 0.01,
         "qualified_ratio": 0.9
+      },
+      "_provenance": {
+        "basis": "US growth; between broad market and QQQ"
       }
     },
     "VTV": {
@@ -53,6 +96,9 @@
       "dist": {
         "yield_annual": 0.023,
         "qualified_ratio": 0.9
+      },
+      "_provenance": {
+        "basis": "US value; slightly lower mu than growth, higher yield"
       }
     },
     "XLK": {
@@ -64,6 +110,9 @@
       "dist": {
         "yield_annual": 0.008,
         "qualified_ratio": 0.9
+      },
+      "_provenance": {
+        "basis": "tech sector; similar to QQQ"
       }
     },
     "XLF": {
@@ -75,6 +124,9 @@
       "dist": {
         "yield_annual": 0.025,
         "qualified_ratio": 0.9
+      },
+      "_provenance": {
+        "basis": "financials sector; cyclical, higher sigma"
       }
     },
     "XLE": {
@@ -86,6 +138,9 @@
       "dist": {
         "yield_annual": 0.035,
         "qualified_ratio": 0.7
+      },
+      "_provenance": {
+        "basis": "energy sector; commodity-linked, lower qualified ratio (MLPs)"
       }
     },
     "AAPL": {
@@ -97,6 +152,9 @@
       "dist": {
         "yield_annual": 0.006,
         "qualified_ratio": 0.9
+      },
+      "_provenance": {
+        "basis": "single stock; higher idiosyncratic risk (tracking_error reflects stock-specific vol above class)"
       }
     },
     "MSFT": {
@@ -108,6 +166,9 @@
       "dist": {
         "yield_annual": 0.009,
         "qualified_ratio": 0.9
+      },
+      "_provenance": {
+        "basis": "single stock; large cap quality, slightly lower sigma than AAPL"
       }
     },
     "AMZN": {
@@ -119,6 +180,9 @@
       "dist": {
         "yield_annual": 0.0,
         "qualified_ratio": 0.0
+      },
+      "_provenance": {
+        "basis": "single stock; no dividend, higher growth/risk"
       }
     },
     "NVDA": {
@@ -130,6 +194,9 @@
       "dist": {
         "yield_annual": 0.002,
         "qualified_ratio": 0.9
+      },
+      "_provenance": {
+        "basis": "single stock; AI/semiconductor cycle exposure; highest sigma in class"
       }
     },
     "VXUS": {
@@ -141,28 +208,37 @@
       "dist": {
         "yield_annual": 0.025,
         "qualified_ratio": 0.8
+      },
+      "_provenance": {
+        "basis": "total intl; lower mu reflects valuation/FX/political risk discount vs US"
       }
     },
     "EFA": {
       "class": "INTL_STOCKS",
       "mu_annual": 0.053,
       "sigma_annual": 0.17,
-      "expense_ratio": 0.0003,
+      "expense_ratio": 0.0032,
       "tracking_error": 0.01,
       "dist": {
         "yield_annual": 0.026,
         "qualified_ratio": 0.8
+      },
+      "_provenance": {
+        "basis": "developed markets ex-US; slightly lower mu than VXUS (ex-EM)"
       }
     },
     "EEM": {
       "class": "INTL_STOCKS",
       "mu_annual": 0.06,
       "sigma_annual": 0.24,
-      "expense_ratio": 0.0065,
+      "expense_ratio": 0.0068,
       "tracking_error": 0.02,
       "dist": {
         "yield_annual": 0.022,
-        "qualified_ratio": 0.7
+        "qualified_ratio": 0.75
+      },
+      "_provenance": {
+        "basis": "emerging markets; higher growth potential but higher sigma and political risk"
       }
     },
     "TLT": {
@@ -174,6 +250,9 @@
       "dist": {
         "yield_annual": 0.03,
         "qualified_ratio": 0.0
+      },
+      "_provenance": {
+        "basis": "20yr Treasury; mu reflects current yield minus duration risk premium; interest income, not qualified dividends"
       }
     },
     "IEF": {
@@ -185,6 +264,9 @@
       "dist": {
         "yield_annual": 0.028,
         "qualified_ratio": 0.0
+      },
+      "_provenance": {
+        "basis": "7-10yr Treasury; lower duration = lower sigma vs TLT"
       }
     },
     "BND": {
@@ -196,17 +278,23 @@
       "dist": {
         "yield_annual": 0.028,
         "qualified_ratio": 0.0
+      },
+      "_provenance": {
+        "basis": "total bond market; investment grade blend, lowest sigma in class"
       }
     },
     "LQD": {
       "class": "INT_TREAS",
       "mu_annual": 0.022,
       "sigma_annual": 0.1,
-      "expense_ratio": 0.0009,
-      "tracking_error": 0.015,
+      "expense_ratio": 0.0014,
+      "tracking_error": 0.01,
       "dist": {
         "yield_annual": 0.032,
         "qualified_ratio": 0.0
+      },
+      "_provenance": {
+        "basis": "investment grade corporate; +20bp spread over Treasuries, slightly higher sigma"
       }
     },
     "TIP": {
@@ -218,35 +306,80 @@
       "dist": {
         "yield_annual": 0.024,
         "qualified_ratio": 0.0
+      },
+      "_provenance": {
+        "basis": "TIPS; real yield + inflation adjustment; low sigma, inflation hedge"
+      }
+    },
+    "SCHP": {
+      "class": "TIPS",
+      "mu_annual": 0.018,
+      "sigma_annual": 0.06,
+      "expense_ratio": 0.0003,
+      "tracking_error": 0.0,
+      "dist": {
+        "yield_annual": 0.023,
+        "qualified_ratio": 0.0
+      },
+      "_provenance": {
+        "basis": "Schwab TIPS ETF; near-identical to TIP, slightly lower ER"
       }
     },
     "GLD": {
       "class": "GOLD",
       "mu_annual": 0.03,
       "sigma_annual": 0.15,
-      "expense_ratio": 0.0004,
-      "tracking_error": 0.01
+      "expense_ratio": 0.004,
+      "tracking_error": 0.01,
+      "dist": {
+        "yield_annual": 0.0,
+        "qualified_ratio": 0.0
+      },
+      "_provenance": {
+        "basis": "gold bullion; long-run real return ~0-1%; ~3% nominal with inflation; portfolio hedge, no income"
+      }
     },
     "IAU": {
       "class": "GOLD",
       "mu_annual": 0.03,
       "sigma_annual": 0.15,
-      "expense_ratio": 0.00025,
-      "tracking_error": 0.01
+      "expense_ratio": 0.0025,
+      "tracking_error": 0.01,
+      "dist": {
+        "yield_annual": 0.0,
+        "qualified_ratio": 0.0
+      },
+      "_provenance": {
+        "basis": "same as GLD, lower ER"
+      }
     },
     "DBC": {
       "class": "COMMOD",
       "mu_annual": 0.028,
       "sigma_annual": 0.2,
-      "expense_ratio": 0.0009,
-      "tracking_error": 0.02
+      "expense_ratio": 0.0085,
+      "tracking_error": 0.02,
+      "dist": {
+        "yield_annual": 0.0,
+        "qualified_ratio": 0.0
+      },
+      "_provenance": {
+        "basis": "broad commodities basket; inflation hedge, high vol, no income; roll yield drag included in mu"
+      }
     },
     "PDBC": {
       "class": "COMMOD",
       "mu_annual": 0.028,
       "sigma_annual": 0.19,
-      "expense_ratio": 0.0009,
-      "tracking_error": 0.02
+      "expense_ratio": 0.0059,
+      "tracking_error": 0.02,
+      "dist": {
+        "yield_annual": 0.0,
+        "qualified_ratio": 0.0
+      },
+      "_provenance": {
+        "basis": "optimized roll commodities; similar to DBC, lower ER, slightly lower sigma from roll optimization"
+      }
     }
   },
   "correlations": {
@@ -274,48 +407,687 @@
       "GLD",
       "IAU",
       "DBC",
-      "PDBC"
-    ]
+      "PDBC",
+      "SCHP"
+    ],
+    "matrix": [
+      [
+        1.0,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.82,
+        0.82,
+        0.82,
+        -0.2,
+        -0.1,
+        -0.1,
+        -0.1,
+        -0.05,
+        0.02,
+        0.02,
+        0.25,
+        0.25,
+        -0.05
+      ],
+      [
+        0.95,
+        1.0,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.82,
+        0.82,
+        0.82,
+        -0.2,
+        -0.1,
+        -0.1,
+        -0.1,
+        -0.05,
+        0.02,
+        0.02,
+        0.25,
+        0.25,
+        -0.05
+      ],
+      [
+        0.95,
+        0.95,
+        1.0,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.82,
+        0.82,
+        0.82,
+        -0.2,
+        -0.1,
+        -0.1,
+        -0.1,
+        -0.05,
+        0.02,
+        0.02,
+        0.25,
+        0.25,
+        -0.05
+      ],
+      [
+        0.95,
+        0.95,
+        0.95,
+        1.0,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.82,
+        0.82,
+        0.82,
+        -0.2,
+        -0.1,
+        -0.1,
+        -0.1,
+        -0.05,
+        0.02,
+        0.02,
+        0.25,
+        0.25,
+        -0.05
+      ],
+      [
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        1.0,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.82,
+        0.82,
+        0.82,
+        -0.2,
+        -0.1,
+        -0.1,
+        -0.1,
+        -0.05,
+        0.02,
+        0.02,
+        0.25,
+        0.25,
+        -0.05
+      ],
+      [
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        1.0,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.82,
+        0.82,
+        0.82,
+        -0.2,
+        -0.1,
+        -0.1,
+        -0.1,
+        -0.05,
+        0.02,
+        0.02,
+        0.25,
+        0.25,
+        -0.05
+      ],
+      [
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        1.0,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.82,
+        0.82,
+        0.82,
+        -0.2,
+        -0.1,
+        -0.1,
+        -0.1,
+        -0.05,
+        0.02,
+        0.02,
+        0.25,
+        0.25,
+        -0.05
+      ],
+      [
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        1.0,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.82,
+        0.82,
+        0.82,
+        -0.2,
+        -0.1,
+        -0.1,
+        -0.1,
+        -0.05,
+        0.02,
+        0.02,
+        0.25,
+        0.25,
+        -0.05
+      ],
+      [
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        1.0,
+        0.95,
+        0.95,
+        0.95,
+        0.82,
+        0.82,
+        0.82,
+        -0.2,
+        -0.1,
+        -0.1,
+        -0.1,
+        -0.05,
+        0.02,
+        0.02,
+        0.25,
+        0.25,
+        -0.05
+      ],
+      [
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        1.0,
+        0.95,
+        0.95,
+        0.82,
+        0.82,
+        0.82,
+        -0.2,
+        -0.1,
+        -0.1,
+        -0.1,
+        -0.05,
+        0.02,
+        0.02,
+        0.25,
+        0.25,
+        -0.05
+      ],
+      [
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        1.0,
+        0.95,
+        0.82,
+        0.82,
+        0.82,
+        -0.2,
+        -0.1,
+        -0.1,
+        -0.1,
+        -0.05,
+        0.02,
+        0.02,
+        0.25,
+        0.25,
+        -0.05
+      ],
+      [
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        0.95,
+        1.0,
+        0.82,
+        0.82,
+        0.82,
+        -0.2,
+        -0.1,
+        -0.1,
+        -0.1,
+        -0.05,
+        0.02,
+        0.02,
+        0.25,
+        0.25,
+        -0.05
+      ],
+      [
+        0.82,
+        0.82,
+        0.82,
+        0.82,
+        0.82,
+        0.82,
+        0.82,
+        0.82,
+        0.82,
+        0.82,
+        0.82,
+        0.82,
+        1.0,
+        0.92,
+        0.92,
+        -0.15,
+        -0.08,
+        -0.08,
+        -0.08,
+        -0.03,
+        0.05,
+        0.05,
+        0.3,
+        0.3,
+        -0.03
+      ],
+      [
+        0.82,
+        0.82,
+        0.82,
+        0.82,
+        0.82,
+        0.82,
+        0.82,
+        0.82,
+        0.82,
+        0.82,
+        0.82,
+        0.82,
+        0.92,
+        1.0,
+        0.92,
+        -0.15,
+        -0.08,
+        -0.08,
+        -0.08,
+        -0.03,
+        0.05,
+        0.05,
+        0.3,
+        0.3,
+        -0.03
+      ],
+      [
+        0.82,
+        0.82,
+        0.82,
+        0.82,
+        0.82,
+        0.82,
+        0.82,
+        0.82,
+        0.82,
+        0.82,
+        0.82,
+        0.82,
+        0.92,
+        0.92,
+        1.0,
+        -0.15,
+        -0.08,
+        -0.08,
+        -0.08,
+        -0.03,
+        0.05,
+        0.05,
+        0.3,
+        0.3,
+        -0.03
+      ],
+      [
+        -0.2,
+        -0.2,
+        -0.2,
+        -0.2,
+        -0.2,
+        -0.2,
+        -0.2,
+        -0.2,
+        -0.2,
+        -0.2,
+        -0.2,
+        -0.2,
+        -0.15,
+        -0.15,
+        -0.15,
+        1.0,
+        0.88,
+        0.88,
+        0.88,
+        0.6,
+        0.15,
+        0.15,
+        -0.05,
+        -0.05,
+        0.6
+      ],
+      [
+        -0.1,
+        -0.1,
+        -0.1,
+        -0.1,
+        -0.1,
+        -0.1,
+        -0.1,
+        -0.1,
+        -0.1,
+        -0.1,
+        -0.1,
+        -0.1,
+        -0.08,
+        -0.08,
+        -0.08,
+        0.88,
+        1.0,
+        0.96,
+        0.96,
+        0.72,
+        0.1,
+        0.1,
+        -0.02,
+        -0.02,
+        0.72
+      ],
+      [
+        -0.1,
+        -0.1,
+        -0.1,
+        -0.1,
+        -0.1,
+        -0.1,
+        -0.1,
+        -0.1,
+        -0.1,
+        -0.1,
+        -0.1,
+        -0.1,
+        -0.08,
+        -0.08,
+        -0.08,
+        0.88,
+        0.96,
+        1.0,
+        0.96,
+        0.72,
+        0.1,
+        0.1,
+        -0.02,
+        -0.02,
+        0.72
+      ],
+      [
+        -0.1,
+        -0.1,
+        -0.1,
+        -0.1,
+        -0.1,
+        -0.1,
+        -0.1,
+        -0.1,
+        -0.1,
+        -0.1,
+        -0.1,
+        -0.1,
+        -0.08,
+        -0.08,
+        -0.08,
+        0.88,
+        0.96,
+        0.96,
+        1.0,
+        0.72,
+        0.1,
+        0.1,
+        -0.02,
+        -0.02,
+        0.72
+      ],
+      [
+        -0.05,
+        -0.05,
+        -0.05,
+        -0.05,
+        -0.05,
+        -0.05,
+        -0.05,
+        -0.05,
+        -0.05,
+        -0.05,
+        -0.05,
+        -0.05,
+        -0.03,
+        -0.03,
+        -0.03,
+        0.6,
+        0.72,
+        0.72,
+        0.72,
+        1.0,
+        0.18,
+        0.18,
+        0.15,
+        0.15,
+        0.97
+      ],
+      [
+        0.02,
+        0.02,
+        0.02,
+        0.02,
+        0.02,
+        0.02,
+        0.02,
+        0.02,
+        0.02,
+        0.02,
+        0.02,
+        0.02,
+        0.05,
+        0.05,
+        0.05,
+        0.15,
+        0.1,
+        0.1,
+        0.1,
+        0.18,
+        1.0,
+        0.99,
+        0.25,
+        0.25,
+        0.18
+      ],
+      [
+        0.02,
+        0.02,
+        0.02,
+        0.02,
+        0.02,
+        0.02,
+        0.02,
+        0.02,
+        0.02,
+        0.02,
+        0.02,
+        0.02,
+        0.05,
+        0.05,
+        0.05,
+        0.15,
+        0.1,
+        0.1,
+        0.1,
+        0.18,
+        0.99,
+        1.0,
+        0.25,
+        0.25,
+        0.18
+      ],
+      [
+        0.25,
+        0.25,
+        0.25,
+        0.25,
+        0.25,
+        0.25,
+        0.25,
+        0.25,
+        0.25,
+        0.25,
+        0.25,
+        0.25,
+        0.3,
+        0.3,
+        0.3,
+        -0.05,
+        -0.02,
+        -0.02,
+        -0.02,
+        0.15,
+        0.25,
+        0.25,
+        1.0,
+        0.92,
+        0.15
+      ],
+      [
+        0.25,
+        0.25,
+        0.25,
+        0.25,
+        0.25,
+        0.25,
+        0.25,
+        0.25,
+        0.25,
+        0.25,
+        0.25,
+        0.25,
+        0.3,
+        0.3,
+        0.3,
+        -0.05,
+        -0.02,
+        -0.02,
+        -0.02,
+        0.15,
+        0.25,
+        0.25,
+        0.92,
+        1.0,
+        0.15
+      ],
+      [
+        -0.05,
+        -0.05,
+        -0.05,
+        -0.05,
+        -0.05,
+        -0.05,
+        -0.05,
+        -0.05,
+        -0.05,
+        -0.05,
+        -0.05,
+        -0.05,
+        -0.03,
+        -0.03,
+        -0.03,
+        0.6,
+        0.72,
+        0.72,
+        0.72,
+        0.97,
+        0.18,
+        0.18,
+        0.15,
+        0.15,
+        1.0
+      ]
+    ],
+    "_note": "Class-level empirical long-run correlations. Crisis correlations (all\u21921) are not modeled here \u2014 that is a simulation_core.py regime feature."
   },
-  "overrides": [
-    {
-      "where": {
-        "assets": [
-          "XLE"
-        ]
-      },
-      "set": {
-        "mu_annual": 0.06,
-        "sigma_annual": 0.23
-      }
-    },
-    {
-      "where": {
-        "assets": [
-          "LQD"
-        ]
-      },
-      "set": {
-        "tracking_error": 0.015
-      }
-    }
-  ],
-  "readme": {
-    "purpose": "Per-ticker return/volatility assumptions and distribution characteristics used by the Monte Carlo simulator. Auto-regenerated by refresh_assets.py from live Yahoo Finance data on server startup if older than STALE_DAYS. Manual edits will be overwritten on next refresh unless you disable auto-refresh in api.py.",
-    "auto_refresh": "Managed by refresh_assets.py. To force a refresh: python refresh_assets.py --out src/config/assets.json --days 0. To skip refresh: set SKIP_ASSET_REFRESH=1 env var.",
-    "asset_classes": "Valid class values: 'US_STOCKS', 'INTL_STOCKS', 'GOLD', 'COMMOD', 'LONG_TREAS', 'INT_TREAS', 'TIPS', 'CASH'. Class drives correlation matrix used in Monte Carlo, not individual ticker returns.",
-    "per_ticker_fields": {
-      "class": "Asset class this ticker belongs to. Must match a class defined in assets_loader.py correlation matrix.",
-      "mu_annual": "Expected annual log return (drift). E.g. 0.065 = ~6.5% annualized. Estimated from trailing history by refresh_assets.py. Override manually to express a personal view.",
-      "sigma_annual": "Annual return volatility (standard deviation). E.g. 0.16 = 16% annualized. Higher = more Monte Carlo spread.",
-      "expense_ratio": "Annual fee as a decimal. Subtracted from returns each year. E.g. 0.0003 = 0.03% (3 basis points). 0.0 for individual stocks.",
-      "tracking_error": "Additional annual return noise for index funds vs their benchmark. ETFs: ~0.01. Individual stocks: ~0.02-0.04. Pure benchmark: 0.0.",
-      "dist": {
-        "yield_annual": "Annual distribution yield as a decimal. E.g. 0.018 = 1.8%. Used to compute taxable distributions each year in brokerage accounts.",
-        "qualified_ratio": "Fraction of distributions that qualify for LTCG tax rates. E.g. 0.9 = 90% qualified. Treasuries: 0.0 (interest, not dividends). Commodities: 0.0."
-      },
-      "dist_note": "dist field is optional. If absent (e.g. GOLD, COMMOD), no taxable distributions are generated for that ticker."
-    },
-    "adding_tickers": "Add a new ticker entry manually OR let refresh_assets.py discover it from allocation_yearly.json holdings_pct entries. refresh_assets.py reads all profiles to find referenced tickers."
-  }
+  "overrides": []
 }

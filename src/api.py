@@ -15,7 +15,8 @@ from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
-from refresh_assets import refresh_assets_if_stale
+# refresh_assets import disabled — auto-refresh is off; asset model managed by asset_calibration.py pipeline
+# from refresh_assets import refresh_assets_if_stale
 from loaders import (
     load_tax_unified,
     load_sched,
@@ -42,7 +43,7 @@ from reporting import report_and_plot_accounts, compute_account_ending_balances
 APP_ROOT = os.path.abspath(os.path.dirname(__file__))
 UI_DIST = os.path.join(APP_ROOT, "ui", "dist")
 ASSETS_DIR = os.path.join(UI_DIST, "assets")
-COMMON_ASSETS_JSON = os.path.join(APP_ROOT, "assets.json")
+COMMON_ASSETS_JSON = os.path.join(APP_ROOT, "config", "assets.json")
 
 PROFILES_ROOT = os.path.join(APP_ROOT, "profiles")
 DEFAULT_PROFILE = "default"
@@ -161,7 +162,7 @@ def _profile_json_path(profile: str, name: str) -> str:
 
 def _default_scaffold(name: str) -> Dict[str, Any]:
     if name == "allocation_yearly.json":
-        return {"accounts": [], "starting": {}, "deposits": [], "begin": {}, "overrides": []}
+        return {"accounts": [], "starting": {}, "deposits": [], "global_allocation": {}, "overrides": []}
     if name == "withdrawal_schedule.json":
         return {"floor_k": 0, "schedule": []}
     if name == "inflation_yearly.json":
@@ -614,14 +615,18 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
     alloc_accounts = load_allocation_yearly_accounts(alloc_path)
     validate_alloc_accounts(alloc_accounts)
 
-    # Refresh assets.json if stale — run-time so it picks up any allocation edits
-    try:
-        refresh_assets_if_stale(
-            assets_path=COMMON_ASSETS_JSON,
-            profiles_root=PROFILES_ROOT,
-        )
-    except Exception as _e:
-        print(f"[run] assets refresh skipped: {_e}")
+    # NOTE: assets.json auto-refresh is DISABLED.
+    # assets.json is now a versioned model artifact managed by the asset-model pipeline.
+    # To update: run asset_calibration.py manually or deploy a new model version.
+    # Do NOT re-enable this block until asset_calibration.py is production-ready.
+    #
+    # try:
+    #     refresh_assets_if_stale(
+    #         assets_path=COMMON_ASSETS_JSON,
+    #         profiles_root=PROFILES_ROOT,
+    #     )
+    # except Exception as _e:
+    #     print(f"[run] assets refresh skipped: {_e}")
 
     person_cfg = load_person(person_path)
     print("[DEBUG api] person_cfg.rmd_policy:", person_cfg.get("rmd_policy") if person_cfg else None)
