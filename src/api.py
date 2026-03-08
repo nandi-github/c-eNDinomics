@@ -689,6 +689,36 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
         and ignore_conversions_flag
     )
 
+    # Withdrawals + RMDs + Conversions: all enabled
+    # Conversions are handled inside simulator_new.py — routing flag just needs
+    # to ensure apply_withdrawals_flag=True and sched is passed correctly.
+    modular_withdrawals_rmd_conv_test = (
+        not ignore_withdrawals_flag
+        and not ignore_rmds_flag
+        and not ignore_conversions_flag
+    )
+
+    # Withdrawals-only + Conversions ON
+    modular_withdrawals_conv_test = (
+        not ignore_withdrawals_flag
+        and ignore_rmds_flag
+        and not ignore_conversions_flag
+    )
+
+    # RMD-only + Conversions ON
+    modular_rmd_conv_test = (
+        ignore_withdrawals_flag
+        and not ignore_rmds_flag
+        and not ignore_conversions_flag
+    )
+
+    # Core-only + Conversions ON (no withdrawals, no RMDs, but conversions fire)
+    modular_core_conv_test = (
+        ignore_withdrawals_flag
+        and ignore_rmds_flag
+        and not ignore_conversions_flag
+    )
+
     # Always True — run_accounts_new handles all cases
     modular_test = True
 
@@ -703,6 +733,7 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
         "modular_core_withdrawals_test:", modular_core_withdrawals_test,
         "modular_rmd_only_test:", modular_rmd_only_test,
         "modular_withdrawals_rmd_test:", modular_withdrawals_rmd_test,
+        "modular_withdrawals_rmd_conv_test:", modular_withdrawals_rmd_conv_test,
         "modular_test:", modular_test,
     )
 
@@ -754,6 +785,7 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
 
         # Decide sched/apply_withdrawals based on which modular case we’re in
         sched_for_modular = None
+        sched_base_for_modular = None   # safe default
         apply_withdrawals_flag = False
 
         # Core-only: no withdrawals, no RMDs → sched=None, apply_withdrawals=False
@@ -780,14 +812,43 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
             sched_base_for_modular = sched_base
             apply_withdrawals_flag = True
 
+        # ── Conversion-enabled variants ──────────────────────────────────────
+        # Conversions are handled inside simulator_new.py.
+        # These branches mirror the above but with ignore_conversions_flag=False.
+
+        # Core + Conversions only
+        elif modular_core_conv_test:
+            sched_for_modular = None
+            sched_base_for_modular = None
+            apply_withdrawals_flag = False
+
+        # Withdrawals + Conversions (no RMDs)
+        elif modular_withdrawals_conv_test:
+            sched_for_modular = sched_arr
+            sched_base_for_modular = sched_base
+            apply_withdrawals_flag = True
+
+        # RMDs + Conversions (no discretionary withdrawals)
+        elif modular_rmd_conv_test:
+            sched_for_modular = None
+            sched_base_for_modular = None
+            apply_withdrawals_flag = False
+
+        # Withdrawals + RMDs + Conversions: all ON
+        elif modular_withdrawals_rmd_conv_test:
+            sched_for_modular = sched_arr
+            sched_base_for_modular = sched_base
+            apply_withdrawals_flag = True
+
         # Build per-year age-gated withdrawal sequence from economic policy
         acct_names    = list(alloc_accounts.get("per_year_portfolios", {}).keys())
         starting_age  = int(person_cfg.get("current_age", 70)) if person_cfg else 70
         tira_age_gate = float(econ_policy.get("tira_age_gate", 59.5))
 
         # Pick the correct bad-market sequence based on conversion policy
+        # NOTE: key is roth_conversion_policy (not conversion_policy)
         conversion_enabled = bool(
-            (person_cfg or {}).get("conversion_policy", {}).get("enabled", False)
+            (person_cfg or {}).get("roth_conversion_policy", {}).get("enabled", False)
         )
         order_good = econ_policy.get("order_good_market", [])
         order_bad  = (
@@ -857,7 +918,7 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
             ytd_income_nom_paths=ytd_income_nom_paths,
             person_cfg=person_cfg,
             rmd_table_path=rmd_path,
-            conversion_per_year_nom=None,
+            conversion_per_year_nom=None,  # simulator_new resolves from person_cfg roth_conversion_policy
             rmds_enabled=rmds_enabled,
             shocks_events=shocks_events,
             shocks_mode=str(internal_shocks_mode),

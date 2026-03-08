@@ -10,7 +10,11 @@ from withdrawals_core import apply_withdrawals_nominal_per_account
 from taxes_core import compute_annual_taxes_paths
 
 from rmd_core import build_rmd_factors, compute_rmd_schedule_nominal
-from roth_conversion_core import apply_simple_conversions
+from roth_conversion_core import (
+    apply_simple_conversions,
+    parse_roth_conversion_policy,
+    compute_conversion_window_years,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -132,7 +136,6 @@ def run_accounts_new(
             paths              = paths,
             years              = YEARS,
         )
-        # Feed rebalancing gains into capital gains for tax computation
         if cap_gains_cur_paths is not None:
             cap_gains_cur_paths = cap_gains_cur_paths + rebal_gains_brokerage
         else:
@@ -289,13 +292,31 @@ def run_accounts_new(
                     ordinary_income_cur_paths[:, y] += rmd_cur_paths_y
 
 
-    # --- Simple Roth conversions (lab only) ---
+    # --- Roth conversions — policy-driven ---
     conversion_nom_paths = None
 
-    # Example: convert a fixed nominal amount per year across TRAD accounts
-    # only if we have both TRAD and ROTH accounts and a conversion amount.
-    if trad_accounts and roth_accounts and conversion_per_year_nom is not None:
-        # Build TRAD/ROTH balance dicts for conversions
+    _roth_policy  = parse_roth_conversion_policy(person_cfg or {})
+    _conv_enabled = _roth_policy["enabled"]
+
+    # Resolve conversion amount: explicit override > policy conversion_amount_k
+    if conversion_per_year_nom is None and _conv_enabled:
+        _raw_policy = _roth_policy.get("raw", {}) or {}
+        _amount_k   = float(_raw_policy.get("conversion_amount_k", 0.0))
+        conversion_per_year_nom = _amount_k * 1_000.0 if _amount_k > 0.0 else None
+
+    # Resolve window from policy
+    _current_age    = float((person_cfg or {}).get("current_age", 65))
+    _window_end_age = _roth_policy.get("window_end_age")
+    if _window_end_age is not None:
+        _window_start_y, _window_end_y = compute_conversion_window_years(
+            current_age=_current_age,
+            window_end_age=_window_end_age,
+            years=YEARS,
+        )
+    else:
+        _window_start_y, _window_end_y = 0, YEARS
+
+    if trad_accounts and roth_accounts and conversion_per_year_nom is not None and _conv_enabled:
         trad_balances_nom = {a: acct_eoy_nom[a] for a in trad_accounts}
         roth_balances_nom = {a: acct_eoy_nom[a] for a in roth_accounts}
 
@@ -303,23 +324,21 @@ def run_accounts_new(
             trad_ira_balances_nom=trad_balances_nom,
             roth_ira_balances_nom=roth_balances_nom,
             conversion_per_year_nom=float(conversion_per_year_nom),
-            window_start_y=0,   # for lab: convert in all years
-            window_end_y=YEARS,
+            window_start_y=_window_start_y,
+            window_end_y=_window_end_y,
         )
 
-        # Write updated balances back into acct_eoy_nom
         for a in trad_accounts:
             acct_eoy_nom[a] = updated_trad[a]
         for a in roth_accounts:
             acct_eoy_nom[a] = updated_roth[a]
 
-        # Add conversion income (current USD) into ordinary income for taxes
+        # Conversion = ordinary income → taxed at marginal rate
         if (
             ordinary_income_cur_paths is not None
             and infl_yearly is not None
             and conversion_nom_paths is not None
         ):
-            # Deflator for conversion nominal → current
             deflator_conv = np.ones(YEARS, dtype=float)
             arr_conv = np.asarray(infl_yearly, dtype=float).reshape(-1)
             if arr_conv.size < YEARS:
@@ -329,11 +348,16 @@ def run_accounts_new(
             elif arr_conv.size > YEARS:
                 arr_conv = arr_conv[:YEARS]
             deflator_conv = np.cumprod(1.0 + arr_conv)
-
             for y in range(YEARS):
                 conv_cur_y = conversion_nom_paths[:, y] / max(deflator_conv[y], 1e-12)
                 ordinary_income_cur_paths[:, y] += conv_cur_y
 
+        logger.debug(
+            "[sim] Roth conversions | amount=$%.0f/yr | window y%d-y%d | age %.0f→%.0f",
+            float(conversion_per_year_nom),
+            _window_start_y, _window_end_y,
+            _current_age, _current_age + _window_end_y,
+        )
 
     # (no legacy withdrawals block here anymore)
 
