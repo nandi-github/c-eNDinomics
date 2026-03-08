@@ -5,6 +5,7 @@ from typing import Dict, Any, Optional
 import numpy as np
 
 from simulation_core import simulate_balances
+from rebalancing_core import apply_rebalancing, build_econ_policy_yearly
 from withdrawals_core import apply_withdrawals_nominal_per_account
 from taxes_core import compute_annual_taxes_paths
 
@@ -80,6 +81,8 @@ def run_accounts_new(
     rmds_enabled: bool = True,
     shocks_events: Optional[list] = None,
     shocks_mode: str = "augment",
+    econ_policy: Optional[Dict[str, Any]] = None,
+    rebalancing_enabled: bool = True,
 ) -> Dict[str, Any]:
 
 
@@ -104,7 +107,7 @@ def run_accounts_new(
     spy = int(spy)
 
     # Core Monte Carlo
-    acct_eoy_nom, total_nom_paths, total_real_paths = simulate_balances(
+    acct_eoy_nom, total_nom_paths, total_real_paths, acct_class_eoy_nom = simulate_balances(
         paths=paths,
         years=YEARS,
         spy=spy,
@@ -114,6 +117,30 @@ def run_accounts_new(
         shocks_mode=shocks_mode,
         infl_yearly=infl_yearly,
     )
+
+    # ── Rebalancing ────────────────────────────────────────────────────────────
+    rebal_gains_brokerage = np.zeros((paths, YEARS), dtype=float)
+    if rebalancing_enabled:
+        econ_policy_yearly = build_econ_policy_yearly(
+            econ_policy or {}, YEARS
+        )
+        rebal_gains_brokerage, _, _ = apply_rebalancing(
+            acct_eoy_nom       = acct_eoy_nom,
+            acct_class_eoy_nom = acct_class_eoy_nom,
+            alloc_accounts     = alloc_accounts,
+            econ_policy_yearly = econ_policy_yearly,
+            paths              = paths,
+            years              = YEARS,
+        )
+        # Feed rebalancing gains into capital gains for tax computation
+        if cap_gains_cur_paths is not None:
+            cap_gains_cur_paths = cap_gains_cur_paths + rebal_gains_brokerage
+        else:
+            cap_gains_cur_paths = rebal_gains_brokerage.copy()
+        logger.debug(
+            "[sim] rebalancing enabled — mean annual brokerage gains: %s",
+            np.mean(rebal_gains_brokerage, axis=0).round(0).tolist(),
+        )
 
     # Snapshot core-only totals and account means before RMD/withdrawals/reinvest (for debug)
     core_total_nom_before = np.zeros((paths, YEARS), dtype=float)

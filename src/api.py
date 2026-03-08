@@ -861,6 +861,8 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
             rmds_enabled=rmds_enabled,
             shocks_events=shocks_events,
             shocks_mode=str(internal_shocks_mode),
+            econ_policy=econ_policy,
+            rebalancing_enabled=True,
         )
     else:
         res = run_accounts(

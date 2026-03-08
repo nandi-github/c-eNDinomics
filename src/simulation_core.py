@@ -12,6 +12,11 @@ logger = logging.getLogger(__name__)
 
 YEARS = 30
 
+ALL_CLASSES = [
+    "US_STOCKS", "INTL_STOCKS", "LONG_TREAS",
+    "INT_TREAS", "TIPS", "GOLD", "COMMOD", "OTHER",
+]
+
 
 def _build_deflator(infl_yearly: Optional[np.ndarray], years: int) -> np.ndarray:
     """
@@ -58,7 +63,7 @@ def simulate_balances(
     shocks_events: Optional[List[dict]],
     shocks_mode: str,
     infl_yearly: Optional[np.ndarray],
-) -> Tuple[Dict[str, np.ndarray], np.ndarray, np.ndarray]:
+) -> Tuple[Dict[str, np.ndarray], np.ndarray, np.ndarray, Dict[str, Dict[str, np.ndarray]]]:
     """
     Core investment simulation: evolve account balances with Monte Carlo + shocks,
     no withdrawals, no taxes, no RMDs, no conversions.
@@ -71,6 +76,9 @@ def simulate_balances(
         Total nominal portfolio per path per year, shape (paths x years).
     total_real_paths : np.ndarray
         Total real portfolio per path per year (deflated by inflation).
+    acct_class_eoy_nom : Dict[acct, Dict[class, np.ndarray]]
+        Per-account per-class nominal balances, shape (paths x years).
+        Used by rebalancing_core to compute drift vs target weights.
     """
     np.random.seed(42)
     paths = int(paths)
@@ -107,6 +115,11 @@ def simulate_balances(
     # ---- Balances ----
     acct_eoy_nom: Dict[str, np.ndarray] = {
         acct: np.zeros((paths, years), dtype=float) for acct in acct_names
+    }
+    # Per-class balances — used by rebalancing_core
+    acct_class_eoy_nom: Dict[str, Dict[str, np.ndarray]] = {
+        acct: {cls: np.zeros((paths, years), dtype=float) for cls in ALL_CLASSES}
+        for acct in acct_names
     }
     total_nom_paths = np.zeros((paths, years), dtype=float)
 
@@ -166,6 +179,9 @@ def simulate_balances(
             # Compute per-year multiplier paths (legacy logic)
             if asset_order and asset_log_R.shape[2] > 0:
                 mult_paths = np.ones(paths, dtype=float)
+                # Per-class numerator/denominator for weighted avg multiplier
+                cls_mult_num: Dict[str, np.ndarray] = {c: np.zeros(paths) for c in ALL_CLASSES}
+                cls_mult_den: Dict[str, float] = {c: 0.0 for c in ALL_CLASSES}
                 for i, ticker in enumerate(asset_order):
                     w = float(asset_w.get(ticker, 0.0))
                     if w <= 1e-12:
@@ -178,7 +194,18 @@ def simulate_balances(
                     r_log = asset_log_R[:, y, i]
                     gross = np.exp(r_log + s_log) * max(0.0, 1.0 - er)
                     mult_paths *= gross ** w
+                    # Accumulate weighted gross return per class
+                    if cls in cls_mult_num:
+                        cls_mult_num[cls] += w * gross
+                        cls_mult_den[cls] += w
                 year_mult = mult_paths
+                # Normalize to per-class multiplier
+                cls_mult: Dict[str, np.ndarray] = {}
+                for c in ALL_CLASSES:
+                    if cls_mult_den[c] > 1e-12:
+                        cls_mult[c] = cls_mult_num[c] / cls_mult_den[c]
+                    else:
+                        cls_mult[c] = np.ones(paths, dtype=float)
             else:
                 # Fallback: class shock-only multipliers
                 def _year_mult(cls: str) -> np.ndarray:
@@ -222,14 +249,33 @@ def simulate_balances(
                     + w_gold * gd_mult
                     + w_commod * cm_mult
                 )
+                # Fallback cls_mult from shock multipliers per class
+                cls_mult = {
+                    "US_STOCKS":   _year_mult("US_STOCKS"),
+                    "INTL_STOCKS": _year_mult("INTL_STOCKS"),
+                    "LONG_TREAS":  _year_mult("LONG_TREAS"),
+                    "INT_TREAS":   _year_mult("INT_TREAS"),
+                    "TIPS":        _year_mult("TIPS"),
+                    "GOLD":        _year_mult("GOLD"),
+                    "COMMOD":      _year_mult("COMMOD"),
+                    "OTHER":       np.ones(paths, dtype=float),
+                }
 
             # Compound balances (no deposits, no withdrawals in core)
             if y == 0:
                 start_bal = float(starting_cfg.get(acct, 0.0))
                 acct_eoy_nom[acct][:, y] = np.full(paths, start_bal, dtype=float) * year_mult
+                for cls in ALL_CLASSES:
+                    w_cls = class_w.get(cls, 0.0)
+                    acct_class_eoy_nom[acct][cls][:, y] = (
+                        start_bal * w_cls * cls_mult[cls]
+                    )
             else:
                 prev = acct_eoy_nom[acct][:, y - 1]
                 acct_eoy_nom[acct][:, y] = prev * year_mult
+                for cls in ALL_CLASSES:
+                    prev_cls = acct_class_eoy_nom[acct][cls][:, y - 1]
+                    acct_class_eoy_nom[acct][cls][:, y] = prev_cls * cls_mult[cls]
 
         # Total nominal portfolio per path for year y
         total_nom_paths_y = np.zeros(paths, dtype=float)
@@ -243,5 +289,5 @@ def simulate_balances(
     # Real paths from deflator
     total_real_paths = total_nom_paths / deflator
 
-    return acct_eoy_nom, total_nom_paths, total_real_paths
+    return acct_eoy_nom, total_nom_paths, total_real_paths, acct_class_eoy_nom
 
