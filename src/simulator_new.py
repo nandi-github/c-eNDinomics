@@ -12,6 +12,7 @@ from taxes_core import compute_annual_taxes_paths
 from rmd_core import build_rmd_factors, compute_rmd_schedule_nominal
 from roth_conversion_core import (
     apply_simple_conversions,
+    apply_bracket_fill_conversions,
     parse_roth_conversion_policy,
     compute_conversion_window_years,
 )
@@ -50,7 +51,17 @@ def pct_change_paths(
     If prior_col (shape: paths,) is provided it is used as the year-0
     starting value so that r[:, 0] = series[:, 0] / prior_col - 1.
     Otherwise r[:, 0] = 0 (no prior data).
+
+    Overflow guard: denominator is floored at $1.0 (meaningful for dollar
+    balances) and the result is clipped to [-1.0, +50.0] (i.e. -100% to
+    +5000%).  This prevents near-zero balances in depleted accounts from
+    producing astronomical ratios that corrupt the mean.  Paths where the
+    prior balance was below $1 return 0% for that year.
     """
+    _MIN_DENOM = 1.0    # $1 floor: below this a YoY ratio is meaningless
+    _MAX_RATE  = 50.0   # +5000% ceiling
+    _MIN_RATE  = -1.0   # -100% floor
+
     s = np.asarray(series_2d, dtype=float)
     if s.ndim != 2:
         s = s.reshape(s.shape[0], -1)
@@ -58,11 +69,72 @@ def pct_change_paths(
     r = np.zeros_like(s)
     if Y < 2:
         return r
-    prev = np.maximum(s[:, :-1], 1e-12)
-    r[:, 1:] = (s[:, 1:] / prev - 1.0)
+    prev = np.abs(s[:, :-1])
+    valid = prev >= _MIN_DENOM
+    safe_prev = np.where(valid, prev, 1.0)
+    raw = s[:, 1:] / safe_prev - 1.0
+    r[:, 1:] = np.where(valid, np.clip(raw, _MIN_RATE, _MAX_RATE), 0.0)
     if prior_col is not None:
-        r[:, 0] = s[:, 0] / np.maximum(prior_col, 1e-12) - 1.0
+        pc = np.abs(np.asarray(prior_col, dtype=float))
+        valid0 = pc >= _MIN_DENOM
+        safe_pc = np.where(valid0, pc, 1.0)
+        raw0 = s[:, 0] / safe_pc - 1.0
+        r[:, 0] = np.where(valid0, np.clip(raw0, _MIN_RATE, _MAX_RATE), 0.0)
     return r
+
+def modified_dietz_paths(
+    eoy_nom: np.ndarray,
+    ncf_nom: np.ndarray,
+    prior_col: Optional[np.ndarray] = None,
+) -> np.ndarray:
+    """
+    Modified Dietz return — correctly separates investment return from cashflows.
+
+    Formula (general):  R = (EOY - BOY - NCF) / (BOY + w * NCF)
+    where w = timing weight (0 = end-of-year, 0.5 = mid-year).
+
+    For our simulation model (market returns first, then annual cashflows at
+    end-of-year), w=0 is EXACT:
+        R = (EOY - BOY - NCF) / BOY  =  BOY×r / BOY  =  r  (true market return)
+
+    This implementation uses w=0.5 (mid-year, industry standard for external
+    reporting) — kept as a utility for potential future use.  For computing
+    per-account YoY in this simulator, use the pre-cashflow core-snapshot
+    approach (acct_eoy_nom_core) which is mathematically equivalent to w=0
+    MD and is numerically more robust (denominator never near-zero).
+
+    NCF sign convention:  positive = money flowing IN, negative = money flowing OUT.
+    Returns fractions (multiply × 100 for percent).
+    """
+    _MIN_DENOM = 1.0
+    _MAX_RATE  = 50.0
+    _MIN_RATE  = -1.0
+
+    eoy = np.asarray(eoy_nom, dtype=float)
+    ncf = np.asarray(ncf_nom, dtype=float)
+    if eoy.ndim != 2:
+        eoy = eoy.reshape(eoy.shape[0], -1)
+    if ncf.ndim != 2:
+        ncf = ncf.reshape(ncf.shape[0], -1)
+    P, Y = eoy.shape
+
+    # BOY: for year y>0 it's the prior EOY; for year 0 it's prior_col (starting balance)
+    boy = np.empty_like(eoy)
+    if prior_col is not None:
+        boy[:, 0] = np.asarray(prior_col, dtype=float).ravel()
+    else:
+        boy[:, 0] = 0.0
+    if Y > 1:
+        boy[:, 1:] = eoy[:, :-1]
+
+    numerator   = eoy - boy - ncf                  # pure investment gain
+    denominator = boy + 0.5 * ncf                  # avg invested capital
+
+    valid    = np.abs(denominator) >= _MIN_DENOM
+    safe_den = np.where(valid, denominator, 1.0)
+    raw      = numerator / safe_den
+    return np.where(valid, np.clip(raw, _MIN_RATE, _MAX_RATE), 0.0)
+
 
 def run_accounts_new(
     paths: int,
@@ -294,15 +366,29 @@ def run_accounts_new(
 
     # --- Roth conversions — policy-driven ---
     conversion_nom_paths = None
+    conversion_tax_cost_cur_paths = np.zeros((paths, YEARS), dtype=float)
+    # Per-account conversion flow tracking (populated by apply_bracket_fill_conversions)
+    _conv_out_per_trad: Dict[str, np.ndarray] = {}
+    _conv_in_per_roth:  Dict[str, np.ndarray] = {}
+    _conv_tax_per_brok: Dict[str, np.ndarray] = {}
 
     _roth_policy  = parse_roth_conversion_policy(person_cfg or {})
     _conv_enabled = _roth_policy["enabled"]
 
     # Resolve conversion amount: explicit override > policy conversion_amount_k
+    _raw_policy = _roth_policy.get("raw", {}) or {}
     if conversion_per_year_nom is None and _conv_enabled:
-        _raw_policy = _roth_policy.get("raw", {}) or {}
-        _amount_k   = float(_raw_policy.get("conversion_amount_k", 0.0))
+        _amount_k = float(_raw_policy.get("conversion_amount_k", 0.0))
         conversion_per_year_nom = _amount_k * 1_000.0 if _amount_k > 0.0 else None
+
+    # Determine if bracket-fill mode is requested
+    _keepit_str = str(_raw_policy.get("keepit_below_max_marginal_fed_rate", "")).strip().lower()
+    _bracket_fill_mode = (
+        _conv_enabled
+        and tax_cfg is not None
+        and ordinary_income_cur_paths is not None
+        and ("fill" in _keepit_str or _keepit_str.replace("%", "").replace(".", "").isdigit())
+    )
 
     # Resolve window from policy
     _current_age    = float((person_cfg or {}).get("current_age", 65))
@@ -316,48 +402,111 @@ def run_accounts_new(
     else:
         _window_start_y, _window_end_y = 0, YEARS
 
-    if trad_accounts and roth_accounts and conversion_per_year_nom is not None and _conv_enabled:
-        trad_balances_nom = {a: acct_eoy_nom[a] for a in trad_accounts}
-        roth_balances_nom = {a: acct_eoy_nom[a] for a in roth_accounts}
+    # Build deflator for conversion block (STEP 1 builds it again later; this is intentional)
+    _deflator_conv = np.ones(YEARS, dtype=float)
+    if infl_yearly is not None and np.asarray(infl_yearly).size > 0:
+        _arr_conv = np.asarray(infl_yearly, dtype=float).reshape(-1)
+        if _arr_conv.size < YEARS:
+            _arr_conv = np.concatenate(
+                [_arr_conv, np.full(YEARS - _arr_conv.size, _arr_conv[-1] if _arr_conv.size > 0 else 0.0)]
+            )
+        elif _arr_conv.size > YEARS:
+            _arr_conv = _arr_conv[:YEARS]
+        _deflator_conv = np.cumprod(1.0 + _arr_conv)
 
-        updated_trad, updated_roth, conversion_nom_paths = apply_simple_conversions(
-            trad_ira_balances_nom=trad_balances_nom,
-            roth_ira_balances_nom=roth_balances_nom,
-            conversion_per_year_nom=float(conversion_per_year_nom),
-            window_start_y=_window_start_y,
-            window_end_y=_window_end_y,
-        )
+    if trad_accounts and roth_accounts and _conv_enabled:
 
-        for a in trad_accounts:
-            acct_eoy_nom[a] = updated_trad[a]
-        for a in roth_accounts:
-            acct_eoy_nom[a] = updated_roth[a]
+        if _bracket_fill_mode:
+            # ── Bracket-fill: compute conversion amount per-path per-year
+            # based on how much income headroom exists before next bracket.
+            # ordinary_income_cur_paths already includes RMDs at this point.
+            # apply_bracket_fill_conversions also:
+            #   - adds conversion to ordinary_income_cur_paths
+            #   - computes tax cost
+            #   - debits tax from brokerage
+            brokerage_balances_nom = {a: acct_eoy_nom[a] for a in brokerage_accounts}
+            _ytd = ytd_income_nom_paths if ytd_income_nom_paths is not None else np.zeros((paths, YEARS), dtype=float)
 
-        # Conversion = ordinary income → taxed at marginal rate
-        if (
-            ordinary_income_cur_paths is not None
-            and infl_yearly is not None
-            and conversion_nom_paths is not None
-        ):
-            deflator_conv = np.ones(YEARS, dtype=float)
-            arr_conv = np.asarray(infl_yearly, dtype=float).reshape(-1)
-            if arr_conv.size < YEARS:
-                arr_conv = np.concatenate(
-                    [arr_conv, np.full(YEARS - arr_conv.size, arr_conv[-1] if arr_conv.size > 0 else 0.0)]
+            updated_trad, updated_roth, updated_brok, conversion_nom_paths, conversion_tax_cost_cur_paths, \
+                _conv_out_per_trad, _conv_in_per_roth, _conv_tax_per_brok = (
+                apply_bracket_fill_conversions(
+                    trad_ira_balances_nom      = {a: acct_eoy_nom[a] for a in trad_accounts},
+                    roth_ira_balances_nom      = {a: acct_eoy_nom[a] for a in roth_accounts},
+                    brokerage_balances_nom     = brokerage_balances_nom,
+                    ordinary_income_cur_paths  = ordinary_income_cur_paths,
+                    ytd_income_nom_paths       = _ytd,
+                    tax_cfg                    = tax_cfg,
+                    roth_policy                = _roth_policy,
+                    deflator                   = _deflator_conv,
+                    window_start_y             = _window_start_y,
+                    window_end_y               = _window_end_y,
                 )
-            elif arr_conv.size > YEARS:
-                arr_conv = arr_conv[:YEARS]
-            deflator_conv = np.cumprod(1.0 + arr_conv)
-            for y in range(YEARS):
-                conv_cur_y = conversion_nom_paths[:, y] / max(deflator_conv[y], 1e-12)
-                ordinary_income_cur_paths[:, y] += conv_cur_y
+            )
+            for a in trad_accounts:
+                acct_eoy_nom[a] = updated_trad[a]
+            for a in roth_accounts:
+                acct_eoy_nom[a] = updated_roth[a]
+            for a in brokerage_accounts:
+                acct_eoy_nom[a] = updated_brok[a]
 
-        logger.debug(
-            "[sim] Roth conversions | amount=$%.0f/yr | window y%d-y%d | age %.0f→%.0f",
-            float(conversion_per_year_nom),
-            _window_start_y, _window_end_y,
-            _current_age, _current_age + _window_end_y,
-        )
+            _mean_conv = float(conversion_nom_paths.mean())
+            _mean_tax  = float(conversion_tax_cost_cur_paths.mean())
+            logger.info(
+                "[sim] Roth bracket-fill conversions | window y%d-y%d | age %.0f→%.0f"
+                " | mean_conv_nom=$%.0f | mean_tax_cur=$%.0f",
+                _window_start_y, _window_end_y,
+                _current_age, _current_age + _window_end_y,
+                _mean_conv, _mean_tax,
+            )
+            logger.info(
+                "[DIAG] conversion_nom_paths per-year mean (all 30 yrs): %s",
+                np.round(conversion_nom_paths.mean(axis=0), 0).tolist(),
+            )
+            logger.info(
+                "[DIAG] TRAD accts year 1-5 mean post-conv: %s",
+                {a: np.round(acct_eoy_nom[a][:, :5].mean(axis=0), 0).tolist()
+                 for a in trad_accounts},
+            )
+            logger.info(
+                "[DIAG] ROTH accts year 1-5 mean post-conv: %s",
+                {a: np.round(acct_eoy_nom[a][:, :5].mean(axis=0), 0).tolist()
+                 for a in roth_accounts},
+            )
+
+        elif conversion_per_year_nom is not None:
+            # ── Fixed-amount fallback (conversion_amount_k in person.json)
+            trad_balances_nom = {a: acct_eoy_nom[a] for a in trad_accounts}
+            roth_balances_nom = {a: acct_eoy_nom[a] for a in roth_accounts}
+
+            updated_trad, updated_roth, conversion_nom_paths = apply_simple_conversions(
+                trad_ira_balances_nom  = trad_balances_nom,
+                roth_ira_balances_nom  = roth_balances_nom,
+                conversion_per_year_nom = float(conversion_per_year_nom),
+                window_start_y         = _window_start_y,
+                window_end_y           = _window_end_y,
+            )
+            for a in trad_accounts:
+                acct_eoy_nom[a] = updated_trad[a]
+            for a in roth_accounts:
+                acct_eoy_nom[a] = updated_roth[a]
+
+            # Add conversion to ordinary income for tax computation
+            if ordinary_income_cur_paths is not None and conversion_nom_paths is not None:
+                for y in range(YEARS):
+                    conv_cur_y = conversion_nom_paths[:, y] / max(_deflator_conv[y], 1e-12)
+                    ordinary_income_cur_paths[:, y] += conv_cur_y
+
+            logger.info(
+                "[sim] Roth fixed conversions | amount=$%.0f/yr | window y%d-y%d | age %.0f→%.0f",
+                float(conversion_per_year_nom),
+                _window_start_y, _window_end_y,
+                _current_age, _current_age + _window_end_y,
+            )
+        else:
+            logger.info(
+                "[sim] Roth conversions ENABLED but no amount configured"
+                " — set conversion_amount_k or keepit_below_max_marginal_fed_rate"
+            )
 
     # (no legacy withdrawals block here anymore)
 
@@ -727,18 +876,49 @@ def run_accounts_new(
         yoy_real_inv = pct_change_paths(lvl_real_inv,
                                         prior_col=acct_start_nom)
 
-        # Aggregate YoY: includes all cashflows (withdrawals, deposits, reinvestments)
-        yoy_nom_agg  = pct_change_paths(lvl_nom,  prior_col=acct_start_nom)
-        yoy_real_agg = pct_change_paths(lvl_real,
-                                        prior_col=acct_start_nom)
+        # ── Portfolio YoY ("aggregate") ─────────────────────────────────────────
+        # ── Portfolio YoY: ratio-of-means ──────────────────────────────────────
+        # We need to show "how did the portfolio balance change year-over-year,
+        # including all cashflows (withdrawals, conversions, RMD, reinvestment)".
+        #
+        # The naive approach — mean(path_ratio) — suffers Jensen's inequality bias:
+        #
+        #   BROKERAGE: some paths drain to small balances → small denominators →
+        #              those paths produce large ratios → mean inflated upward
+        #              (observed: 35% ratio-of-means inflated to 55.70% in year 6)
+        #
+        #   TRAD: some paths deplete to zero → $1 floor guard forces ratio → 0%
+        #         for those paths → mean pulled DOWN artificially
+        #         (observed: 9.6% ratio-of-means suppressed to 0.53% in year 6)
+        #
+        # Fix: ratio-of-means = mean_bal[y] / mean_bal[y-1] - 1
+        # This directly corresponds to the mean balance columns already in the table,
+        # eliminates both bias directions, and is the most interpretable metric:
+        # "if you had the average portfolio, what was your YoY change?"
+        _mean_nom  = lvl_nom.mean(axis=0)   # shape: (YEARS,)
+        _mean_real = lvl_real.mean(axis=0)
+
+        _agg_nom_arr  = np.zeros(YEARS, dtype=float)
+        _agg_real_arr = np.zeros(YEARS, dtype=float)
+
+        # Year 0: vs actual starting balance
+        if acct_start >= 1.0:
+            _agg_nom_arr[0]  = np.clip(_mean_nom[0]  / acct_start - 1.0, -1.0, 50.0)
+            _agg_real_arr[0] = np.clip(_mean_real[0] / acct_start - 1.0, -1.0, 50.0)
+        # Years 1+: vs prior year mean balance
+        for _y in range(1, YEARS):
+            if _mean_nom[_y - 1] >= 1.0:
+                _agg_nom_arr[_y]  = np.clip(_mean_nom[_y]  / _mean_nom[_y - 1]  - 1.0, -1.0, 50.0)
+            if _mean_real[_y - 1] >= 1.0:
+                _agg_real_arr[_y] = np.clip(_mean_real[_y] / _mean_real[_y - 1] - 1.0, -1.0, 50.0)
 
         # r[:,y] = bal[y]/bal[y-1]-1, r[:,0] uses actual starting balance
         inv_nom_yoy_mean_pct_acct[acct]               = (yoy_nom_inv.mean(axis=0)   * 100.0).tolist()
         inv_real_yoy_mean_pct_acct[acct]              = (yoy_real_inv.mean(axis=0)  * 100.0).tolist()
         inv_nom_yoy_mean_pct_acct[acct + "__inv_med"] = (np.median(yoy_nom_inv, axis=0) * 100.0).tolist()
-        inv_nom_yoy_mean_pct_acct[acct + "__agg_nom"] = (yoy_nom_agg.mean(axis=0)   * 100.0).tolist()
-        inv_nom_yoy_mean_pct_acct[acct + "__agg_real"]= (yoy_real_agg.mean(axis=0)  * 100.0).tolist()
-        inv_nom_yoy_mean_pct_acct[acct + "__agg_nom_med"] = (np.median(yoy_nom_agg, axis=0) * 100.0).tolist()
+        inv_nom_yoy_mean_pct_acct[acct + "__agg_nom"] = (_agg_nom_arr  * 100.0).tolist()
+        inv_nom_yoy_mean_pct_acct[acct + "__agg_real"]= (_agg_real_arr * 100.0).tolist()
+        inv_nom_yoy_mean_pct_acct[acct + "__agg_nom_med"] = (_agg_nom_arr * 100.0).tolist()  # same scalar
 
         # Reinvestment summary per account (current and future USD, mean)
         reinvest_cur_mean = (reinvest_nom / np.maximum(deflator, 1e-12)).mean(axis=0)
@@ -752,6 +932,35 @@ def run_accounts_new(
         rmd_out_fut_mean = rmd_out_nom.mean(axis=0)
         inv_nom_levels_mean_acct[acct + "__rmd_out_cur"] = rmd_out_cur_mean.tolist()
         inv_nom_levels_mean_acct[acct + "__rmd_out_fut"] = rmd_out_fut_mean.tolist()
+
+        # Conversion flows per account
+        # TRAD: conversion_out = nominal $ debited per year
+        if _is_trad(acct) and acct in _conv_out_per_trad:
+            conv_out_nom = _conv_out_per_trad[acct]
+            inv_nom_levels_mean_acct[acct + "__conversion_out_cur"] = (
+                (conv_out_nom / np.maximum(deflator, 1e-12)).mean(axis=0).tolist()
+            )
+            inv_nom_levels_mean_acct[acct + "__conversion_out_fut"] = (
+                conv_out_nom.mean(axis=0).tolist()
+            )
+        # ROTH: conversion_in = nominal $ credited per year
+        if _is_roth(acct) and acct in _conv_in_per_roth:
+            conv_in_nom = _conv_in_per_roth[acct]
+            inv_nom_levels_mean_acct[acct + "__conversion_in_cur"] = (
+                (conv_in_nom / np.maximum(deflator, 1e-12)).mean(axis=0).tolist()
+            )
+            inv_nom_levels_mean_acct[acct + "__conversion_in_fut"] = (
+                conv_in_nom.mean(axis=0).tolist()
+            )
+        # BROKERAGE: conversion_tax = nominal $ tax debited per year
+        if _is_brokerage(acct) and acct in _conv_tax_per_brok:
+            conv_tax_nom = _conv_tax_per_brok[acct]
+            inv_nom_levels_mean_acct[acct + "__conversion_tax_cur"] = (
+                (conv_tax_nom / np.maximum(deflator, 1e-12)).mean(axis=0).tolist()
+            )
+            inv_nom_levels_mean_acct[acct + "__conversion_tax_fut"] = (
+                conv_tax_nom.mean(axis=0).tolist()
+            )
 
         # Withdrawal outflow per account:
         #   = discretionary sold (plan > RMD years)
@@ -962,6 +1171,37 @@ def run_accounts_new(
         "state_year0_cur_paths_mean": float(taxes_state_cur_paths.mean()) if taxes_state_cur_paths is not None else 0.0,
         "niit_year0_cur_paths_mean": float(taxes_niit_cur_paths.mean()) if taxes_niit_cur_paths is not None else 0.0,
         "excise_year0_cur_paths_mean": float(taxes_excise_cur_paths.mean()) if taxes_excise_cur_paths is not None else 0.0,
+        # Per-year mean arrays (current USD) for UI display
+        "fed_cur_mean_by_year":    taxes_fed_cur_paths.mean(axis=0).tolist(),
+        "state_cur_mean_by_year":  taxes_state_cur_paths.mean(axis=0).tolist(),
+        "niit_cur_mean_by_year":   taxes_niit_cur_paths.mean(axis=0).tolist(),
+        "excise_cur_mean_by_year": taxes_excise_cur_paths.mean(axis=0).tolist(),
+        # 30yr totals
+        "fed_total_cur_mean":    float(taxes_fed_cur_paths.sum(axis=1).mean()),
+        "state_total_cur_mean":  float(taxes_state_cur_paths.sum(axis=1).mean()),
+        "niit_total_cur_mean":   float(taxes_niit_cur_paths.sum(axis=1).mean()),
+        "excise_total_cur_mean": float(taxes_excise_cur_paths.sum(axis=1).mean()),
+    }
+
+    # Roth conversion summary
+    _conv_nom = conversion_nom_paths if conversion_nom_paths is not None else np.zeros((paths, YEARS), dtype=float)
+    _conv_cur = _conv_nom / np.maximum(_deflator_conv, 1e-12)
+    _conv_tax = conversion_tax_cost_cur_paths  # already current USD
+    res["conversions"] = {
+        # Per-year mean (future USD nominal)
+        "conversion_nom_mean_by_year":  _conv_nom.mean(axis=0).tolist(),
+        # Per-year mean (current USD deflated)
+        "conversion_cur_mean_by_year":  _conv_cur.mean(axis=0).tolist(),
+        # Per-year tax cost (current USD)
+        "conversion_tax_cur_mean_by_year": _conv_tax.mean(axis=0).tolist(),
+        # Net benefit = conversion - tax (current USD, per year)
+        "conversion_net_cur_mean_by_year": (_conv_cur - _conv_tax).mean(axis=0).tolist(),
+        # 30yr totals
+        "total_converted_nom_mean":  float(_conv_nom.sum(axis=1).mean()),
+        "total_converted_cur_mean":  float(_conv_cur.sum(axis=1).mean()),
+        "total_tax_cost_cur_mean":   float(_conv_tax.sum(axis=1).mean()),
+        "conversion_enabled": bool(_conv_enabled),
+        "bracket_fill_mode":  bool(_bracket_fill_mode),
     }
 
     # Starting balances and account types (for UI)

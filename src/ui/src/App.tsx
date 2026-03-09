@@ -151,7 +151,6 @@ const CONFIG_FILES = [
   "shocks_yearly.json",
   "person.json",
   "income.json",
-  "rmd.json",
   "economic.json",
 ];
 
@@ -1385,7 +1384,6 @@ const App: React.FC = () => {
                     }
                   >
                     <option value="None">None</option>
-                    <option value="All">All</option>
                     {(snapshot.accounts || []).map((acct) => (
                       <option key={acct.name} value={acct.name}>
                         {acct.name}
@@ -1396,23 +1394,52 @@ const App: React.FC = () => {
 
                 <table className="table">
                   <thead>
-                    <tr>
-                      <th>Account</th>
-                      <th>Year</th>
-                      <th>$ Future - mean</th>
-                      <th>$ Future - median</th>
-                      <th>$ Future - p10</th>
-                      <th>$ Future - p90</th>
-                      <th>Nominal Portfolio YoY - mean</th>
-                      <th>Real Portfolio YoY - mean</th>
-                      <th>Nominal Inv YoY - mean</th>
-                      <th>Real Inv YoY - mean</th>
-                      <th>Reinvested Out Future USD</th>
-                      <th>Reinvested In Future USD</th>
-                      <th>RMD Out Future USD</th>
-                      <th>Withdrawal Out Future USD</th>
-                      <th>Total Out Future USD</th>
-                    </tr>
+                    {(() => {
+                      const selAcct = (snapshot.accounts || []).find(
+                        (a) => a.name === selectedResultsAccountFuture,
+                      );
+                      const t = selAcct?.type ?? "";
+                      if (t === "traditional_ira") return (
+                        <tr>
+                          <th>Account</th><th>Year</th>
+                          <th>$ Future - mean</th><th>$ Future - median</th>
+                          <th>$ Future - p10</th><th>$ Future - p90</th>
+                          <th>Nominal Portfolio YoY</th><th>Real Portfolio YoY</th>
+                          <th>Nominal Inv YoY</th><th>Real Inv YoY</th>
+                          <th>Conversion Out Future USD</th>
+                          <th>RMD Out Future USD</th>
+                          <th>Reinvested Out Future USD</th>
+                          <th>Withdrawal Out Future USD</th>
+                          <th>Total Out Future USD</th>
+                        </tr>
+                      );
+                      if (t === "roth_ira") return (
+                        <tr>
+                          <th>Account</th><th>Year</th>
+                          <th>$ Future - mean</th><th>$ Future - median</th>
+                          <th>$ Future - p10</th><th>$ Future - p90</th>
+                          <th>Nominal Portfolio YoY</th><th>Real Portfolio YoY</th>
+                          <th>Nominal Inv YoY</th><th>Real Inv YoY</th>
+                          <th>Conversion In Future USD</th>
+                          <th>Withdrawal Out Future USD</th>
+                          <th>Total Out Future USD</th>
+                        </tr>
+                      );
+                      // brokerage (default)
+                      return (
+                        <tr>
+                          <th>Account</th><th>Year</th>
+                          <th>$ Future - mean</th><th>$ Future - median</th>
+                          <th>$ Future - p10</th><th>$ Future - p90</th>
+                          <th>Nominal Portfolio YoY</th><th>Real Portfolio YoY</th>
+                          <th>Nominal Inv YoY</th><th>Real Inv YoY</th>
+                          <th>Conversion Tax Out Future USD</th>
+                          <th>Reinvested In Future USD</th>
+                          <th>Withdrawal Out Future USD</th>
+                          <th>Total Out Future USD</th>
+                        </tr>
+                      );
+                    })()}
                   </thead>
                   <tbody>
                     {(() => {
@@ -1421,7 +1448,7 @@ const App: React.FC = () => {
 
                       if (selectedResultsAccountFuture === "None") {
                         visibleAccounts = [];
-                      } else if (selectedResultsAccountFuture !== "All") {
+                      } else {
                         visibleAccounts = allAccounts.filter(
                           (a) => a.name === selectedResultsAccountFuture,
                         );
@@ -1430,41 +1457,70 @@ const App: React.FC = () => {
                       const rows: JSX.Element[] = [];
                       for (const acct of visibleAccounts) {
                         const name = acct.name;
+                        const t = acct.type;
                         const levels = snapshot.returns_acct_levels;
                         const rets = snapshot.returns_acct;
-                        const mean =
-                          levels?.inv_nom_levels_mean_acct[name] || [];
-                        const med =
-                          levels?.inv_nom_levels_med_acct[name] || [];
-                        const p10 =
-                          levels?.inv_nom_levels_p10_acct[name] || [];
-                        const p90 =
-                          levels?.inv_nom_levels_p90_acct[name] || [];
-                        const yoyNom =
-                          rets?.inv_nom_yoy_mean_pct_acct[name] || [];
-                        const yoyReal =
-                          rets?.inv_real_yoy_mean_pct_acct[name] || [];
-                        const yoyNomAgg =
-                          rets?.inv_nom_yoy_mean_pct_acct[name + "__agg_nom"] || [];
-                        const yoyRealAgg =
-                          rets?.inv_nom_yoy_mean_pct_acct[name + "__agg_real"] || [];
-                        const reinvestedFutRaw =
-                          levels?.inv_nom_levels_mean_acct[name + "__reinvest_fut"] || [];
-                        const rmdOutFut =
-                          levels?.inv_nom_levels_mean_acct[name + "__rmd_out_fut"] || [];
-                        const withdrawalOutFut =
-                          levels?.inv_nom_levels_mean_acct[name + "__withdrawal_out_fut"] || [];
+                        const mean   = levels?.inv_nom_levels_mean_acct[name] || [];
+                        const med    = levels?.inv_nom_levels_med_acct[name] || [];
+                        const p10    = levels?.inv_nom_levels_p10_acct[name] || [];
+                        const p90    = levels?.inv_nom_levels_p90_acct[name] || [];
+                        const yoyNom = rets?.inv_nom_yoy_mean_pct_acct[name] || [];
+                        const yoyReal= rets?.inv_real_yoy_mean_pct_acct[name] || [];
+                        const yoyNomAgg  = rets?.inv_nom_yoy_mean_pct_acct[name + "__agg_nom"] || [];
+                        const yoyRealAgg = rets?.inv_nom_yoy_mean_pct_acct[name + "__agg_real"] || [];
+
+                        // Flow arrays — fetched per type to keep logic clean
+                        const rmdOutFut        = levels?.inv_nom_levels_mean_acct[name + "__rmd_out_fut"] || [];
+                        const withdrawalOutFut = levels?.inv_nom_levels_mean_acct[name + "__withdrawal_out_fut"] || [];
+                        const reinvestFutRaw   = levels?.inv_nom_levels_mean_acct[name + "__reinvest_fut"] || [];
+                        const convOutFut       = levels?.inv_nom_levels_mean_acct[name + "__conversion_out_fut"] || [];
+                        const convInFut        = levels?.inv_nom_levels_mean_acct[name + "__conversion_in_fut"] || [];
+                        const convTaxFut       = levels?.inv_nom_levels_mean_acct[name + "__conversion_tax_fut"] || [];
+
                         snapshot.years.forEach((yr, idx) => {
-                          // TRAD_IRA: Reinvested = RMD Out - Withdrawal Out (surplus above plan).
-                          // Brokerage: inflow received from TRAD surplus (raw from simulator).
-                          const reinvestedFutDisplay = acct.type === "traditional_ira"
-                            ? Math.max((rmdOutFut[idx] || 0) - (withdrawalOutFut[idx] || 0), 0)
-                            : (reinvestedFutRaw[idx] || 0);
-                          // Total Out for TRAD_IRA = RMD Out (withdrawal + reinvested are subsets of it).
-                          // For brokerage/roth = withdrawal out only.
-                          const totalOutFut = acct.type === "traditional_ira"
-                            ? (rmdOutFut[idx] || 0)
-                            : (withdrawalOutFut[idx] || 0);
+                          let cells: JSX.Element;
+
+                          if (t === "traditional_ira") {
+                            const rmd      = rmdOutFut[idx] || 0;
+                            const convOut  = convOutFut[idx] || 0;
+                            const wdraw    = withdrawalOutFut[idx] || 0;
+                            const reinvOut = Math.max(rmd - wdraw, 0);
+                            const totalOut = rmd + convOut;
+                            cells = (
+                              <>
+                                <td>{formatUSD(convOut)}</td>
+                                <td>{formatUSD(rmd)}</td>
+                                <td>{formatUSD(reinvOut)}</td>
+                                <td>{formatUSD(wdraw)}</td>
+                                <td>{totalOut > 0 ? formatUSD(totalOut) : "0"}</td>
+                              </>
+                            );
+                          } else if (t === "roth_ira") {
+                            const convIn  = convInFut[idx] || 0;
+                            const wdraw   = withdrawalOutFut[idx] || 0;
+                            cells = (
+                              <>
+                                <td>{formatUSD(convIn)}</td>
+                                <td>{formatUSD(wdraw)}</td>
+                                <td>{wdraw > 0 ? formatUSD(wdraw) : "0"}</td>
+                              </>
+                            );
+                          } else {
+                            // brokerage
+                            const convTax   = convTaxFut[idx] || 0;
+                            const reinvestIn= reinvestFutRaw[idx] || 0;
+                            const wdraw     = withdrawalOutFut[idx] || 0;
+                            const totalOut  = wdraw + convTax;
+                            cells = (
+                              <>
+                                <td>{convTax > 0 ? formatUSD(convTax) : "0"}</td>
+                                <td>{reinvestIn > 0 ? formatUSD(reinvestIn) : "0"}</td>
+                                <td>{formatUSD(wdraw)}</td>
+                                <td>{totalOut > 0 ? formatUSD(totalOut) : "0"}</td>
+                              </>
+                            );
+                          }
+
                           rows.push(
                             <tr key={`${name}-${yr}`}>
                               <td>{idx === 0 ? name : ""}</td>
@@ -1477,11 +1533,7 @@ const App: React.FC = () => {
                               <td>{formatPct(yoyRealAgg[idx])}</td>
                               <td>{formatPct(yoyNom[idx])}</td>
                               <td>{formatPct(yoyReal[idx])}</td>
-                              <td>{acct.type === "traditional_ira" ? formatUSD(reinvestedFutDisplay) : "—"}</td>
-                              <td>{acct.type !== "traditional_ira" ? formatUSD(reinvestedFutDisplay) : "—"}</td>
-                              <td>{acct.type === "traditional_ira" ? formatUSD(rmdOutFut[idx]) : "—"}</td>
-                              <td>{formatUSD(withdrawalOutFut[idx])}</td>
-                              <td>{totalOutFut > 0 ? formatUSD(totalOutFut) : "0"}</td>
+                              {cells}
                             </tr>,
                           );
                         });
@@ -1504,7 +1556,6 @@ const App: React.FC = () => {
                     }
                   >
                     <option value="None">None</option>
-                    <option value="All">All</option>
                     {(snapshot.accounts || []).map((acct) => (
                       <option key={acct.name} value={acct.name}>
                         {acct.name}
@@ -1515,23 +1566,51 @@ const App: React.FC = () => {
 
                 <table className="table">
                   <thead>
-                    <tr>
-                      <th>Account</th>
-                      <th>Year</th>
-                      <th>$ Current - mean</th>
-                      <th>$ Current - median</th>
-                      <th>$ Current - p10</th>
-                      <th>$ Current - p90</th>
-                      <th>Nominal Portfolio YoY - mean</th>
-                      <th>Real Portfolio YoY - mean</th>
-                      <th>Nominal Inv YoY - mean</th>
-                      <th>Real Inv YoY - mean</th>
-                      <th>Reinvested Out Current USD</th>
-                      <th>Reinvested In Current USD</th>
-                      <th>RMD Out Current USD</th>
-                      <th>Withdrawal Out Current USD</th>
-                      <th>Total Out Current USD</th>
-                    </tr>
+                    {(() => {
+                      const selAcct = (snapshot.accounts || []).find(
+                        (a) => a.name === selectedResultsAccountCurrent,
+                      );
+                      const t = selAcct?.type ?? "";
+                      if (t === "traditional_ira") return (
+                        <tr>
+                          <th>Account</th><th>Year</th>
+                          <th>$ Current - mean</th><th>$ Current - median</th>
+                          <th>$ Current - p10</th><th>$ Current - p90</th>
+                          <th>Nominal Portfolio YoY</th><th>Real Portfolio YoY</th>
+                          <th>Nominal Inv YoY</th><th>Real Inv YoY</th>
+                          <th>Conversion Out Current USD</th>
+                          <th>RMD Out Current USD</th>
+                          <th>Reinvested Out Current USD</th>
+                          <th>Withdrawal Out Current USD</th>
+                          <th>Total Out Current USD</th>
+                        </tr>
+                      );
+                      if (t === "roth_ira") return (
+                        <tr>
+                          <th>Account</th><th>Year</th>
+                          <th>$ Current - mean</th><th>$ Current - median</th>
+                          <th>$ Current - p10</th><th>$ Current - p90</th>
+                          <th>Nominal Portfolio YoY</th><th>Real Portfolio YoY</th>
+                          <th>Nominal Inv YoY</th><th>Real Inv YoY</th>
+                          <th>Conversion In Current USD</th>
+                          <th>Withdrawal Out Current USD</th>
+                          <th>Total Out Current USD</th>
+                        </tr>
+                      );
+                      return (
+                        <tr>
+                          <th>Account</th><th>Year</th>
+                          <th>$ Current - mean</th><th>$ Current - median</th>
+                          <th>$ Current - p10</th><th>$ Current - p90</th>
+                          <th>Nominal Portfolio YoY</th><th>Real Portfolio YoY</th>
+                          <th>Nominal Inv YoY</th><th>Real Inv YoY</th>
+                          <th>Conversion Tax Out Current USD</th>
+                          <th>Reinvested In Current USD</th>
+                          <th>Withdrawal Out Current USD</th>
+                          <th>Total Out Current USD</th>
+                        </tr>
+                      );
+                    })()}
                   </thead>
 
                   <tbody>
@@ -1541,7 +1620,7 @@ const App: React.FC = () => {
 
                       if (selectedResultsAccountCurrent === "None") {
                         visibleAccounts = [];
-                      } else if (selectedResultsAccountCurrent !== "All") {
+                      } else {
                         visibleAccounts = allAccounts.filter(
                           (a) => a.name === selectedResultsAccountCurrent,
                         );
@@ -1550,37 +1629,69 @@ const App: React.FC = () => {
                       const rows: JSX.Element[] = [];
                       for (const acct of visibleAccounts) {
                         const name = acct.name;
+                        const t = acct.type;
                         const levels = snapshot.returns_acct_levels;
                         const rets = snapshot.returns_acct;
-                        const mean =
-                          levels?.inv_real_levels_mean_acct[name] || [];
-                        const med =
-                          levels?.inv_real_levels_med_acct[name] || [];
-                        const p10 =
-                          levels?.inv_real_levels_p10_acct[name] || [];
-                        const p90 =
-                          levels?.inv_real_levels_p90_acct[name] || [];
-                        const yoyNom =
-                          rets?.inv_nom_yoy_mean_pct_acct[name] || [];
-                        const yoyReal =
-                          rets?.inv_real_yoy_mean_pct_acct[name] || [];
-                        const yoyNomAggCur =
-                          rets?.inv_nom_yoy_mean_pct_acct[name + "__agg_nom"] || [];
-                        const yoyRealAggCur =
-                          rets?.inv_nom_yoy_mean_pct_acct[name + "__agg_real"] || [];
-                        const reinvestedCurRaw =
-                          levels?.inv_nom_levels_mean_acct[name + "__reinvest_cur"] || [];
-                        const rmdOutCur =
-                          levels?.inv_nom_levels_mean_acct[name + "__rmd_out_cur"] || [];
-                        const withdrawalOutCur =
-                          levels?.inv_nom_levels_mean_acct[name + "__withdrawal_out_cur"] || [];
+                        const mean    = levels?.inv_real_levels_mean_acct[name] || [];
+                        const med     = levels?.inv_real_levels_med_acct[name] || [];
+                        const p10     = levels?.inv_real_levels_p10_acct[name] || [];
+                        const p90     = levels?.inv_real_levels_p90_acct[name] || [];
+                        const yoyNom  = rets?.inv_nom_yoy_mean_pct_acct[name] || [];
+                        const yoyReal = rets?.inv_real_yoy_mean_pct_acct[name] || [];
+                        const yoyNomAggCur  = rets?.inv_nom_yoy_mean_pct_acct[name + "__agg_nom"] || [];
+                        const yoyRealAggCur = rets?.inv_nom_yoy_mean_pct_acct[name + "__agg_real"] || [];
+
+                        const rmdOutCur        = levels?.inv_nom_levels_mean_acct[name + "__rmd_out_cur"] || [];
+                        const withdrawalOutCur = levels?.inv_nom_levels_mean_acct[name + "__withdrawal_out_cur"] || [];
+                        const reinvestCurRaw   = levels?.inv_nom_levels_mean_acct[name + "__reinvest_cur"] || [];
+                        const convOutCur       = levels?.inv_nom_levels_mean_acct[name + "__conversion_out_cur"] || [];
+                        const convInCur        = levels?.inv_nom_levels_mean_acct[name + "__conversion_in_cur"] || [];
+                        const convTaxCur       = levels?.inv_nom_levels_mean_acct[name + "__conversion_tax_cur"] || [];
+
                         snapshot.years.forEach((yr, idx) => {
-                          const reinvestedCurDisplay = acct.type === "traditional_ira"
-                            ? Math.max((rmdOutCur[idx] || 0) - (withdrawalOutCur[idx] || 0), 0)
-                            : (reinvestedCurRaw[idx] || 0);
-                          const totalOutCur = acct.type === "traditional_ira"
-                            ? (rmdOutCur[idx] || 0)
-                            : (withdrawalOutCur[idx] || 0);
+                          let cells: JSX.Element;
+
+                          if (t === "traditional_ira") {
+                            const rmd      = rmdOutCur[idx] || 0;
+                            const convOut  = convOutCur[idx] || 0;
+                            const wdraw    = withdrawalOutCur[idx] || 0;
+                            const reinvOut = Math.max(rmd - wdraw, 0);
+                            const totalOut = rmd + convOut;
+                            cells = (
+                              <>
+                                <td>{formatUSD(convOut)}</td>
+                                <td>{formatUSD(rmd)}</td>
+                                <td>{formatUSD(reinvOut)}</td>
+                                <td>{formatUSD(wdraw)}</td>
+                                <td>{totalOut > 0 ? formatUSD(totalOut) : "0"}</td>
+                              </>
+                            );
+                          } else if (t === "roth_ira") {
+                            const convIn  = convInCur[idx] || 0;
+                            const wdraw   = withdrawalOutCur[idx] || 0;
+                            cells = (
+                              <>
+                                <td>{formatUSD(convIn)}</td>
+                                <td>{formatUSD(wdraw)}</td>
+                                <td>{wdraw > 0 ? formatUSD(wdraw) : "0"}</td>
+                              </>
+                            );
+                          } else {
+                            // brokerage
+                            const convTax    = convTaxCur[idx] || 0;
+                            const reinvestIn = reinvestCurRaw[idx] || 0;
+                            const wdraw      = withdrawalOutCur[idx] || 0;
+                            const totalOut   = wdraw + convTax;
+                            cells = (
+                              <>
+                                <td>{convTax > 0 ? formatUSD(convTax) : "0"}</td>
+                                <td>{reinvestIn > 0 ? formatUSD(reinvestIn) : "0"}</td>
+                                <td>{formatUSD(wdraw)}</td>
+                                <td>{totalOut > 0 ? formatUSD(totalOut) : "0"}</td>
+                              </>
+                            );
+                          }
+
                           rows.push(
                             <tr key={`cur-${name}-${yr}`}>
                               <td>{idx === 0 ? name : ""}</td>
@@ -1593,11 +1704,7 @@ const App: React.FC = () => {
                               <td>{formatPct(yoyRealAggCur[idx])}</td>
                               <td>{formatPct(yoyNom[idx])}</td>
                               <td>{formatPct(yoyReal[idx])}</td>
-                              <td>{acct.type === "traditional_ira" ? formatUSD(reinvestedCurDisplay) : "—"}</td>
-                              <td>{acct.type !== "traditional_ira" ? formatUSD(reinvestedCurDisplay) : "—"}</td>
-                              <td>{acct.type === "traditional_ira" ? formatUSD(rmdOutCur[idx]) : "—"}</td>
-                              <td>{formatUSD(withdrawalOutCur[idx])}</td>
-                              <td>{totalOutCur > 0 ? formatUSD(totalOutCur) : "0"}</td>
+                              {cells}
                             </tr>,
                           );
                         });
