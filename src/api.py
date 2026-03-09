@@ -920,6 +920,7 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
             rmd_table_path=rmd_path,
             conversion_per_year_nom=None,  # simulator_new resolves from person_cfg roth_conversion_policy
             rmds_enabled=rmds_enabled,
+            conversions_enabled=not ignore_conversions_flag,
             shocks_events=shocks_events,
             shocks_mode=str(internal_shocks_mode),
             econ_policy=econ_policy,
