@@ -48,9 +48,22 @@ def compute_annual_taxes(
     excise_cfg = (tax_cfg.get("STATE_CG_EXCISE", {}) or {})
     excise_rate_nom = float(excise_cfg.get("rate", 0.0))
 
-    # --- Dividends: compute fed/state/NIIT on ordinary + qualified dividends ---
+    # Apply standard deductions before hitting the bracket tables.
+    # FED_ORD (and STATE_ORD) brackets are expressed as taxable-income thresholds,
+    # so gross income must be reduced by the relevant standard deduction first.
+    # Deductions cannot create negative taxable income.
+    fed_std_ded   = float(tax_cfg.get("FED_STD_DED",   0.0))
+    state_std_ded = float(tax_cfg.get("STATE_STD_DED", 0.0))
+
+    ordinary_taxable_fed   = max(0.0, float(ordinary_income_cur) - fed_std_ded)
+    ordinary_taxable_state = max(0.0, float(ordinary_income_cur) - state_std_ded)
+
+    # --- Dividends: compute fed/state/NIIT on ordinary + qualified income ---
+    # compute_dividend_taxes_components returns keys: "fed_ord", "fed_qual", "state", "niit"
+    # We pass the post-deduction taxable amounts for ordinary income,
+    # but keep the full gross amounts for NIIT threshold comparison (NIIT uses AGI not taxable).
     comp_div = compute_dividend_taxes_components(
-        ordinary_div_nom=float(ordinary_income_cur),
+        ordinary_div_nom=ordinary_taxable_fed,
         qualified_div_nom=float(qual_div_cur),
         fed_ord_brackets=fed_ord_br,
         fed_qual_brackets=fed_qual_br,
@@ -61,10 +74,27 @@ def compute_annual_taxes(
         ytd_income_nom=float(ytd_income_nom),
     )
 
-    # comp_div is a mapping; legacy code picks keys from it
-    # From your simulator you can inspect the exact keys; for now we assume:
-    taxes_fed_div_cur = float(comp_div.get("fed", 0.0))
+    # Bug fix: returned keys are "fed_ord" and "fed_qual", NOT "fed".
+    # Total federal tax on ordinary + qualified income = fed_ord + fed_qual.
+    taxes_fed_div_cur = float(comp_div.get("fed_ord", 0.0)) + float(comp_div.get("fed_qual", 0.0))
+    # State uses its own deduction (passed via ordinary_taxable_state above).
+    # compute_dividend_taxes_components uses ordinary_div_nom for state too, so
+    # re-call with state-adjusted amount when deductions differ, otherwise use as-is.
     taxes_state_div_cur = float(comp_div.get("state", 0.0))
+    if state_std_ded != fed_std_ded:
+        # Recompute state portion with state-specific deduction
+        _comp_state = compute_dividend_taxes_components(
+            ordinary_div_nom=ordinary_taxable_state,
+            qualified_div_nom=float(qual_div_cur),
+            fed_ord_brackets=[],
+            fed_qual_brackets=[],
+            state_type=state_type,
+            state_ord_brackets=state_ord_br,
+            niit_rate=0.0,
+            niit_threshold_nom=niit_thresh_nom,
+            ytd_income_nom=float(ytd_income_nom),
+        )
+        taxes_state_div_cur = float(_comp_state.get("state", 0.0))
     taxes_niit_div_cur = float(comp_div.get("niit", 0.0))
 
     # --- Gains: compute fed/state/NIIT/excise on realized capital gains ---

@@ -92,6 +92,11 @@ def simulate_balances(
     per_year_pf = alloc_accounts.get("per_year_portfolios", {}) or {}
     acct_names = list(per_year_pf.keys())
     starting_cfg = alloc_accounts.get("starting", {}) or {}
+    # deposits_yearly: {acct: np.ndarray of length YEARS} — pre-expanded by loader.
+    # Deposits are treated as beginning-of-year inflows so they compound with
+    # that year's asset returns.  Zero array is the safe default for accounts
+    # that have no explicit deposit schedule.
+    deposits_cfg: Dict[str, np.ndarray] = alloc_accounts.get("deposits_yearly", {}) or {}
 
     # ---- Load asset model ----
     assets_model = load_assets_model(assets_path)
@@ -261,21 +266,36 @@ def simulate_balances(
                     "OTHER":       np.ones(paths, dtype=float),
                 }
 
-            # Compound balances (no deposits, no withdrawals in core)
+            # Compound balances with optional beginning-of-year deposits.
+            # deposit_y is the nominal cash inflow for this account in year y.
+            # It is added before applying the year's return multiplier so it
+            # compounds with the rest of the balance for that year.
+            _dep_arr = deposits_cfg.get(acct)
+            deposit_y = (
+                float(_dep_arr[y])
+                if _dep_arr is not None and y < len(_dep_arr)
+                else 0.0
+            )
             if y == 0:
                 start_bal = float(starting_cfg.get(acct, 0.0))
-                acct_eoy_nom[acct][:, y] = np.full(paths, start_bal, dtype=float) * year_mult
+                bot_bal = start_bal + deposit_y          # beginning-of-year balance
+                acct_eoy_nom[acct][:, y] = np.full(paths, bot_bal, dtype=float) * year_mult
                 for cls in ALL_CLASSES:
                     w_cls = class_w.get(cls, 0.0)
                     acct_class_eoy_nom[acct][cls][:, y] = (
-                        start_bal * w_cls * cls_mult[cls]
+                        bot_bal * w_cls * cls_mult[cls]
                     )
             else:
                 prev = acct_eoy_nom[acct][:, y - 1]
-                acct_eoy_nom[acct][:, y] = prev * year_mult
+                bot = prev + deposit_y                   # beginning-of-year balance
+                acct_eoy_nom[acct][:, y] = bot * year_mult
                 for cls in ALL_CLASSES:
+                    w_cls = class_w.get(cls, 0.0)
                     prev_cls = acct_class_eoy_nom[acct][cls][:, y - 1]
-                    acct_class_eoy_nom[acct][cls][:, y] = prev_cls * cls_mult[cls]
+                    # Add deposit proportionally to current class weights then compound
+                    acct_class_eoy_nom[acct][cls][:, y] = (
+                        prev_cls + deposit_y * w_cls
+                    ) * cls_mult[cls]
 
         # Total nominal portfolio per path for year y
         total_nom_paths_y = np.zeros(paths, dtype=float)
