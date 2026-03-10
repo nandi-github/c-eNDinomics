@@ -1,7 +1,7 @@
 # filename: simulator_new.py
 
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import numpy as np
 
 from simulation_core import simulate_balances
@@ -513,6 +513,13 @@ def run_accounts_new(
 
     planned_cur = np.zeros(YEARS, dtype=float)
 
+    # ── Gap 2 fix: populate withdrawals tax fields from computed paths ────────
+    # These were hardcoded zeros; wire the real tax arrays computed above.
+    withdrawals["taxes_fed_current_mean"]    = taxes_fed_cur_paths.mean(axis=0).tolist()
+    withdrawals["taxes_state_current_mean"]  = taxes_state_cur_paths.mean(axis=0).tolist()
+    withdrawals["taxes_niit_current_mean"]   = taxes_niit_cur_paths.mean(axis=0).tolist()
+    withdrawals["taxes_excise_current_mean"] = taxes_excise_cur_paths.mean(axis=0).tolist()
+
     # =========================================================================
     # STEP 3: Apply discretionary withdrawals (amount above RMD) if enabled
     #
@@ -530,6 +537,40 @@ def run_accounts_new(
         acct: np.array(bal, dtype=float, order='C', copy=True)
         for acct, bal in acct_eoy_nom.items()
     }
+
+    # ── Gap 1 fix: Debit ordinary income taxes from brokerage ────────────────
+    # taxes_*_cur_paths are in current USD; convert to nominal before debiting.
+    # Conversion taxes were already debited inside apply_bracket_fill_conversions
+    # (conv_tax_per_brok), so subtract that to avoid double-counting.
+    _tax_payment_source = str((person_cfg or {}).get("tax_payment_source", "BROKERAGE")).upper()
+    if _tax_payment_source == "BROKERAGE" and brokerage_accounts:
+        _taxes_non_conv_cur = np.maximum(
+            taxes_fed_cur_paths
+            + taxes_state_cur_paths
+            + taxes_niit_cur_paths
+            + taxes_excise_cur_paths
+            - conversion_tax_cost_cur_paths,   # already debited in bracket-fill block
+            0.0,
+        )
+        for y in range(YEARS):
+            tax_nom_y = _taxes_non_conv_cur[:, y] * deflator[y]
+            brok_bals_y = np.stack(
+                [np.maximum(acct_eoy_nom[b][:, y], 0.0) for b in brokerage_accounts], axis=1
+            )  # (paths, n_brok)
+            total_brok_y = brok_bals_y.sum(axis=1, keepdims=True)
+            n_brok = len(brokerage_accounts)
+            fracs_y = np.where(
+                total_brok_y > 1e-12,
+                brok_bals_y / np.maximum(total_brok_y, 1e-12),
+                np.full_like(brok_bals_y, 1.0 / n_brok),
+            )
+            for i, b in enumerate(brokerage_accounts):
+                debit = tax_nom_y * fracs_y[:, i]
+                acct_eoy_nom[b][:, y] = np.maximum(acct_eoy_nom[b][:, y] - debit, 0.0)
+        logger.info(
+            "[sim] Tax debit from brokerage | mean non-conv taxes yr0-4 (cur $): %s",
+            np.round(_taxes_non_conv_cur.mean(axis=0)[:5], 0).tolist(),
+        )
 
     # Per-account withdrawal outflow tracker (paths × YEARS).
     # Accumulated inside the STEP 3 loop; available in STEP 6 for per-account stats.
@@ -990,12 +1031,12 @@ def run_accounts_new(
         "shortfall_years_mean":       shortfall_years_mean,
         "drawdown_p50":               drawdown_p50,
         "drawdown_p90":               drawdown_p90,
-        "taxes_fed_total_current":    0.0,
-        "taxes_state_total_current":  0.0,
-        "taxes_niit_total_current":   0.0,
-        "taxes_excise_total_current": 0.0,
+        "taxes_fed_total_current":    float(taxes_fed_cur_paths.sum(axis=1).mean()),
+        "taxes_state_total_current":  float(taxes_state_cur_paths.sum(axis=1).mean()),
+        "taxes_niit_total_current":   float(taxes_niit_cur_paths.sum(axis=1).mean()),
+        "taxes_excise_total_current": float(taxes_excise_cur_paths.sum(axis=1).mean()),
         "tax_shortfall_total_current": 0.0,
-        "rmd_total_current":          0.0,
+        "rmd_total_current":          float(rmd_current_mean.sum()),
         "cagr_nominal_mean":          cagr_nom_mean,
         "cagr_nominal_median":        cagr_nom_median,
         "cagr_nominal_p10":           cagr_nom_p10,
@@ -1005,6 +1046,20 @@ def run_accounts_new(
         "cagr_real_p10":              cagr_real_p10,
         "cagr_real_p90":              cagr_real_p90,
     }
+
+    # ── Gap 4 fix: net spendable per year (current USD, mean across paths) ────
+    # net_spendable = cash received (withdrawals + RMDs) - total tax liability
+    # Note: w2/rental external income not yet separately tracked; add when
+    # ordinary_income_cur_paths splits external vs RMD/conversion income.
+    _taxes_all_cur_mean = (
+        taxes_fed_cur_paths.mean(axis=0)
+        + taxes_state_cur_paths.mean(axis=0)
+        + taxes_niit_cur_paths.mean(axis=0)
+        + taxes_excise_cur_paths.mean(axis=0)
+    )
+    _total_cash_received_cur = np.array(withdrawals["total_withdraw_current_mean"], dtype=float)
+    _net_spendable_cur_mean  = np.maximum(_total_cash_received_cur - _taxes_all_cur_mean, 0.0)
+    withdrawals["net_spendable_current_mean"] = _net_spendable_cur_mean.tolist()
 
 
 #    res["meta"] = {
@@ -1061,10 +1116,10 @@ def run_accounts_new(
     res["withdrawals"] = withdrawals
 
     res["taxes"] = {
-        "fed_year0_cur_paths_mean": float(taxes_fed_cur_paths.mean()) if taxes_fed_cur_paths is not None else 0.0,
-        "state_year0_cur_paths_mean": float(taxes_state_cur_paths.mean()) if taxes_state_cur_paths is not None else 0.0,
-        "niit_year0_cur_paths_mean": float(taxes_niit_cur_paths.mean()) if taxes_niit_cur_paths is not None else 0.0,
-        "excise_year0_cur_paths_mean": float(taxes_excise_cur_paths.mean()) if taxes_excise_cur_paths is not None else 0.0,
+        "fed_year0_cur_paths_mean":    float(taxes_fed_cur_paths[:, 0].mean())    if taxes_fed_cur_paths is not None    else 0.0,
+        "state_year0_cur_paths_mean":  float(taxes_state_cur_paths[:, 0].mean())  if taxes_state_cur_paths is not None  else 0.0,
+        "niit_year0_cur_paths_mean":   float(taxes_niit_cur_paths[:, 0].mean())   if taxes_niit_cur_paths is not None   else 0.0,
+        "excise_year0_cur_paths_mean": float(taxes_excise_cur_paths[:, 0].mean()) if taxes_excise_cur_paths is not None else 0.0,
         # Per-year mean arrays (current USD) for UI display
         "fed_cur_mean_by_year":    taxes_fed_cur_paths.mean(axis=0).tolist(),
         "state_cur_mean_by_year":  taxes_state_cur_paths.mean(axis=0).tolist(),
