@@ -8,3 +8,4 @@ src/reports/
 *.backup
 src/profiles/*/reports/
 src/profiles/*/rmd.json
+test_results/
