@@ -133,6 +133,8 @@ def compute_bracket_fill_conversion_paths(
       1. Find the target bracket ceiling from policy
          ("fill the bracket" = stay below the NEXT bracket above current income)
       2. Compute headroom = ceiling - current_ordinary_income
+         Both income and ceilings are scaled to year-y nominal $ by deflator_y,
+         so the real bracket structure is inflation-stable (no bracket creep).
       3. Conversion = min(headroom, trad_balance, niit_guard)
       4. Cannot convert more than the TRAD balance
 
@@ -166,7 +168,25 @@ def compute_bracket_fill_conversion_paths(
     # ordinary_income_cur_paths is in CURRENT $ (deflated by cumulative inflation).
     # We must compare them in the SAME currency — convert income to nominal first,
     # compute headroom in nominal, then convert conversion amount back to current.
+    #
+    # BRACKET CREEP PREVENTION: Without adjustment, inflation grows inc_nom each year
+    # (inc_nom = inc_cur × deflator_y) while bracket ceilings stay fixed. This causes
+    # income to cross bracket boundaries over time purely due to inflation — not real
+    # income growth — producing erratic headroom (e.g. W2 spills into 24% bracket,
+    # giving MORE headroom than the no-income base case).
+    #
+    # Fix: also scale bracket ceilings and the NIIT threshold by deflator_y, so that
+    # the real bracket structure is consistent across all simulation years. Income and
+    # ceilings inflate together → headroom is purely a function of real income, not
+    # of how far along in the simulation we are.
     deflator_y = max(deflator_y, 1e-12)
+
+    # Pre-scale: inflate bracket ceilings and NIIT threshold to year-y nominal $
+    scaled_brackets = [
+        {**b, "up_to": float(b.get("up_to") or 1e12) * deflator_y}
+        for b in fed_ord_brackets
+    ]
+    niit_thresh_scaled = niit_thresh * deflator_y
 
     for p in range(paths):
         inc_cur = float(ordinary_income_cur_paths[p])
@@ -178,9 +198,9 @@ def compute_bracket_fill_conversion_paths(
         # Convert current income → nominal for bracket comparison
         inc_nom = inc_cur * deflator_y
 
-        # Determine target bracket ceiling (nominal $)
+        # Determine target bracket ceiling (scaled nominal $)
         if max_rate_str == "fill the bracket":
-            target_ceiling_nom = _find_current_bracket_ceiling(inc_nom, fed_ord_brackets)
+            target_ceiling_nom = _find_current_bracket_ceiling(inc_nom, scaled_brackets)
         else:
             try:
                 rate_val = float(max_rate_str.replace("%", "")) / (
@@ -189,16 +209,17 @@ def compute_bracket_fill_conversion_paths(
             except ValueError:
                 rate_val = None
             if rate_val is not None:
-                target_ceiling_nom = _find_rate_bracket_ceiling(rate_val, fed_ord_brackets)
+                target_ceiling_nom = _find_rate_bracket_ceiling(rate_val, scaled_brackets)
             else:
-                target_ceiling_nom = _find_current_bracket_ceiling(inc_nom, fed_ord_brackets)
+                target_ceiling_nom = _find_current_bracket_ceiling(inc_nom, scaled_brackets)
 
         # Headroom in nominal $
         headroom_nom = max(0.0, target_ceiling_nom - inc_nom)
 
-        # NIIT guard: niit_thresh is also in base-year nominal $
-        if avoid_niit and inc_nom < niit_thresh:
-            niit_headroom_nom = max(0.0, niit_thresh - inc_nom)
+        # NIIT guard: use inflation-scaled threshold so the guard is consistent
+        # across simulation years (same real income level triggers it each year).
+        if avoid_niit and inc_nom < niit_thresh_scaled:
+            niit_headroom_nom = max(0.0, niit_thresh_scaled - inc_nom)
             headroom_nom = min(headroom_nom, niit_headroom_nom)
 
         # Cap at available TRAD balance (nominal $)
