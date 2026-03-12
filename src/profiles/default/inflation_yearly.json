@@ -22,8 +22,8 @@
     }
   ],
   "readme": {
-    "purpose": "Annual inflation rate schedule used to deflate nominal values and grow inflation-adjusted targets. Fed long-run target is ~2.0%. Recent 2022-2024 experience was 4-9%.",
+    "purpose": "Annual inflation rate schedule. This rate simultaneously: (1) inflates withdrawal targets from withdrawal_schedule.json so your take-home maintains purchasing power, (2) adjusts tax brackets each year so bracket thresholds grow with inflation, (3) converts between nominal and real dollars in results. Fed long-run target is ~2.0%. Recent 2022-2024 experience was 4-9%.",
     "years": "Year range. Use '1-30' for a flat assumption across the whole simulation.",
-    "rate_pct": "Annual inflation rate as a percentage. E.g. 2.3 = 2.3% per year. Applied as a compound rate within each year block."
+    "rate_pct": "Annual inflation rate as a percentage. E.g. 2.3 = 2.3% per year, compounded. A higher rate means your withdrawal targets grow faster in nominal terms — but your real purchasing power target stays constant."
   }
 }

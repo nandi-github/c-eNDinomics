@@ -2,7 +2,7 @@
   "_comment": "System-defined shock presets. Read-only. Mode is always augment. Do not edit.",
   "presets": {
     "average": {
-      "description": "Mild market correction \u2014 brief dip, quick recovery",
+      "description": "Mild market correction — brief dip, quick recovery",
       "mode": "override",
       "events": [
         {
@@ -61,7 +61,7 @@
       ]
     },
     "below_average": {
-      "description": "Moderate downturn \u2014 2011-style correction with slower recovery",
+      "description": "Moderate downturn — 2011-style correction with slower recovery",
       "mode": "override",
       "events": [
         {
@@ -152,7 +152,7 @@
       ]
     },
     "bad": {
-      "description": "Significant recession \u2014 2001 dotcom style, broad decline",
+      "description": "Significant recession — 2001 dotcom style, broad decline",
       "mode": "override",
       "events": [
         {
@@ -234,7 +234,7 @@
       ]
     },
     "worst": {
-      "description": "Severe crash \u2014 2008 GFC style, deep and prolonged",
+      "description": "Severe crash — 2008 GFC style, deep and prolonged",
       "mode": "override",
       "events": [
         {
@@ -317,21 +317,22 @@
     }
   },
   "readme": {
-    "purpose": "Named macro shock scenario presets selectable from the UI. Each preset defines a deterministic stress-test applied on top of Monte Carlo returns. System file \u2014 lives in src/config/, not per-profile.",
-    "how_selected": "User picks a preset name in the UI ('average', 'below_average', 'bad', 'worst', or 'none'). The simulator loads the matching preset from this file. Profile shocks_yearly.json can augment or replace the preset.",
+    "purpose": "Named macro shock scenario presets selectable from the UI. Each preset defines a deterministic stress-test applied on top of Monte Carlo returns. System file in src/config/, not per-profile.",
+    "tax_note": "Shock presets affect portfolio returns only — no direct tax event. Taxes are computed on income flows, not on portfolio value changes. A severe shock (e.g. 'worst') will suppress withdrawals via shock_scaling in economicglobal.json, which reduces taxable ordinary income that year. Roth conversions may also be suppressed or reduced in bad-market years.",
+    "how_selected": "User picks a preset in the UI ('average', 'below_average', 'bad', 'worst', or 'none'). The simulator loads the matching preset. Profile shocks_yearly.json can augment or replace.",
     "preset_names": {
-      "none": "No system shock applied. Pure Monte Carlo only.",
-      "average": "Mild correction \u2014 brief dip, quick recovery. Roughly 10% drawdown.",
-      "below_average": "Moderate downturn \u2014 2011-style correction, slower recovery. ~20% drawdown.",
-      "bad": "Significant recession \u2014 2001 dotcom style, broad decline. ~35% drawdown.",
-      "worst": "Severe crash \u2014 2008 GFC style, deep and prolonged. ~50%+ drawdown."
+      "none": "No system shock. Pure Monte Carlo only.",
+      "average": "Mild correction — brief dip, quick recovery. ~10% drawdown.",
+      "below_average": "Moderate downturn — 2011-style, slower recovery. ~20% drawdown.",
+      "bad": "Significant recession — 2001 dotcom style, broad decline. ~35% drawdown.",
+      "worst": "Severe crash — 2008 GFC style, deep and prolonged. ~50% drawdown."
     },
     "preset_fields": {
       "description": "Human-readable label shown in the UI dropdown.",
-      "mode": "Always 'override' for system presets \u2014 replaces stochastic returns for affected classes during the shock window.",
-      "events": "List of shock events. Same schema as shocks_yearly.json events. See that file's readme for full field documentation."
+      "mode": "Always 'override' for system presets — replaces stochastic returns for affected classes during the shock window.",
+      "events": "List of shock events. Same schema as shocks_yearly.json. See that file's readme for full field documentation."
     },
     "adding_presets": "Add a new named object under 'presets'. The UI dropdown will pick it up automatically. Preset names must be lowercase with underscores.",
-    "do_not_rename_existing": "The UI and api.py reference preset names by string. Renaming 'bad' or 'worst' will break the dropdown without a matching api.py update."
+    "do_not_rename_existing": "The UI and api.py reference preset names by exact string. Renaming 'bad' or 'worst' will break the UI dropdown without a matching api.py update."
   }
 }

@@ -28,12 +28,12 @@
     }
   ],
   "readme": {
-    "purpose": "Annual withdrawal targets from portfolio. Actual withdrawals may be scaled down in bad markets per economicglobal.json withdrawal shock settings.",
-    "floor_k": "Minimum withdrawal in $k regardless of market conditions. Simulator will not scale below this even in severe downturns.",
+    "purpose": "Annual take-home withdrawal targets — the cash you receive, post-tax. Taxes (federal, state, NIIT, excise) are computed separately and debited from brokerage on top of this amount. Enter what you want to spend, not a grossed-up number. Actual withdrawals may be scaled down in bad markets per economicglobal.json withdrawal shock settings.",
+    "floor_k": "Minimum take-home in $k regardless of market conditions. Simulator will not scale below this even in severe downturns. Taxes are still debited from brokerage separately even at the floor.",
     "schedule": {
       "years": "Year range e.g. '1-5'. Simulation year 1 = current_age + 1.",
-      "amount_k": "Target withdrawal in $k for this period (nominal). This is the ask; market scaling may reduce it.",
-      "base_k": "Inflation base in $k. Each year the floor and target grow from this base by the inflation rate. Set equal to floor_k if you want floor to inflate with target."
+      "amount_k": "Your target take-home in $k — the cash deposited to your bank account, in today's purchasing power (inflation-adjusted annually). Taxes are paid separately from brokerage and are NOT deducted from this amount. Do not gross up for taxes. Market scaling may reduce it in severe downturns.",
+      "base_k": "Minimum acceptable take-home in $k for this period (above floor_k, below amount_k). Models spending flexibility — how much you can cut if needed. Also the inflation base: floor and target both grow from this value each year. Set equal to floor_k to have the floor inflate in step with the target."
     }
   }
 }

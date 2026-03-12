@@ -19,16 +19,18 @@
     "notes": "v1.0 hand-calibrated baseline. Replace with asset_calibration.py output when asset-model pipeline is ready."
   },
   "readme": {
-    "purpose": "Asset model artifact \u2014 mu, sigma, correlation, and distribution parameters for Monte Carlo simulation. This is v1.0 hand-calibrated baseline. Will be superseded by asset_calibration.py pipeline output.",
-    "mu_annual": "Conservative long-run planning estimate. NOT raw historical return. Sources: Vanguard/BlackRock 10yr CMAs, CRSP long-run data.",
-    "sigma_annual": "Annualized return volatility. Long-run estimate, not recent-window.",
-    "expense_ratio": "Annual fund fee subtracted from returns.",
-    "tracking_error": "Additional annual noise above class model. 0.0 for pure index, 0.03-0.04 for single stocks.",
-    "dist.yield_annual": "Annual distribution yield. Drives taxable income in brokerage accounts.",
-    "dist.qualified_ratio": "Fraction of distributions taxed at LTCG rates. 0.0 for Treasury interest.",
-    "_provenance": "Audit trail per ticker \u2014 basis for parameter choices. Ignored by simulator.",
-    "auto_refresh_enabled": "false \u2014 asset model is now managed manually or by asset_calibration.py pipeline. Do not run refresh_assets.py against this file.",
-    "correlations": "Class-level empirical long-run correlation matrix. Conservative (less than peak crisis correlations)."
+    "purpose": "Asset model artifact — mu, sigma, correlation, and distribution parameters for Monte Carlo simulation. System file in src/config/, shared by all profiles. v1.0 hand-calibrated baseline; will be superseded by asset_calibration.py pipeline output.",
+    "do_not_edit_note": "These parameters drive all portfolio return simulations. Changes here affect every profile. Use asset_calibration.py to update from new market data rather than editing manually.",
+    "mu_annual": "Conservative long-run REAL return estimate (net of inflation). NOT raw historical nominal return and NOT recent-window return. Sources: Vanguard/BlackRock 10yr CMAs, CRSP long-run data. Example: 0.065 = 6.5% real annual return. The simulator adds the inflation rate from inflation_yearly.json on top to get nominal returns.",
+    "sigma_annual": "Annualized return volatility (standard deviation). Long-run estimate — not a recent-window figure. Drives the spread of Monte Carlo paths.",
+    "expense_ratio": "Annual fund expense ratio subtracted from returns every year. E.g. 0.0009 = 0.09% (9 basis points). Already reflected in net-of-fee mu.",
+    "tracking_error": "Additional per-year return noise above the asset class model. 0.0 for broad index funds. 0.03-0.04 for single stocks or active funds.",
+    "dist_yield_annual": "Annual distribution yield (dividends + interest). Drives taxable income in BROKERAGE accounts each year. Distributions from TRAD and Roth accounts are NOT taxed annually — they are tax-deferred or tax-free respectively.",
+    "dist_qualified_ratio": "Fraction of annual distributions taxed at LTCG rates (0/15/20%) rather than ordinary income rates. E.g. 0.9 = 90% qualified dividends. 0.0 for Treasury interest (always ordinary income). Only relevant for BROKERAGE accounts.",
+    "tax_note": "Distributions from BROKERAGE accounts generate taxable income each year: (yield × balance × qualified_ratio) taxed at LTCG rates, remainder at ordinary rates. TRAD IRA distributions are taxed at ordinary rates only when withdrawn. Roth IRA distributions are always tax-free.",
+    "_provenance": "Audit trail per ticker — basis for parameter choices. Ignored by simulator. Keep updated when changing parameters.",
+    "auto_refresh_enabled": "false — asset model is managed manually or via asset_calibration.py pipeline. Do not run refresh_assets.py against this file.",
+    "correlations": "Class-level empirical long-run correlation matrix. Conservative estimates — lower than peak-crisis correlations. Used by Monte Carlo to generate correlated return paths across asset classes."
   },
   "assets": {
     "SPY": {
@@ -1087,7 +1089,7 @@
         1.0
       ]
     ],
-    "_note": "Class-level empirical long-run correlations. Crisis correlations (all\u21921) are not modeled here \u2014 that is a simulation_core.py regime feature."
+    "_note": "Class-level empirical long-run correlations. Crisis correlations (all→1) are not modeled here — that is a simulation_core.py regime feature."
   },
   "overrides": []
 }

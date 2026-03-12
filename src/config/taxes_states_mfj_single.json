@@ -1176,26 +1176,27 @@
     }
   },
   "readme": {
-    "purpose": "Federal and state tax bracket tables used by taxes_core.py. System file \u2014 lives in src/config/, shared by all profiles. Updated annually as IRS adjusts brackets for inflation.",
-    "schema_version": "Increment when adding new structural fields to maintain backward compat in loaders.",
+    "purpose": "Federal and state tax bracket tables used by taxes_core.py. System file in src/config/, shared by all profiles. Contains 2025 federal brackets (Rev. Proc. 2024-40) and all 50 states + DC.",
+    "schema_version": "Increment when adding new structural fields to maintain backward compatibility in loaders.",
     "federal": {
-      "ordinary_brackets": "Progressive marginal rate brackets for wages, IRA distributions, Roth conversions, interest, rental income. Brackets are upper bounds \u2014 'up_to: null' means the top bracket has no ceiling.",
-      "qualified_brackets": "Lower rate brackets for qualified dividends and long-term capital gains. Stacked on top of ordinary income for bracket placement.",
-      "standard_deduction": "Per filing status. Applied before bracket lookup. 2025 values; update each year per IRS Rev. Proc.",
-      "niit": "Net Investment Income Tax. rate=0.038 (3.8%) applied to investment income above threshold. Applies to brokerage dividends, cap gains, and rebalancing gains. Does NOT apply to IRA/Roth distributions.",
-      "filing_status_keys": "MFJ = Married Filing Jointly, Single = Single/MFS/HOH where separate tables not defined."
+      "ordinary_brackets": "Progressive marginal rate brackets for wages, IRA distributions, Roth conversions, interest, and rental income. Brackets are upper income bounds — 'up_to: null' means the top bracket has no ceiling. Applied after standard deduction.",
+      "qualified_brackets": "Lower preferential rate brackets (0/15/20%) for qualified dividends and long-term capital gains. Bracket placement is determined by where ordinary income sits — LTCG dollars stack on top of ordinary income.",
+      "standard_deduction": "Per filing status. Subtracted from gross income before bracket lookup. Updated annually by IRS for inflation. 2025 values currently loaded.",
+      "niit": "Net Investment Income Tax. 3.8% applied to investment income (dividends, cap gains, interest) above AGI threshold ($250k MFJ, $200k single). Threshold is NOT inflation-adjusted by statute — it has been $250k since 2013.",
+      "filing_status_keys": "MFJ = Married Filing Jointly. Single covers Single, MFS (Married Filing Separately), and HOH (Head of Household) where separate tables are not defined."
     },
     "states": {
+      "coverage": "All 50 states and DC are populated with 2025 bracket data. No-income-tax states (AK, FL, NV, SD, TN, TX, WA, WY, NH) have type='none' or empty brackets.",
       "type_options": {
-        "none": "No state income tax (e.g. Alaska, Florida, Nevada, Texas, Washington, Wyoming).",
-        "flat": "Single rate on all income. Use a single bracket with up_to: null.",
-        "progressive": "Multiple brackets like federal. Most states."
+        "none": "No state income tax.",
+        "flat": "Single rate on all income.",
+        "progressive": "Multiple brackets, same structure as federal."
       },
-      "treat_qualified_as_ordinary": "true = state taxes qualified dividends and LTCG at ordinary income rates (most states). false = state has its own preferential LTCG rate.",
-      "brackets_format": "Same as federal \u2014 list of {up_to, rate} objects. Empty list [] means no tax for that filing status.",
-      "populated_states": "California and Washington are fully populated. All other states have empty brackets \u2014 add actual bracket data before modeling state taxes for those states.",
-      "how_to_set_state": "State is not set in this file. It is set per-profile via a field in person.json (planned) or defaulted to the profile's home state in api.py."
+      "treat_qualified_as_ordinary": "true = state taxes qualified dividends and LTCG at ordinary income rates (most states do this). false = state has its own preferential LTCG rate (rare — e.g. Hawaii partial exclusion).",
+      "brackets_format": "List of {up_to, rate} objects, same structure as federal. up_to: null = top bracket.",
+      "how_to_set_state": "State is NOT set in this file. Set per-profile in person.json (state field) or defaulted to the profile's home state in api.py.",
+      "standard_deduction": "Most states have their own standard deduction separate from federal. Some states use federal AGI as the starting point instead."
     },
-    "update_cadence": "IRS adjusts federal brackets annually in October/November for the following tax year. Update ordinary_brackets thresholds and standard_deduction each year. NIIT threshold is NOT inflation-adjusted by statute."
+    "update_cadence": "IRS adjusts federal brackets and standard deductions annually in October/November (Rev. Proc.) for the following tax year. State updates vary — most states publish annual adjustments in Q4. NIIT threshold ($250k MFJ) is fixed by statute and does not change unless Congress acts. Update this file each January before running new-year projections."
   }
 }

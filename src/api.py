@@ -29,7 +29,6 @@ from loaders import (
     load_income,
     load_economic_policy,
 )
-from simulator import run_accounts
 from simulator_new import run_accounts_new
 
 from income_core import build_income_streams
@@ -741,10 +740,8 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
 
     if modular_test:
         print("[DEBUG api] Using modular run_accounts_new for Test profile")
-        # RMDs are enabled in the modular engine when Ignore RMDs is False
         rmds_enabled = not ignore_rmds_flag
 
-        # Build income streams from Test profile income_cfg
         income_cfg = load_income(f"profiles/{profile}/income.json")
         (
             w2_cur,
@@ -761,92 +758,53 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
         ytd_income_nom_paths = np.zeros((paths, YEARS), dtype=float)
 
         for y in range(YEARS):
-            ordinary_year = (
-                w2_cur[y]
-                + rental_cur[y]
-                + interest_cur[y]
-                + ordinary_other_cur[y]
+            ordinary_income_cur_paths[:, y] = (
+                w2_cur[y] + rental_cur[y] + interest_cur[y] + ordinary_other_cur[y]
             )
-            qual_div_year = qual_div_cur[y]
-            cap_gains_year = cap_gains_cur[y]
+            qual_div_cur_paths[:, y] = qual_div_cur[y]
+            cap_gains_cur_paths[:, y] = cap_gains_cur[y]
 
-            ordinary_income_cur_paths[:, y] = ordinary_year
-            qual_div_cur_paths[:, y] = qual_div_year
-            cap_gains_cur_paths[:, y] = cap_gains_year
-            # ytd_income_nom_paths can stay zeros for now
-
-        # Decide sched/apply_withdrawals based on which modular case we’re in
-        #sched_for_modular = None
-        #apply_withdrawals_flag = False
-        #if modular_core_withdrawals_test:
-        #    sched_for_modular = sched_arr   # use the real schedule
-        #    apply_withdrawals_flag = True
-
-
-        # Decide sched/apply_withdrawals based on which modular case we’re in
         sched_for_modular = None
-        sched_base_for_modular = None   # safe default
+        sched_base_for_modular = None
         apply_withdrawals_flag = False
 
-        # Core-only: no withdrawals, no RMDs → sched=None, apply_withdrawals=False
         if modular_core_only_test:
             sched_for_modular = None
             sched_base_for_modular = None
             apply_withdrawals_flag = False
-
-        # Withdrawals-only: discretionary schedule ON, RMDs ignored
         elif modular_core_withdrawals_test:
             sched_for_modular = sched_arr
             sched_base_for_modular = sched_base
             apply_withdrawals_flag = True
-
-        # RMD-only: RMDs ON, no discretionary withdrawals
         elif modular_rmd_only_test:
             sched_for_modular = None
             sched_base_for_modular = None
             apply_withdrawals_flag = False
-
-        # Withdrawals + RMDs: both ON
         elif modular_withdrawals_rmd_test:
             sched_for_modular = sched_arr
             sched_base_for_modular = sched_base
             apply_withdrawals_flag = True
-
-        # ── Conversion-enabled variants ──────────────────────────────────────
-        # Conversions are handled inside simulator_new.py.
-        # These branches mirror the above but with ignore_conversions_flag=False.
-
-        # Core + Conversions only
         elif modular_core_conv_test:
             sched_for_modular = None
             sched_base_for_modular = None
             apply_withdrawals_flag = False
-
-        # Withdrawals + Conversions (no RMDs)
         elif modular_withdrawals_conv_test:
             sched_for_modular = sched_arr
             sched_base_for_modular = sched_base
             apply_withdrawals_flag = True
-
-        # RMDs + Conversions (no discretionary withdrawals)
         elif modular_rmd_conv_test:
             sched_for_modular = None
             sched_base_for_modular = None
             apply_withdrawals_flag = False
-
-        # Withdrawals + RMDs + Conversions: all ON
         elif modular_withdrawals_rmd_conv_test:
             sched_for_modular = sched_arr
             sched_base_for_modular = sched_base
             apply_withdrawals_flag = True
 
-        # Build per-year age-gated withdrawal sequence from economic policy
         acct_names    = list(alloc_accounts.get("per_year_portfolios", {}).keys())
         starting_age  = int(person_cfg.get("current_age", 70)) if person_cfg else 70
         tira_age_gate = float(econ_policy.get("tira_age_gate", 59.5))
 
-        # Pick the correct bad-market sequence based on conversion policy
-        # NOTE: key is roth_conversion_policy (not conversion_policy)
         conversion_enabled = bool(
             (person_cfg or {}).get("roth_conversion_policy", {}).get("enabled", False)
         )
@@ -879,7 +837,6 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
                             result.append(a); seen.add(a)
             return result if result else [a for a in accts if _is_brokerage(a)]
 
-        # Build good/bad sequences per year — simulator picks based on market condition
         seq_good_per_year = []
         seq_bad_per_year  = []
         for y in range(YEARS):
@@ -889,17 +846,7 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
             seq_good_per_year.append(_expand(order_good, acct_names, allow_trad, allow_roth))
             seq_bad_per_year.append( _expand(order_bad,  acct_names, allow_trad, allow_roth))
 
-        # TODO: simulator_new.py needs per-path bad-market flag support to use seq_bad_per_year.
-        # When implemented, pass {"good": seq_good_per_year, "bad": seq_bad_per_year} and
-        # the simulator will pick the sequence per year per path based on drawdown detection.
-        # For now, good-market sequence is used for all years.
         withdraw_seq_per_year = seq_good_per_year
-
-        print("[DEBUG api] conversion_enabled:", conversion_enabled)
-        print("[DEBUG api] seq_good year 0:", seq_good_per_year[0])
-        print("[DEBUG api] seq_bad  year 0:", seq_bad_per_year[0])
-        print("[DEBUG api] seq_good year 14:", seq_good_per_year[14] if len(seq_good_per_year) > 14 else "N/A")
-        print("[DEBUG api] seq_bad  year 14:", seq_bad_per_year[14]  if len(seq_bad_per_year)  > 14 else "N/A")
 
         res = run_accounts_new(
             paths=paths,
@@ -918,36 +865,33 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
             ytd_income_nom_paths=ytd_income_nom_paths,
             person_cfg=person_cfg,
             rmd_table_path=rmd_path,
-            conversion_per_year_nom=None,  # simulator_new resolves from person_cfg roth_conversion_policy
+            conversion_per_year_nom=None,
             rmds_enabled=rmds_enabled,
             conversions_enabled=not ignore_conversions_flag,
             shocks_events=shocks_events,
             shocks_mode=str(internal_shocks_mode),
             econ_policy=econ_policy,
             rebalancing_enabled=True,
+            override_state         = payload.get("state"),
+            override_filing_status = payload.get("filing"),
+            override_rmd_table     = payload.get("rmd_table"),
         )
-    else:
-        res = run_accounts(
-            paths=int(paths),
-            spy=int(steps_per_year),
-            tax_cfg=tax_cfg,
-            sched=sched_arr,
-            floor_k=float(floor_k),
-            shocks_events=shocks_events,
-            shocks_mode=str(internal_shocks_mode),
-            infl_yearly=infl_yearly,
-            alloc_accounts=alloc_accounts,
-            person_cfg=person_cfg,
-            income_cfg=income_cfg,
-            dollars=str(dollars or "current"),
-            rmd_table_path=rmd_path,
-            base_year=int(base_year),
-            rebalance_drift_threshold=float(rebalance_threshold),
-            rebalance_brokerage_enabled=bool(rebalance_brokerage_enabled),
-            rebalance_brokerage_capgain_limit_k=float(rebalance_brokerage_capgain_limit_k),
-            economic_policy=econ_policy,
-            assets_path=assets_path,
-        )
+
+    # -- Tax diagnostic (server log -- remove once tax table confirmed working) --
+    _wd_d = res.get("withdrawals", {})
+    _cx_d = res.get("conversions", {})
+    print("[TAX DIAG] taxes_fed yr20-24:",
+          [round(v, 0) for v in (_wd_d.get("taxes_fed_current_mean") or [0]*30)[20:25]])
+    print("[TAX DIAG] taxes_state yr20-24:",
+          [round(v, 0) for v in (_wd_d.get("taxes_state_current_mean") or [0]*30)[20:25]])
+    print("[TAX DIAG] conv_tax yr0-4:",
+          [round(v, 0) for v in (_cx_d.get("conversion_tax_cur_mean_by_year") or [0]*30)[0:5]])
+    print("[TAX DIAG] ord_income yr0 mean:",
+          round(float(ordinary_income_cur_paths[:, 0].mean()), 2))
+    print("[TAX DIAG] ord_income yr20 mean:",
+          round(float(ordinary_income_cur_paths[:, 20].mean()), 2))
+
+    rmd_table = str(payload.get("rmd_table") or (person_cfg or {}).get("rmd_table", "uniform_lifetime"))
 
     # 8) Canonical input paths and run_info
     input_paths = {
@@ -970,8 +914,9 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
         "base_year": int(base_year),
         "state": state,
         "filing": filing,
-        # Show exactly what the user chose; "none" if they picked that
-        "shocks_mode": raw_shocks_mode ,
+        "rmd_table": rmd_table,
+        "runtime_overrides": {k: v for k, v in {"state": payload.get("state"), "filing": payload.get("filing"), "rmd_table": payload.get("rmd_table")}.items() if v is not None},
+        "shocks_mode": raw_shocks_mode,
         "flags": {
             "ignore_withdrawals": bool(ignore_withdrawals),
             "ignore_rmds": bool(ignore_rmds),
@@ -1019,7 +964,6 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
             else None,
         )
     except Exception:
-        # Non-fatal for UI
         pass
 
     # 11) Compute ending balances per account for UI
@@ -1035,7 +979,6 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
     except Exception:
         ending_balances = []
 
-    # Final response to UI
     return {
         "ok": True,
         "profile": profile,
@@ -1044,4 +987,3 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
     }
 
 # --- End of file ---
-

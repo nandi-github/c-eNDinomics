@@ -1,5 +1,5 @@
 {
-  "_comment": "Global market assumptions shared across ALL profiles. No withdrawal sequences here \u2014 those are per-profile in economic.json.",
+  "_comment": "Global market assumptions shared across ALL profiles. No withdrawal sequences here — those are per-profile in economic.json.",
   "defaults": {
     "bad_market": {
       "drawdown_threshold": 0.15,
@@ -123,37 +123,37 @@
     }
   ],
   "readme": {
-    "purpose": "Global market behavior settings shared across ALL profiles. Overrides section lets you change these per year-range. Profile economic.json is merged on top for profile-specific overrides.",
+    "purpose": "Global market behavior settings shared across ALL profiles. Overrides section applies year-range-specific changes. Profile economic.json is merged on top for profile-specific differences — profile values win on any conflict.",
     "bad_market": {
-      "drawdown_threshold": "Portfolio decline fraction that triggers 'bad market' mode. E.g. 0.15 = 15% below peak triggers bad-market withdrawal sequencing and rebalancing suppression.",
-      "use_recession_flag": "true = also trigger bad-market mode if macroeconomic recession flag is set in the stochastic model, even if drawdown threshold not yet hit."
+      "drawdown_threshold": "Portfolio decline fraction from peak that triggers bad-market mode. E.g. 0.15 = 15% below peak switches to bad-market withdrawal sequencing and suppresses rebalancing.",
+      "use_recession_flag": "true = also trigger bad-market mode if the stochastic model sets a macro recession flag, even if drawdown threshold has not yet been crossed."
     },
     "cash_reserve": {
-      "months": "Months of withdrawal target kept as cash buffer. E.g. 6 = half-year buffer always maintained.",
-      "allow_dip_below_reserve": "false = never withdraw below cash floor even if it means falling short of withdrawal target.",
-      "use_cash_only_in_bad_markets": "true = only draw from cash reserve during bad markets; use investment accounts otherwise."
+      "months": "Months of withdrawal target kept as liquid cash buffer. E.g. 6 = six-month cash cushion always maintained in brokerage.",
+      "allow_dip_below_reserve": "false = never let cash fall below the reserve floor even if it means a withdrawal shortfall.",
+      "use_cash_only_in_bad_markets": "true = only draw from the cash reserve during bad markets; use investment accounts in good markets."
     },
     "rebalancing": {
-      "global_drift_threshold": "Maximum allowed class drift as fraction of target before rebalancing triggers. E.g. 0.12 = 12% drift band (\u00b112% of target weight). Overrides the per-class \u00b110% default in allocation_yearly.json if set here.",
-      "require_cash_above_reserve_to_rebalance": "true = do not rebalance if cash is below reserve threshold.",
-      "suppress_in_bad_market": "true = pause rebalancing entirely during bad-market periods to avoid locking in losses.",
-      "brokerage_capgain_limit_k": "Maximum realized capital gains in $k per year from brokerage rebalancing. Prevents large unexpected tax bills from a single rebalance.",
-      "brokerage_enabled": "true/false. Master switch for brokerage rebalancing. TRAD/Roth always rebalance costlessly."
+      "global_drift_threshold": "Maximum allowed drift as a fraction of target weight before rebalancing triggers. E.g. 0.12 = ±12% of target weight. Overrides the per-portfolio rebalance_band_pct default from allocation_yearly.json when set here.",
+      "require_cash_above_reserve_to_rebalance": "true = do not execute rebalancing trades if cash is at or below the reserve threshold.",
+      "suppress_in_bad_market": "true = pause all rebalancing during bad-market periods to avoid locking in losses at depressed prices.",
+      "brokerage_capgain_limit_k": "Maximum capital gains in $k per year realized from brokerage rebalancing. Tax note: brokerage rebalancing generates taxable capital gains — this cap prevents a single rebalance from creating a large unexpected tax bill. TRAD and Roth rebalancing generates no taxable event.",
+      "brokerage_enabled": "true/false. Master switch for brokerage rebalancing. TRAD and Roth accounts always rebalance without tax consequence."
     },
     "withdrawals": {
-      "shock_scaling_enabled": "true = scale down withdrawals during bad markets. false = always withdraw full target regardless of market.",
-      "drawdown_threshold": "Portfolio drawdown fraction at which scaling begins. Should match bad_market.drawdown_threshold.",
-      "min_scaling_factor": "Minimum fraction of target withdrawal allowed. E.g. 0.65 = never withdraw less than 65% of target. Works with floor_k in withdrawal_schedule.json.",
+      "shock_scaling_enabled": "true = scale down take-home withdrawals during bad markets. false = withdraw full target regardless. Note: even when scaled down, taxes are still computed on actual income (RMDs, conversions) and debited from brokerage separately.",
+      "drawdown_threshold": "Portfolio decline fraction at which scaling begins. Should match bad_market.drawdown_threshold for consistent behavior.",
+      "min_scaling_factor": "Minimum fraction of the target withdrawal paid out. E.g. 0.65 = never deliver less than 65% of planned take-home. Works together with floor_k in withdrawal_schedule.json — the effective floor is max(floor_k, min_scaling_factor × target).",
       "scale_curve_options": {
-        "linear": "Withdrawal scales linearly from 100% at threshold to min_scaling_factor at full drawdown.",
-        "poly": "Polynomial scaling. scale_poly_alpha > 1 = gentler at first, sharper near bottom.",
-        "exp": "Exponential scaling. scale_exp_lambda controls decay rate."
+        "linear": "Take-home scales linearly from 100% at threshold down to min_scaling_factor at full drawdown.",
+        "poly": "Polynomial scaling. scale_poly_alpha > 1 = gentle reduction at first, sharper near the bottom.",
+        "exp": "Exponential scaling. scale_exp_lambda controls how quickly reduction accelerates."
       },
-      "use_recession_flag": "Same as bad_market \u2014 also scale withdrawals if recession flag is set.",
-      "makeup_enabled": "true = in good years following a scaled-down year, make up missed withdrawals.",
-      "makeup_ratio": "Fraction of missed amount to recover per good year. E.g. 0.3 = recover 30% of the deficit each year.",
-      "makeup_cap_per_year": "Maximum makeup as fraction of annual target. E.g. 0.1 = makeup never exceeds 10% of that year's target."
+      "use_recession_flag": "Same as bad_market — also scale withdrawals when recession flag is set.",
+      "makeup_enabled": "true = in good years following a scaled-down year, make up a portion of the missed take-home.",
+      "makeup_ratio": "Fraction of the cumulative missed withdrawal recovered per good year. E.g. 0.3 = recover 30% of the deficit each year.",
+      "makeup_cap_per_year": "Maximum makeup payment as fraction of that year's target. E.g. 0.1 = makeup never exceeds 10% of the year's planned withdrawal."
     },
-    "overrides_note": "Time-bounded only. Each override applies for its years range then reverts to defaults above. No permanent overrides \u2014 change the defaults block instead."
+    "overrides_note": "Time-bounded only. Each override applies for its years range then reverts to the defaults block. To make a permanent change, update the defaults block instead of adding a permanent override."
   }
 }

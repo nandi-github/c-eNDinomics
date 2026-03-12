@@ -91,9 +91,10 @@ def save_raw_snapshot_accounts(
     snapshot["returns_acct"] = res.get("returns_acct", {})
     snapshot["returns_acct_levels"] = res.get("returns_acct_levels", {})
 
-    # Withdrawals & taxes
+    # Withdrawals, taxes & conversions
     snapshot["withdrawals"] = res.get("withdrawals", {})
     snapshot["taxes"] = res.get("taxes", {})
+    snapshot["conversions"] = res.get("conversions", {})
 
     # Starting balances & account-level data
     snapshot["starting"] = res.get("starting", {})

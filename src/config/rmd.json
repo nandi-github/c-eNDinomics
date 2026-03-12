@@ -57,11 +57,12 @@
     "120+": 2.0
   },
   "readme": {
-    "purpose": "IRS Uniform Lifetime Table for Required Minimum Distribution calculations. System file \u2014 lives in src/config/, shared by all profiles. Do not copy to profile directories.",
-    "when_used": "Applied to all Traditional IRA accounts starting at RMD age. RMD age depends on birth year: born before 1951 = age 72, born 1951-1959 = age 73, born 1960+ = age 75 (SECURE 2.0 Act).",
-    "formula": "Annual RMD = prior December 31 IRA balance / distribution_period for that age.",
-    "exception": "If your spouse is your sole IRA beneficiary AND is more than 10 years younger, use the Joint and Last Survivor Table instead. This table is not currently modeled \u2014 person.json sole_beneficiary_for_ira=true uses a simplified spousal rollover rule.",
-    "factors": "Keys are ages as strings. Value is the IRS distribution period divisor. '120+' covers all ages 120 and above.",
-    "do_not_edit": "These values are IRS-published. Do not modify unless the IRS issues a new table. Source: IRS Publication 590-B, Table III (Uniform Lifetime)."
+    "purpose": "IRS Uniform Lifetime Table for Required Minimum Distribution calculations. System file in src/config/, shared by all profiles. Do not copy to profile directories — profile rmd.json is for overrides only.",
+    "when_used": "Applied automatically to all Traditional IRA accounts starting at RMD age. RMD start age is determined by birth year per SECURE 2.0: born before 1951 = age 72, born 1951-1959 = age 73, born 1960 or later = age 75. Set in person.json birth_year.",
+    "formula": "Annual RMD = prior December 31 TRAD IRA balance ÷ distribution_period for that age. Each TRAD account's RMD is computed separately then summed.",
+    "tax_note": "Every dollar of RMD is taxed as ordinary income in the year taken — it stacks above W2/passive income but below Roth conversions in the bracket. There is no way to avoid RMD taxation once distributions begin. Surplus RMDs above the withdrawal plan are reinvested in brokerage (generating a taxable investment event) or taken as taxable cash, per rmd_policy.extra_handling in person.json.",
+    "exception": "If your sole IRA beneficiary is a spouse more than 10 years younger, the IRS Joint and Last Survivor Table produces lower RMDs. This table is not currently modeled — person.json sole_beneficiary_for_ira=true uses a simplified spousal rollover rule. Add the Joint table here to support this case.",
+    "factors": "Keys are ages as strings. Values are IRS distribution period divisors. '120+' covers all ages 120 and above.",
+    "do_not_edit": "These values are IRS-published law (IRS Publication 590-B, Table III, Uniform Lifetime). Do not modify unless the IRS issues a revised table. Source: Rev. Proc. 2021-45 (effective 2022). No changes expected without Congressional action."
   }
 }

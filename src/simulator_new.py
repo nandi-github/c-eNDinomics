@@ -101,6 +101,15 @@ def run_accounts_new(
     shocks_mode: str = "augment",
     econ_policy: Optional[Dict[str, Any]] = None,
     rebalancing_enabled: bool = True,
+    # -----------------------------------------------------------------------
+    # Runtime override params — supplied by api.py when the Run panel has
+    # user-selected values that differ from person.json. These take precedence
+    # over person_cfg values for THIS run only. Echoed in res["meta"]["run_params"]
+    # so every result is fully self-describing.
+    # -----------------------------------------------------------------------
+    override_state: Optional[str] = None,
+    override_filing_status: Optional[str] = None,
+    override_rmd_table: Optional[str] = None,
 ) -> Dict[str, Any]:
 
 
@@ -123,6 +132,22 @@ def run_accounts_new(
     np.random.seed(42)
     paths = int(paths)
     spy = int(spy)
+
+    # -----------------------------------------------------------------------
+    # Resolve effective run parameters: runtime overrides win over person_cfg.
+    # These are the values actually used for this run — recorded in meta.
+    # -----------------------------------------------------------------------
+    _pcfg = person_cfg or {}
+    _eff_state          = override_state          or _pcfg.get("state", "California")
+    _eff_filing_status  = override_filing_status  or _pcfg.get("filing_status", "MFJ")
+    _eff_rmd_table      = override_rmd_table      or _pcfg.get("rmd_table", "uniform_lifetime")
+    _overrides_applied  = {
+        k: v for k, v in {
+            "state":          override_state,
+            "filing_status":  override_filing_status,
+            "rmd_table":      override_rmd_table,
+        }.items() if v is not None
+    }
 
     # Core Monte Carlo
     acct_eoy_nom, total_nom_paths, total_real_paths, acct_class_eoy_nom = simulate_balances(
@@ -1088,9 +1113,26 @@ def run_accounts_new(
 #    }
 
     res["meta"] = {
-        "success": success_rate_pct,
-        "paths": int(paths),
-        "years": YEARS,
+        "success":      success_rate_pct,
+        "paths":        int(paths),
+        "years":        YEARS,
+        # --- Run parameters: what actually drove this simulation ---
+        # Always present so results are fully self-describing.
+        # UI should display these alongside results so user knows
+        # exactly which settings produced this output.
+        "run_params": {
+            "state":            _eff_state,
+            "filing_status":    _eff_filing_status,
+            "rmd_table":        _eff_rmd_table,
+            "current_age":      _pcfg.get("current_age"),
+            "birth_year":       _pcfg.get("birth_year"),
+            "assumed_death_age":_pcfg.get("assumed_death_age"),
+            "roth_conversion_enabled": (_pcfg.get("roth_conversion_policy") or {}).get("enabled", False),
+            "rmd_extra_handling": (_pcfg.get("rmd_policy") or {}).get("extra_handling", "cash_out"),
+        },
+        # Flags any values that were overridden at runtime vs person.json.
+        # Empty dict {} means all values came directly from person.json.
+        "runtime_overrides": _overrides_applied,
     }
 
     if person_cfg is not None:

@@ -153,35 +153,36 @@
   ],
   "readme": {
     "purpose": "Profile-specific deterministic market shocks layered on top of Monte Carlo returns. Use these to model known or assumed macro events at specific years.",
+    "tax_note": "Shocks affect portfolio returns only — they do NOT directly create a tax event. Taxes are computed on income (withdrawals, conversions, dividends), not on unrealized portfolio value changes. A shock may indirectly affect taxes by triggering bad-market withdrawal sequencing (switching which account is drained) if the drawdown crosses the threshold in economicglobal.json.",
     "mode_options": {
       "augment": "Add these events on top of system_shocks.json preset events.",
-      "replace": "Ignore system_shocks.json entirely; only these events apply."
+      "replace": "Ignore system_shocks.json entirely — only these profile events apply."
     },
     "event_fields": {
       "class": "Asset class to shock. Options: 'US_STOCKS', 'INTL_STOCKS', 'GOLD', 'COMMOD', 'LONG_TREAS', 'INT_TREAS', 'TIPS', 'CASH'",
-      "start_year": "Simulation year the shock begins (1-indexed).",
-      "start_quarter": "Quarter within start_year. Options: 1, 2, 3, 4.",
+      "start_year": "Simulation year the shock begins (1-indexed). Year 1 = current_age + 1.",
+      "start_quarter": "Quarter within start_year the shock begins. Options: 1, 2, 3, 4.",
       "depth": "Maximum drawdown as a fraction. E.g. 0.30 = 30% peak-to-trough loss.",
-      "dip_quarters": "Number of quarters to reach maximum depth.",
-      "recovery_quarters": "Number of quarters to recover from trough.",
+      "dip_quarters": "Number of quarters to reach maximum depth from shock start.",
+      "recovery_quarters": "Number of quarters to recover from trough back to recovery_to target.",
       "override_mode_options": {
-        "strict": "This shock overrides any concurrent stochastic return for this class.",
-        "augment": "Shock is additive on top of the stochastic return."
+        "strict": "This shock overrides any concurrent stochastic return for this class — deterministic only.",
+        "augment": "Shock is additive on top of the stochastic return — can amplify or dampen."
       },
       "recovery_to_options": {
-        "baseline": "Recover to the pre-shock trend line.",
-        "none": "Recover to trough level only; no mean-reversion above trough."
+        "baseline": "Recover to the pre-shock trend line (mean-reversion).",
+        "none": "Stop at trough level — no recovery above trough."
       },
       "dip_profile_and_rise_profile": {
         "type_options": {
           "linear": "Constant rate of decline/recovery.",
-          "poly": "Polynomial curve. alpha > 1 = slow start then sharp. alpha < 1 = sharp start then slow.",
-          "exp": "Exponential curve. lambda controls decay rate."
+          "poly": "Polynomial curve. alpha > 1 = slow start then sharp drop. alpha < 1 = sharp start then gradual.",
+          "exp": "Exponential curve. lambda controls the decay rate."
         }
       },
-      "coimpact_down": "Other classes pulled down during the dip. mode: 'limited' (only listed classes), 'broad' (all equity classes), 'none'. scale: fraction of primary depth applied to co-impacted classes.",
-      "corecovery_up": "Other classes lifted during recovery. Same mode/scale options as coimpact_down. organic: true = co-recovering class follows its own profile shape. organic_profile: dip/rise profile for the organic recovery.",
-      "correlated_to": "For co-movement shocks: this class moves as a scaled version of another class's shock. Use with scale field.",
+      "coimpact_down": "Other asset classes pulled down sympathetically during the dip. mode: 'limited' (only listed classes), 'broad' (all equity-like classes), 'none'. scale: fraction of primary shock depth applied to co-impacted classes.",
+      "corecovery_up": "Other classes lifted during the recovery phase. Same mode/scale options. organic: true = the co-recovering class follows its own profile shape. organic_profile: the shape parameters for that organic recovery.",
+      "correlated_to": "For co-movement: this class tracks another class's shock scaled by 'scale'. Used for commodity-to-equity correlation.",
       "scale": "Fraction of the correlated class's movement applied to this class."
     }
   }

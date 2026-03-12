@@ -88,11 +88,18 @@ type SnapshotReturnsAcctLevels = {
 
 type SnapshotAccount = { name: string; type: string };
 
+type SnapshotConversions = {
+  conversion_tax_cur_mean_by_year?: number[];
+  conversion_nom_mean_by_year?: number[];
+  conversion_cur_mean_by_year?: number[];
+};
+
 type Snapshot = {
   run_info: RunInfo;
   years: number[];
   portfolio: SnapshotPortfolio;
   withdrawals?: SnapshotWithdrawals;
+  conversions?: SnapshotConversions;
   summary?: SnapshotSummary;
   returns?: SnapshotReturns;
   returns_acct?: SnapshotReturnsAcct;
@@ -1372,6 +1379,71 @@ const App: React.FC = () => {
 
 
 
+
+
+              {/* ── Taxes by Type ──────────────────────────────────────────────── */}
+              <section className="results-section">
+                <h3>Taxes by Type</h3>
+                <p style={{ marginBottom: 8, fontSize: 13, color: "#555" }}>
+                  All values in Current USD (mean across paths).
+                  Federal&nbsp;=&nbsp;ordinary income&nbsp;+&nbsp;conversion income brackets.
+                  State&nbsp;=&nbsp;state ordinary&nbsp;+&nbsp;capital gains.
+                  NIIT&nbsp;=&nbsp;3.8% on net investment income above threshold.
+                  Excise&nbsp;=&nbsp;state capital gains surcharge where applicable.
+                  Total&nbsp;=&nbsp;sum of all four.
+                  Effective rate&nbsp;=&nbsp;total taxes&nbsp;÷&nbsp;(withdrawal&nbsp;+&nbsp;total taxes).
+                </p>
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Year</th><th>Age</th>
+                      <th>Federal</th><th>State</th><th>NIIT</th><th>Excise</th>
+                      <th>Total Taxes</th>
+                      <th>Take-Home (Withdrawal)</th>
+                      <th>Effective Rate</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {snapshot.years.map((yr, i) => {
+                      const W = snapshot.withdrawals;
+                      const C = snapshot.conversions;
+                      // Federal = ordinary income taxes + conversion income taxes
+                      // Conversion taxes are federal income taxes (bracket-fill on converted amount)
+                      const ordFed    = W?.taxes_fed_current_mean?.[i]   ?? 0;
+                      const convTax   = C?.conversion_tax_cur_mean_by_year?.[i] ?? 0;
+                      const fedTotal  = ordFed + convTax;
+                      const state     = W?.taxes_state_current_mean?.[i]  ?? 0;
+                      const niit      = W?.taxes_niit_current_mean?.[i]   ?? 0;
+                      const excise    = W?.taxes_excise_current_mean?.[i] ?? 0;
+                      const total     = fedTotal + state + niit + excise;
+                      const planned   = W?.planned_current?.[i] ?? 0;
+                      const denom     = planned + total;
+                      const effRate   = denom > 0 ? total / denom : null;
+
+                      const startAge = snapshot.person?.current_age ?? snapshot.person?.age ?? undefined;
+                      const ageDisplay = startAge !== undefined ? Math.floor(startAge + i) : "";
+
+                      const dash = <span style={{ color: "#aaa" }}>—</span>;
+                      return (
+                        <tr key={yr}>
+                          <td>{yr}</td>
+                          <td>{ageDisplay}</td>
+                          <td>{fedTotal > 0 ? formatUSD(fedTotal) : dash}</td>
+                          <td>{state    > 0 ? formatUSD(state)    : dash}</td>
+                          <td>{niit     > 0 ? formatUSD(niit)     : dash}</td>
+                          <td>{excise   > 0 ? formatUSD(excise)   : dash}</td>
+                          <td>{total    > 0 ? formatUSD(total)    : dash}</td>
+                          <td>{planned  > 0 ? formatUSD(planned)  : dash}</td>
+                          <td>{effRate  !== null && total > 0
+                               ? (effRate * 100).toFixed(1) + "%"
+                               : dash}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </section>
+
               {/* Accounts — Investment YoY (Future USD) */}
               <section className="results-section">
                 <h3>Accounts — Investment YoY (Future USD)</h3>
@@ -1475,7 +1547,7 @@ const App: React.FC = () => {
                         const reinvestFutRaw   = levels?.inv_nom_levels_mean_acct[name + "__reinvest_fut"] || [];
                         const convOutFut       = levels?.inv_nom_levels_mean_acct[name + "__conversion_out_fut"] || [];
                         const convInFut        = levels?.inv_nom_levels_mean_acct[name + "__conversion_in_fut"] || [];
-                        const convTaxFut       = levels?.inv_nom_levels_mean_acct[name + "__conversion_tax_fut"] || [];
+                        const convTaxFut       = levels?.inv_nom_levels_mean_acct[name + "__conv_tax_out_fut"] || [];
 
                         snapshot.years.forEach((yr, idx) => {
                           let cells: JSX.Element;
@@ -1646,7 +1718,7 @@ const App: React.FC = () => {
                         const reinvestCurRaw   = levels?.inv_nom_levels_mean_acct[name + "__reinvest_cur"] || [];
                         const convOutCur       = levels?.inv_nom_levels_mean_acct[name + "__conversion_out_cur"] || [];
                         const convInCur        = levels?.inv_nom_levels_mean_acct[name + "__conversion_in_cur"] || [];
-                        const convTaxCur       = levels?.inv_nom_levels_mean_acct[name + "__conversion_tax_cur"] || [];
+                        const convTaxCur       = levels?.inv_nom_levels_mean_acct[name + "__conv_tax_out_cur"] || [];
 
                         snapshot.years.forEach((yr, idx) => {
                           let cells: JSX.Element;

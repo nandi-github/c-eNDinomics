@@ -151,7 +151,9 @@
     }
   ],
   "readme": {
-    "purpose": "Deterministic shock schedule applied globally across all profiles unless overridden. These represent macro scenarios you want baked into every run (e.g. a known recession stress test). Profile-level shocks_yearly.json can augment or replace these.",
+    "purpose": "Deterministic shock schedule applied globally across all profiles unless overridden by profile shocks_yearly.json. Represents macro scenarios baked into every run as a stress baseline.",
+    "tax_note": "Shocks affect portfolio returns only — they do NOT directly generate a tax event. Taxes are computed on income (withdrawals, conversions, dividends), not on unrealized value changes. A shock may indirectly affect taxes by triggering bad-market withdrawal sequencing if the drawdown crosses the threshold in economicglobal.json.",
+    "relationship_to_profile_shocks": "Profile shocks_yearly.json mode='augment' adds to these events. mode='replace' ignores these entirely and uses only the profile events.",
     "note": "Same event schema as shocks_yearly.json. See that file's readme for full field documentation."
   }
 }
