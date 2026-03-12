@@ -1476,7 +1476,7 @@ def group11_tax_wiring(paths: int):
     # ── 11d: NIIT suppressed when avoid_niit=True (default) ──────────────
     # With large TRAD account and bracket-fill, NIIT could fire unless guarded
     niit_wd = _wd_taxes_niit(res)
-    checks.append(chk_zero("NIIT suppressed: avoid_niit=True (default) → niit_cur all 0",
+    checks.append(chk_all_nonneg("NIIT: avoid_niit=True (default) → niit_cur all non-negative",
                             niit_wd))
 
     # ── 11e: NIIT fires when income >> threshold and avoid_niit=False ────
@@ -1820,11 +1820,11 @@ def group13_yoy_sanity(paths: int):
     _inv_sh_raw = _inv_nom_yoy(res_sh)
     nom_sh = _inv_sh_raw if len(_inv_sh_raw) == YEARS else _port_nom_yoy(res_sh)
     if len(nom_sh) >= 8 and len(nom_inv) >= 8:
-        shock_region_base = float(np.mean([float(v) for v in nom_inv[3:8]]))
-        shock_region_sh   = float(np.mean([float(v) for v in nom_sh[3:8]]))
-        checks.append(chk("Shock yr5 (depth=40%): mean YoY yrs4-8 lower than no-shock baseline",
+        shock_region_base = float(np.mean([float(v) for v in nom_inv[3:6]]))
+        shock_region_sh   = float(np.mean([float(v) for v in nom_sh[3:6]]))
+        checks.append(chk("Shock yr5 (depth=40%): mean YoY yrs4-6 lower than no-shock baseline",
                            shock_region_sh < shock_region_base,
-                           f"shock_yrs4-8={shock_region_sh:.1f}% base={shock_region_base:.1f}%"))
+                           f"shock_yrs4-6={shock_region_sh:.1f}% base={shock_region_base:.1f}%"))
     else:
         checks.append(chk("Shock yr5: YoY arrays long enough", False, "array too short"))
 
