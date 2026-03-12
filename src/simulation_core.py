@@ -176,6 +176,20 @@ def simulate_balances(
             for k in list(class_w.keys()):
                 class_w[k] = class_w[k] / w_sum
 
+            # If no ticker-level weights, derive from class weights
+            # by distributing each class weight equally across its assets
+            if not asset_w:
+                cls_assets: Dict[str, list] = {}
+                for ticker, adef in assets_cfg.items():
+                    c = adef.get("class", "OTHER")
+                    cls_assets.setdefault(c, []).append(ticker)
+                for cls, tickers in cls_assets.items():
+                    w_cls = class_w.get(cls, 0.0)
+                    if w_cls > 1e-12 and tickers:
+                        per_ticker = w_cls / len(tickers)
+                        for ticker in tickers:
+                            asset_w[ticker] = asset_w.get(ticker, 0.0) + per_ticker
+
             # Debug once for BROKERAGE-1 at y=0
             if not debug_class_w_printed and y == 0 and acct.upper().startswith("BROKERAGE-1"):
                 logger.debug("core class_w %s: %s", acct, class_w)
