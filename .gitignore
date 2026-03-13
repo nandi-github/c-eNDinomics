@@ -9,3 +9,8 @@ src/reports/
 src/profiles/*/reports/
 src/profiles/*/rmd.json
 test_results/
+src/check_tax.sh
+src/log
+src/txt
+src/temp/
+src/profiles/__ftest__*/
