@@ -1316,7 +1316,7 @@ const App: React.FC = () => {
                       <th>Age</th>
                       <th>Current USD Planned</th>
                       <th>Current USD Realized mean</th>
-                      <th>Current USD Diff (Mean – Planned)</th>
+                      <th style={{ width: "70px", minWidth: "70px", whiteSpace: "normal", lineHeight: "1.2" }}>Δ Cur USD</th>
                       <th>Future USD Realized mean</th>
                       <th>RMD Current USD mean</th>
                       <th>RMD Future USD mean</th>
@@ -1324,11 +1324,14 @@ const App: React.FC = () => {
                       <th>Total Future USD mean</th>
                       <th>Reinvested Current USD mean</th>
                       <th>Reinvested Future USD mean</th>
+                      <th>Conv Out Current USD mean</th>
+                      <th>Conv Tax Current USD mean</th>
                     </tr>
                   </thead>
                   <tbody>
                     {snapshot.years.map((y, i) => {
                       const W = snapshot.withdrawals;
+                      const C = snapshot.conversions;
                       const planned = W?.planned_current?.[i] ?? 0;
                       const realizedCur = W?.realized_current_mean?.[i] ?? 0;
                       const realizedFut = W?.realized_future_mean?.[i] ?? 0;
@@ -1346,6 +1349,10 @@ const App: React.FC = () => {
                       // Reinvested = surplus RMD actually added to brokerage (0 if cash_out policy)
                       const reinvestedCur = W?.rmd_extra_current?.[i] ?? 0;
                       const reinvestedFut = W?.rmd_extra_future?.[i] ?? 0;
+
+                      // Roth conversion cashflow (current USD) — shows TRAD→ROTH flow per year
+                      const convOutCur  = C?.conversion_cur_mean_by_year?.[i]     ?? 0;
+                      const convTaxCur  = C?.conversion_tax_cur_mean_by_year?.[i] ?? 0;
               
                       // New: Age = starting age + (year index)
                       const startAge =
@@ -1354,6 +1361,8 @@ const App: React.FC = () => {
                         undefined;
                       const ageDisplay =
                         startAge !== undefined ? Math.floor(startAge + i) : "";
+
+                      const dash = <span style={{ color: "#aaa" }}>—</span>;
               
                       return (
                         <tr key={y}>
@@ -1369,6 +1378,8 @@ const App: React.FC = () => {
                           <td>{formatUSD(totalFut)}</td>
                           <td>{formatUSD(reinvestedCur)}</td>
                           <td>{formatUSD(reinvestedFut)}</td>
+                          <td>{convOutCur > 0 ? formatUSD(convOutCur) : dash}</td>
+                          <td>{convTaxCur > 0 ? formatUSD(convTaxCur) : dash}</td>
                         </tr>
                       );
                     })}
@@ -1391,7 +1402,7 @@ const App: React.FC = () => {
                   NIIT&nbsp;=&nbsp;3.8% on net investment income above threshold.
                   Excise&nbsp;=&nbsp;state capital gains surcharge where applicable.
                   Total&nbsp;=&nbsp;sum of all four.
-                  Effective rate&nbsp;=&nbsp;total taxes&nbsp;÷&nbsp;(withdrawal&nbsp;+&nbsp;total taxes).
+                  Effective rate&nbsp;=&nbsp;total taxes&nbsp;÷&nbsp;gross income (max of planned withdrawal and RMD).
                 </p>
                 <table className="table">
                   <thead>
@@ -1407,18 +1418,18 @@ const App: React.FC = () => {
                     {snapshot.years.map((yr, i) => {
                       const W = snapshot.withdrawals;
                       const C = snapshot.conversions;
-                      // Federal = ordinary income taxes + conversion income taxes
-                      // Conversion taxes are federal income taxes (bracket-fill on converted amount)
-                      const ordFed    = W?.taxes_fed_current_mean?.[i]   ?? 0;
-                      const convTax   = C?.conversion_tax_cur_mean_by_year?.[i] ?? 0;
-                      const fedTotal  = ordFed + convTax;
+                      // taxes_fed_current_mean is computed on ordinary_income which already
+                      // includes conversion income — do NOT add convTax again (double-count).
+                      const fedTotal  = W?.taxes_fed_current_mean?.[i]   ?? 0;
                       const state     = W?.taxes_state_current_mean?.[i]  ?? 0;
                       const niit      = W?.taxes_niit_current_mean?.[i]   ?? 0;
                       const excise    = W?.taxes_excise_current_mean?.[i] ?? 0;
                       const total     = fedTotal + state + niit + excise;
+                      // Effective rate denominator = gross income received (max of planned, RMD).
+                      // Using planned alone inflates rate to ~96% in RMD years.
                       const planned   = W?.planned_current?.[i] ?? 0;
-                      const denom     = planned + total;
-                      const effRate   = denom > 0 ? total / denom : null;
+                      const gross     = W?.total_withdraw_current_mean?.[i] ?? planned;
+                      const effRate   = gross > 0 ? total / gross : null;
 
                       const startAge = snapshot.person?.current_age ?? snapshot.person?.age ?? undefined;
                       const ageDisplay = startAge !== undefined ? Math.floor(startAge + i) : "";

@@ -181,9 +181,14 @@ def compute_bracket_fill_conversion_paths(
     # of how far along in the simulation we are.
     deflator_y = max(deflator_y, 1e-12)
 
-    # Pre-scale: inflate bracket ceilings and NIIT threshold to year-y nominal $
+    # Pre-scale: inflate bracket ceilings and NIIT threshold to year-y nominal $.
+    # IMPORTANT: preserve None for the top bracket (up_to=null in JSON).
+    # Previously `b.get("up_to") or 1e12` converted null → 1e12, then × deflator_y
+    # produced a ~$1.38T ceiling that bypassed _find_current_bracket_ceiling's
+    # top-bracket fallback, causing runaway conversions equal to the full TRAD
+    # balance in years when ordinary income (e.g. RMDs) exceeded all real brackets.
     scaled_brackets = [
-        {**b, "up_to": float(b.get("up_to") or 1e12) * deflator_y}
+        {**b, "up_to": (float(b["up_to"]) * deflator_y if b.get("up_to") is not None else None)}
         for b in fed_ord_brackets
     ]
     niit_thresh_scaled = niit_thresh * deflator_y
