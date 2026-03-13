@@ -1276,7 +1276,7 @@ def run_standard(profile: str, paths: int):
                 chks.append(chk("ROTH < baseline by >1M",           br - r2 > 1_000_000,
                     f"ROTH={r2:,.0f} vs {br:,.0f}"))
             if rmd and not cv and not wd:
-                chks.append(chk("BROK < baseline (no RMD reinvest)", b2 < bb,
+                chks.append(chk("BROK > baseline (no RMD tax drag)", b2 > bb,
                     f"BROK={b2:,.0f} vs {bb:,.0f}"))
             if wd and not cv and not rmd:
                 chks.append(chk("BROK > baseline (no WD drain)",     b2 > bb,

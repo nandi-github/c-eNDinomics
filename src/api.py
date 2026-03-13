@@ -49,7 +49,7 @@ DEFAULT_PROFILE = "default"
 
 # Files that live at APP_ROOT, not per-profile
 ECONOMIC_GLOBAL_PATH = os.path.join(APP_ROOT, "economicglobal.json")
-TAX_GLOBAL_PATH      = os.path.join(APP_ROOT, "taxes_states_mfj_single.json")
+TAX_GLOBAL_PATH      = os.path.join(APP_ROOT, "config", "taxes_states_mfj_single.json")
 BENCHMARKS_GLOBAL_PATH = os.path.join(APP_ROOT, "benchmarks.json")
 SYSTEM_SHOCKS_PATH   = os.path.join(APP_ROOT, "system_shocks.json")
 SYSTEM_SHOCK_PRESETS = {"average", "below_average", "bad", "worst"}

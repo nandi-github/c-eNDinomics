@@ -460,11 +460,7 @@ def run_accounts_new(
             for a in roth_accounts:
                 acct_eoy_nom[a] = updated_roth[a]
 
-            # Add conversion to ordinary income for tax computation
-            if ordinary_income_cur_paths is not None and conversion_nom_paths is not None:
-                for y in range(YEARS):
-                    conv_cur_y = conversion_nom_paths[:, y] / max(_deflator_conv[y], 1e-12)
-                    ordinary_income_cur_paths[:, y] += conv_cur_y
+            # Note: ordinary_income_cur_paths already updated inside apply_bracket_fill_conversions
 
             logger.info(
                 "[sim] Roth fixed conversions | amount=$%.0f/yr | window y%d-y%d | age %.0f→%.0f",
