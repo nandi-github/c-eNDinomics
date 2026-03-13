@@ -900,12 +900,21 @@ def run_accounts_new(
         # Use nanmean/nanmedian so NaN cells (prior balance < $1k) are excluded
         # rather than polluting the mean with division-by-near-zero garbage.
         def _pct_tolist(arr2d):
-            """nanmean over paths, scale to %, replace NaN with None for JSON."""
-            m = np.nanmean(arr2d, axis=0) * 100.0
+            """nanmean over paths, scale to %, replace NaN with None for JSON.
+            nanmean/nanmedian emit 'mean of empty slice' via Python warnings
+            (not numpy errstate) when all paths are NaN for a column — expected
+            for depleted accounts. Suppress with warnings.catch_warnings."""
+            import warnings as _w
+            with _w.catch_warnings():
+                _w.simplefilter("ignore", RuntimeWarning)
+                m = np.nanmean(arr2d, axis=0) * 100.0
             return [None if np.isnan(v) else float(v) for v in m]
 
         def _pct_med_tolist(arr2d):
-            m = np.nanmedian(arr2d, axis=0) * 100.0
+            import warnings as _w
+            with _w.catch_warnings():
+                _w.simplefilter("ignore", RuntimeWarning)
+                m = np.nanmedian(arr2d, axis=0) * 100.0
             return [None if np.isnan(v) else float(v) for v in m]
 
         inv_nom_yoy_mean_pct_acct[acct]               = _pct_tolist(yoy_nom_inv)
