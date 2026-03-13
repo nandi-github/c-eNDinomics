@@ -2046,6 +2046,220 @@ def group14_cashflow_verification(paths: int):
     return "G14", "Cashflow verification (withdrawals, taxes, conversions, account flows)", checks, elapsed
 
 
+
+# ===========================================================================
+# GROUP 15 — INSIGHTS ENGINE TESTS
+# Tests insights.py as a standalone module — rule firing, suppression,
+# report structure, and integration with the simulation result shape.
+# ===========================================================================
+
+def _make_insight_result(
+    mean_eff_pre: float = 0.5,
+    mean_eff_rmd: float = 52.0,
+    trad_at_rmd: float = 9_000_000.0,
+    roth_end: float = 1_000_000.0,
+    total_end: float = 22_000_000.0,
+    niit_30yr: float = 7_300_000.0,
+    success_rate: float = 0.97,
+    conv_enabled: bool = True,
+    brokerage_depletes_early: bool = False,
+) -> dict:
+    """Synthetic result dict for insights rule testing."""
+    n, rmd_start = 30, 20
+    planned = [150_000]*5 + [200_000]*25
+    rmd_vals = [trad_at_rmd / 27.4] * (n - rmd_start)
+    state_pre = [planned[i] * mean_eff_pre / 100.0 for i in range(rmd_start)]
+    state_rmd = [r * mean_eff_rmd / 100.0 for r in rmd_vals]
+    fed_yr    = [0.0]*rmd_start + [r * 0.37 for r in rmd_vals]
+    state_yr  = state_pre + state_rmd
+    niit_yr   = [0.0]*rmd_start + [niit_30yr / (n - rmd_start)] * (n - rmd_start)
+    total_wd  = planned[:rmd_start] + rmd_vals
+    brok = ([500_000, 300_000, 100_000, 500.0] + [0.0]*16 + [1_000_000.0]*10
+            if brokerage_depletes_early
+            else [max(0, 500_000 - i*15_000) for i in range(rmd_start)] +
+                 [2_000_000 + i*500_000 for i in range(n - rmd_start)])
+    trad = ([max(0, trad_at_rmd + (rmd_start - i)*200_000) for i in range(rmd_start)] +
+            [max(0, trad_at_rmd - i*trad_at_rmd/28) for i in range(n - rmd_start)])
+    roth = ([370_000 + i*23_000 for i in range(rmd_start)] +
+            [roth_end] * (n - rmd_start))
+    conv_cur = [23_850]*rmd_start + [0.0]*(n-rmd_start) if conv_enabled else [0.0]*n
+    conv_tax = [2_667]*rmd_start  + [0.0]*(n-rmd_start) if conv_enabled else [0.0]*n
+    return {
+        "years": list(range(1, n + 1)),
+        "withdrawals": {
+            "taxes_fed_current_mean":      fed_yr,
+            "taxes_state_current_mean":    state_yr,
+            "taxes_niit_current_mean":     niit_yr,
+            "taxes_excise_current_mean":   [0.0]*n,
+            "planned_current":             planned,
+            "total_withdraw_current_mean": total_wd,
+            "rmd_current_mean":            [0.0]*rmd_start + rmd_vals,
+            "rmd_extra_current":           [0.0]*rmd_start + [max(0, r-200_000) for r in rmd_vals],
+        },
+        "conversions": {
+            "conversion_cur_mean_by_year":     conv_cur,
+            "conversion_tax_cur_mean_by_year": conv_tax,
+            "total_converted_cur_mean":        sum(conv_cur),
+            "total_tax_cost_cur_mean":         sum(conv_tax),
+        },
+        "summary": {
+            "success_rate":              success_rate,
+            "taxes_fed_total_current":   sum(fed_yr),
+            "taxes_state_total_current": sum(state_yr),
+            "taxes_niit_total_current":  niit_30yr,
+        },
+        "returns_acct_levels": {
+            "inv_nom_levels_mean_acct": {
+                "BROKERAGE-1": brok,
+                "TRAD_IRA-1":  trad,
+                "ROTH_IRA-1":  roth,
+            },
+        },
+    }
+
+
+def _make_insight_profile(conv_enabled: bool = True, window: str = "now-75") -> dict:
+    return {
+        "current_age": 55, "rmd_start_age": 75,
+        "roth_conversion_policy": {
+            "enabled": conv_enabled,
+            "keepit_below_max_marginal_fed_rate": "fill the bracket" if conv_enabled else None,
+            "window": window, "avoid_niit": True,
+        },
+        "rmd_extra_handling": "reinvest_in_brokerage",
+    }
+
+
+def group15_insights_engine(paths: int):
+    """
+    Tests insights.py as a standalone module — no simulator run needed.
+
+    15a: compute_insights() returns InsightReport with correct structure
+    15b: conv_underutilized fires (pre-RMD < 5%, RMD > 35%, conv enabled)
+    15c: conv_underutilized suppressed when conversion is disabled
+    15d: rmd_cliff fires when TRAD implies RMD > 5x planned spend
+    15e: rmd_cliff suppressed when TRAD balance is small
+    15f: all_clear fires when no warn/tip rules trigger
+    15g: success_rate_low fires when success_rate < 0.95
+    15h: brokerage_depletion fires when mean balance hits $0 before yr15
+    15i: niit_exposure fires when niit > 0; suppressed when niit = 0
+    15j: ask_insights() returns a non-empty string (stub)
+    15k: all insight severity values are valid enum members
+    15l: warn/tip insights have non-empty data dicts
+    15m: to_dict() produces JSON-serialisable output
+    """
+    import importlib, json as _json
+    checks = []; elapsed = 0.0
+    VALID_SEV = {"warn", "tip", "good", "info"}
+
+    try:
+        ins_mod = importlib.import_module("insights")
+    except ImportError as e:
+        checks.append(chk("insights module importable", False, str(e)))
+        return "G15", "Insights engine tests", checks, elapsed
+
+    compute_insights = ins_mod.compute_insights
+    ask_insights     = ins_mod.ask_insights
+
+    prof = _make_insight_profile()
+    t0   = time.time()
+    res  = _make_insight_result()
+    report = compute_insights(res, prof, {})
+    elapsed += time.time() - t0
+    ids = [i.id for i in report.insights]
+
+    # 15a ── structure ────────────────────────────────────────────────────
+    checks.append(chk("15a: returns InsightReport with .insights attr",
+                       hasattr(report, "insights") and hasattr(report, "rules_fired"),
+                       f"type={type(report).__name__}"))
+    checks.append(chk("15a: at least 1 insight returned", len(report.insights) >= 1,
+                       f"found {len(report.insights)}"))
+    checks.append(chk("15a: rules_checked > rules_fired",
+                       report.rules_checked > report.rules_fired,
+                       f"checked={report.rules_checked} fired={report.rules_fired}"))
+
+    # 15b ── conv_underutilized fires ─────────────────────────────────────
+    checks.append(chk("15b: conv_underutilized fires (pre=0.5%, rmd=52%, enabled)",
+                       "conv_underutilized" in ids, f"ids={ids}"))
+
+    # 15c ── conv_underutilized suppressed ────────────────────────────────
+    report_nc = compute_insights(_make_insight_result(conv_enabled=False),
+                                  _make_insight_profile(conv_enabled=False), {})
+    checks.append(chk("15c: conv_underutilized suppressed when conv disabled",
+                       "conv_underutilized" not in [i.id for i in report_nc.insights],
+                       f"ids={[i.id for i in report_nc.insights]}"))
+
+    # 15d ── rmd_cliff fires with large TRAD ($40M → RMD $1.46M, ratio 7.3x) ──
+    report_big = compute_insights(_make_insight_result(trad_at_rmd=40_000_000), prof, {})
+    checks.append(chk("15d: rmd_cliff fires with $40M TRAD (ratio > 5x)",
+                       "rmd_cliff" in [i.id for i in report_big.insights],
+                       f"ids={[i.id for i in report_big.insights]}"))
+
+    # 15e ── rmd_cliff suppressed with small TRAD ($500k → RMD $18k) ─────
+    report_sm = compute_insights(_make_insight_result(trad_at_rmd=500_000), prof, {})
+    checks.append(chk("15e: rmd_cliff suppressed with $500k TRAD (ratio < 5x)",
+                       "rmd_cliff" not in [i.id for i in report_sm.insights],
+                       f"ids={[i.id for i in report_sm.insights]}"))
+
+    # 15f ── all_clear fires when clean ───────────────────────────────────
+    res_clean = _make_insight_result(
+        mean_eff_pre=25.0, mean_eff_rmd=30.0, trad_at_rmd=500_000,
+        roth_end=5_000_000, total_end=8_000_000, niit_30yr=0.0, success_rate=0.98,
+    )
+    report_clean = compute_insights(res_clean, prof, {})
+    ids_clean = [i.id for i in report_clean.insights]
+    checks.append(chk("15f: all_clear fires when no warn/tip rules trigger",
+                       "all_clear" in ids_clean, f"ids={ids_clean}"))
+    checks.append(chk("15f: all_clear is the only finding in clean run",
+                       len(report_clean.insights) == 1, f"count={len(report_clean.insights)}"))
+
+    # 15g ── success_rate_low fires ───────────────────────────────────────
+    report_fail = compute_insights(_make_insight_result(success_rate=0.80), prof, {})
+    checks.append(chk("15g: success_rate_low fires when success_rate=0.80",
+                       "success_rate_low" in [i.id for i in report_fail.insights],
+                       f"ids={[i.id for i in report_fail.insights]}"))
+
+    # 15h ── brokerage_depletion fires ────────────────────────────────────
+    report_dep = compute_insights(_make_insight_result(brokerage_depletes_early=True), prof, {})
+    checks.append(chk("15h: brokerage_depletion fires when brokerage hits $0 before yr15",
+                       "brokerage_depletion" in [i.id for i in report_dep.insights],
+                       f"ids={[i.id for i in report_dep.insights]}"))
+
+    # 15i ── niit_exposure fires and suppresses ────────────────────────────
+    checks.append(chk("15i: niit_exposure fires when niit_30yr > 0",
+                       "niit_exposure" in ids, f"ids={ids}"))
+    report_noniit = compute_insights(_make_insight_result(niit_30yr=0.0), prof, {})
+    checks.append(chk("15i: niit_exposure suppressed when niit_30yr = 0",
+                       "niit_exposure" not in [i.id for i in report_noniit.insights],
+                       f"ids={[i.id for i in report_noniit.insights]}"))
+
+    # 15j ── ask_insights stub ────────────────────────────────────────────
+    answer = ask_insights(report, "Why is my rate so high?")
+    checks.append(chk("15j: ask_insights() returns non-empty string",
+                       isinstance(answer, str) and len(answer) > 10,
+                       f"len={len(answer)}"))
+
+    # 15k ── all severities valid ──────────────────────────────────────────
+    bad = [i.severity for i in report.insights if i.severity not in VALID_SEV]
+    checks.append(chk("15k: all severity values valid (warn/tip/good/info)",
+                       len(bad) == 0, f"invalid: {bad}"))
+
+    # 15l ── warn/tip data dicts non-empty ────────────────────────────────
+    empty = [i.id for i in report.insights if i.severity in ("warn","tip") and not i.data]
+    checks.append(chk("15l: warn/tip insights have non-empty data dicts",
+                       len(empty) == 0, f"empty: {empty}"))
+
+    # 15m ── JSON-serialisable ─────────────────────────────────────────────
+    try:
+        serial = _json.dumps(report.to_dict())
+        checks.append(chk("15m: to_dict() is JSON-serialisable",
+                           len(serial) > 50, f"len={len(serial)}"))
+    except Exception as e:
+        checks.append(chk("15m: to_dict() is JSON-serialisable", False, str(e)))
+
+    return "G15", "Insights engine (rules, suppression, structure, serialisation)", checks, elapsed
+
+
 GROUPS = [
     group1_flag_matrix,
     group2_rmd,
@@ -2061,6 +2275,7 @@ GROUPS = [
     group12_conversion_tax,
     group13_yoy_sanity,
     group14_cashflow_verification,
+    group15_insights_engine,
 ]
 
 

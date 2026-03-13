@@ -30,6 +30,7 @@ from loaders import (
     load_economic_policy,
 )
 from simulator_new import run_accounts_new
+from insights import compute_insights
 
 from income_core import build_income_streams
 
@@ -924,7 +925,18 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
         },
     }
 
-    # 9) Snapshot + run_meta
+    # 9) Insights — computed before snapshot so they can be saved into it
+    try:
+        insight_report = compute_insights(
+            result=res,
+            profile_cfg=person_cfg or {},
+            global_cfg=tax_cfg or {},
+        )
+        insights_data = insight_report.to_dict()
+    except Exception as _ins_exc:
+        insights_data = {"insights": [], "error": str(_ins_exc)}
+
+    # 9b) Snapshot + run_meta
     save_raw_snapshot_accounts(
         out_dir=run_dir,
         res=res,
@@ -935,6 +947,7 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
         infl_yearly=infl_yearly,
         shocks_events=shocks_events,
         shocks_mode=str(shocks_mode or "augment"),
+        insights=insights_data,
     )
     _write_run_meta(run_dir=run_dir, profile=profile, run_id=run_id, run_info=run_info)
 

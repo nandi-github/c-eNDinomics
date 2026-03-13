@@ -94,6 +94,23 @@ type SnapshotConversions = {
   conversion_cur_mean_by_year?: number[];
 };
 
+
+type InsightItem = {
+  id:       string;
+  severity: "warn" | "tip" | "good" | "info";
+  title:    string;
+  body:     string;
+  data:     Record<string, unknown>;
+  actions:  string[];
+};
+
+type InsightReport = {
+  insights:       InsightItem[];
+  rules_fired:    number;
+  rules_checked:  number;
+  engine_version: string;
+};
+
 type Snapshot = {
   run_info: RunInfo;
   years: number[];
@@ -106,6 +123,7 @@ type Snapshot = {
   returns_acct_levels?: SnapshotReturnsAcctLevels;
   accounts?: SnapshotAccount[];
   starting?: Record<string, number>;
+  insights?: InsightReport;
 };
 
 type EndingBalance = {
@@ -240,6 +258,7 @@ const App: React.FC = () => {
   const isDefaultProfile = selectedProfile === "default";
 
   const [aggView, setAggView] = useState<"none" | "current" | "future">("none");
+  const [showInsights, setShowInsights] = useState(false);
 
   useEffect(() => {
     apiGet<ProfileList>("/profiles")
@@ -1042,7 +1061,85 @@ const App: React.FC = () => {
                   </tbody>
                 </table>
               </section>
-              
+
+
+              {/* ── Insights ─────────────────────────────────────────────────── */}
+              {(() => {
+                // Insights are computed server-side by insights.py and attached to the snapshot.
+                // The UI is pure display — no rule logic here.
+                const insightReport = snapshot.insights;
+                const insights: InsightItem[] = insightReport?.insights ?? [];
+
+                const sevIcon:  Record<string, string> = { warn: "⚠️", tip: "💡", good: "✅", info: "ℹ️" };
+                const sevColor: Record<string, string> = {
+                  warn: "var(--color-warn, #b45309)",
+                  tip:  "var(--color-accent, #1d6fa4)",
+                  good: "var(--color-success, #166534)",
+                  info: "var(--color-muted, #555)",
+                };
+                const sevBg: Record<string, string> = {
+                  warn: "var(--color-warn-bg, #fffbeb)",
+                  tip:  "var(--color-tip-bg, #eff6ff)",
+                  good: "var(--color-success-bg, #f0fdf4)",
+                  info: "var(--color-info-bg, #f8f8f8)",
+                };
+
+                return (
+                  <section className="results-section">
+                    <h3
+                      style={{ cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", gap: "0.4rem" }}
+                      onClick={() => setShowInsights(v => !v)}
+                    >
+                      <span style={{ fontSize: "0.8em", opacity: 0.6 }}>{showInsights ? "▼" : "▶"}</span>
+                      Insights
+                      {insights.length > 0 && (
+                        <span style={{ fontSize: "0.75em", fontWeight: 400, opacity: 0.55, marginLeft: "0.3rem" }}>
+                          ({insights.length} {insights.length === 1 ? "finding" : "findings"})
+                        </span>
+                      )}
+                      {!showInsights && (
+                        <span style={{ fontSize: "0.7em", fontWeight: 400, color: "var(--color-muted, #888)", marginLeft: "0.5rem" }}>
+                          click to expand
+                        </span>
+                      )}
+                    </h3>
+
+                    {showInsights && (
+                      <div style={{ display: "flex", flexDirection: "column", gap: "0.75rem", marginTop: "0.5rem" }}>
+                        {insights.length === 0 && (
+                          <div style={{ color: "var(--color-muted, #888)", fontSize: "0.9em" }}>
+                            No insights available for this run.
+                          </div>
+                        )}
+                        {insights.map(ins => (
+                          <div key={ins.id} style={{
+                            border: `1px solid ${sevColor[ins.severity] ?? "#ccc"}33`,
+                            borderLeft: `4px solid ${sevColor[ins.severity] ?? "#ccc"}`,
+                            borderRadius: "6px",
+                            background: sevBg[ins.severity] ?? "#fafafa",
+                            padding: "0.75rem 1rem",
+                          }}>
+                            <div style={{ fontWeight: 600, color: sevColor[ins.severity], marginBottom: "0.3rem" }}>
+                              {sevIcon[ins.severity] ?? "•"} {ins.title}
+                            </div>
+                            <div style={{ fontSize: "0.9em", lineHeight: 1.55, color: "var(--color-text, #222)", marginBottom: ins.actions?.length ? "0.5rem" : 0 }}>
+                              {ins.body}
+                            </div>
+                            {ins.actions && ins.actions.length > 0 && (
+                              <ul style={{ margin: "0.2rem 0 0 1.1rem", padding: 0, fontSize: "0.85em", color: "var(--color-muted, #555)" }}>
+                                {ins.actions.map((a, ai) => <li key={ai}>{a}</li>)}
+                              </ul>
+                            )}
+                          </div>
+                        ))}
+                        <div style={{ fontSize: "0.75em", color: "var(--color-muted, #aaa)", textAlign: "right", marginTop: "0.25rem" }}>
+                          insights.py v{insightReport?.engine_version ?? "—"} · {insightReport?.rules_checked ?? 0} rules checked
+                        </div>
+                      </div>
+                    )}
+                  </section>
+                );
+              })()}
 
               <section className="results-section">
                 <h3>Aggregate Balances (Charts)</h3>
@@ -1324,14 +1421,16 @@ const App: React.FC = () => {
                       <th>Total Future USD mean</th>
                       <th>Reinvested Current USD mean</th>
                       <th>Reinvested Future USD mean</th>
-                      <th>Conv Out Current USD mean</th>
-                      <th>Conv Tax Current USD mean</th>
+                      <th>Conv Out Current USD</th>
+                      <th>Conv Tax Current USD</th>
                     </tr>
                   </thead>
                   <tbody>
                     {snapshot.years.map((y, i) => {
                       const W = snapshot.withdrawals;
-                      const C = snapshot.conversions;
+                      const C_wd = snapshot.conversions;
+                      const convOutCur = C_wd?.conversion_cur_mean_by_year?.[i] ?? 0;
+                      const convTaxCur = C_wd?.conversion_tax_cur_mean_by_year?.[i] ?? 0;
                       const planned = W?.planned_current?.[i] ?? 0;
                       const realizedCur = W?.realized_current_mean?.[i] ?? 0;
                       const realizedFut = W?.realized_future_mean?.[i] ?? 0;
@@ -1349,10 +1448,6 @@ const App: React.FC = () => {
                       // Reinvested = surplus RMD actually added to brokerage (0 if cash_out policy)
                       const reinvestedCur = W?.rmd_extra_current?.[i] ?? 0;
                       const reinvestedFut = W?.rmd_extra_future?.[i] ?? 0;
-
-                      // Roth conversion cashflow (current USD) — shows TRAD→ROTH flow per year
-                      const convOutCur  = C?.conversion_cur_mean_by_year?.[i]     ?? 0;
-                      const convTaxCur  = C?.conversion_tax_cur_mean_by_year?.[i] ?? 0;
               
                       // New: Age = starting age + (year index)
                       const startAge =
@@ -1361,8 +1456,6 @@ const App: React.FC = () => {
                         undefined;
                       const ageDisplay =
                         startAge !== undefined ? Math.floor(startAge + i) : "";
-
-                      const dash = <span style={{ color: "#aaa" }}>—</span>;
               
                       return (
                         <tr key={y}>
@@ -1378,8 +1471,8 @@ const App: React.FC = () => {
                           <td>{formatUSD(totalFut)}</td>
                           <td>{formatUSD(reinvestedCur)}</td>
                           <td>{formatUSD(reinvestedFut)}</td>
-                          <td>{convOutCur > 0 ? formatUSD(convOutCur) : dash}</td>
-                          <td>{convTaxCur > 0 ? formatUSD(convTaxCur) : dash}</td>
+                          <td>{convOutCur > 0 ? formatUSD(convOutCur) : <span style={{color:"#aaa"}}>—</span>}</td>
+                          <td>{convTaxCur > 0 ? formatUSD(convTaxCur) : <span style={{color:"#aaa"}}>—</span>}</td>
                         </tr>
                       );
                     })}
@@ -1418,15 +1511,13 @@ const App: React.FC = () => {
                     {snapshot.years.map((yr, i) => {
                       const W = snapshot.withdrawals;
                       const C = snapshot.conversions;
-                      // taxes_fed_current_mean is computed on ordinary_income which already
-                      // includes conversion income — do NOT add convTax again (double-count).
+                      // Federal = ordinary income taxes + conversion income taxes
+                      // Conversion taxes are federal income taxes (bracket-fill on converted amount)
                       const fedTotal  = W?.taxes_fed_current_mean?.[i]   ?? 0;
                       const state     = W?.taxes_state_current_mean?.[i]  ?? 0;
                       const niit      = W?.taxes_niit_current_mean?.[i]   ?? 0;
                       const excise    = W?.taxes_excise_current_mean?.[i] ?? 0;
                       const total     = fedTotal + state + niit + excise;
-                      // Effective rate denominator = gross income received (max of planned, RMD).
-                      // Using planned alone inflates rate to ~96% in RMD years.
                       const planned   = W?.planned_current?.[i] ?? 0;
                       const gross     = W?.total_withdraw_current_mean?.[i] ?? planned;
                       const effRate   = gross > 0 ? total / gross : null;
