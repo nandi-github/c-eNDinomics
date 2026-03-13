@@ -464,7 +464,31 @@ def validate_alloc_accounts(alloc_accounts: Dict[str, Any]) -> None:
 def load_person(path: str) -> Dict[str, Any]:
     data = _load_json(path)
 
-    current_age = _safe_num(data.get("current_age", 0.0), 0.0)
+    # current_age: "compute" → derive from birth_year and today's date
+    _raw_age = data.get("current_age", 0.0)
+    if str(_raw_age).strip().lower() == "compute":
+        _birth_year = int(data.get("birth_year", 0) or 0)
+        if _birth_year > 0:
+            import datetime as _dt
+            _today = _dt.date.today()
+            # Age = years since birth_year, adjusted for whether birthday has passed
+            _birth_month = int(data.get("birth_month", 1) or 1)
+            _birth_day   = int(data.get("birth_day",   1) or 1)
+            try:
+                _bday = _dt.date(_birth_year, _birth_month, _birth_day)
+            except ValueError:
+                _bday = _dt.date(_birth_year, 1, 1)
+            current_age = float(
+                _today.year - _bday.year
+                - ((_today.month, _today.day) < (_bday.month, _bday.day))
+            )
+        else:
+            raise ValueError(
+                "person.json: current_age='compute' requires a valid birth_year"
+            )
+    else:
+        current_age = _safe_num(_raw_age, 0.0)
+
     retirement_age = _safe_num(
         data.get("retirement_age", data.get("current_age", 0.0)),
         0.0,

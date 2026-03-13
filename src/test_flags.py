@@ -1218,7 +1218,57 @@ def group9_ages(paths: int):
     checks.append(chk_zero("tira_age_gate 59.5: TRAD withdrawal_out zero in yrs 1-4 (age 56-59)",
                             [trad_wd_early]))
 
-    return "G9", "Age variations (pre-retirement, birth_year, tira_age_gate)", checks, elapsed
+    # 9e — current_age="compute": derives age from birth_year (+ optional month/day)
+    import datetime as _dt
+    _today = _dt.date.today()
+    _birth_year = 1971  # same as BASE_PERSON
+    _expected_age = _today.year - _birth_year - ((_today.month, _today.day) < (1, 1))
+
+    # Test 1: compute from birth_year only (no month/day → defaults Jan 1)
+    p_compute = copy.deepcopy(BASE_PERSON)
+    p_compute["current_age"] = "compute"
+    p_compute["birth_year"] = _birth_year
+    res_c, t = ephemeral_run("g9e_compute_age", paths, person=p_compute); elapsed += t
+    computed_n = len(_portfolio_future(res_c))
+    expected_n = max(10, min(60, int(p_compute.get("target_age", 95)) - _expected_age))
+    checks.append(chk(
+        f"current_age='compute' birth_year=1971: sim runs ({expected_n} yrs expected)",
+        computed_n == expected_n,
+        f"got={computed_n} expected={expected_n}"
+    ))
+    checks.append(chk_pos("current_age='compute': portfolio grows (sim ran ok)", _portfolio_future(res_c)))
+
+    # Test 2: compute with explicit birth_month + birth_day
+    p_md = copy.deepcopy(BASE_PERSON)
+    p_md["current_age"] = "compute"
+    p_md["birth_year"] = _birth_year
+    p_md["birth_month"] = 6
+    p_md["birth_day"] = 15
+    _bday = _dt.date(_birth_year, 6, 15)
+    _age_md = _today.year - _bday.year - ((_today.month, _today.day) < (_bday.month, _bday.day))
+    res_md, t = ephemeral_run("g9e_compute_age_md", paths, person=p_md); elapsed += t
+    computed_n_md = len(_portfolio_future(res_md))
+    expected_n_md = max(10, min(60, int(p_md.get("target_age", 95)) - _age_md))
+    checks.append(chk(
+        f"current_age='compute' with birth_month/day: sim runs ({expected_n_md} yrs expected)",
+        computed_n_md == expected_n_md,
+        f"got={computed_n_md} expected={expected_n_md}"
+    ))
+
+    # Test 3: compute with missing birth_year → raises ValueError
+    import traceback as _tb
+    p_bad = copy.deepcopy(BASE_PERSON)
+    p_bad["current_age"] = "compute"
+    p_bad["birth_year"] = 0
+    _raised = False
+    try:
+        ephemeral_run("g9e_compute_bad", paths, person=p_bad)
+    except (ValueError, Exception):
+        _raised = True
+    checks.append(chk("current_age='compute' with birth_year=0 raises error", _raised,
+                       "expected ValueError, got none"))
+
+    return "G9", "Age variations (pre-retirement, birth_year, tira_age_gate, compute)", checks, elapsed
 
 
 # ===========================================================================

@@ -1,6 +1,7 @@
 {
   "current_age": 55,
   "birth_year": 1971,
+  "assumed_death_age": 88,
   "filing_status": "MFJ",
   "spouse": {
     "name": "Spouse",
@@ -51,8 +52,9 @@
     }
   },
   "readme": {
-    "current_age": "Simulation start age. Year 1 = this age + 1. All age-gated logic (RMD start, Roth conversion window, tira_age_gate) is relative to this.",
+    "current_age": "Simulation start age. Year 1 = this age + 1. All age-gated logic (RMD start, Roth conversion window, tira_age_gate) is relative to this. Set to \"compute\" to derive automatically from birth_year (and optionally birth_month + birth_day). Example: \"current_age\": \"compute\"",
     "birth_year": "Used to determine SECURE 2.0 RMD start age: born 1950 or earlier = age 72, born 1951-1959 = age 73, born 1960 or later = age 75. Does not drive simulation year counting.",
+    "assumed_death_age": "Last simulation year. Simulation runs from current_age+1 to this age inclusive.",
     "filing_status": "Options: 'MFJ' (married filing jointly), 'single', 'MFS' (married filing separately), 'HOH' (head of household). Drives federal and state tax bracket selection.",
     "spouse": "Optional. Include only if filing_status is MFJ. sole_beneficiary_for_ira: true enables spousal rollover RMD rules (spouse uses their own life expectancy after inheriting).",
     "beneficiaries": {
@@ -77,7 +79,7 @@
     "state": "Resident state for state income tax bracket selection. Must match a state name exactly as keyed in src/config/taxes_states_mfj_single.json (e.g. 'California', 'New York', 'Texas'). Drives which state brackets are loaded by load_tax_unified(). Can be overridden at runtime via the Run panel without changing this file.",
     "rmd_table": "Which IRS RMD table to use. Options: 'uniform_lifetime' (default \u2014 applies to all account owners), 'joint_survivor' (use only if your spouse is your sole IRA beneficiary AND is more than 10 years younger \u2014 produces lower RMDs). The system file src/config/rmd.json contains the Uniform Lifetime Table. Joint Survivor table must be added to src/config/ before selecting this option.",
     "runtime_overrides_note": "Fields 'state', 'filing_status', and 'rmd_table' can be overridden at runtime from the Run panel without editing this file. Runtime overrides are ephemeral \u2014 they apply to that run only and are recorded in the run's result metadata so you always know which parameters produced which results.",
-    "target_age": "Age at which the simulation ends. sim_years = target_age - current_age (clamped 10\u201360). Replaces the old assumed_death_age field which was stored but never wired. Default 95 gives 40 years of simulation from age 55."
+    "target_age": "Final simulation age (inclusive). n_years = target_age - current_age. Clamped to 10-60 year range. Replaces assumed_death_age for simulation length control."
   },
   "state": "California",
   "rmd_table": "uniform_lifetime",
