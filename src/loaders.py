@@ -497,6 +497,10 @@ def load_person(path: str) -> Dict[str, Any]:
     if "roth_conversion_policy" in data:
         person_cfg["roth_conversion_policy"] = data.get("roth_conversion_policy", {}) or {}
 
+    # Pass through target_age (used by api.py for n_years computation)
+    if "target_age" in data:
+        person_cfg["target_age"] = int(_safe_num(data.get("target_age", 95), 95))
+
     return person_cfg
 
 

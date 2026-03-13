@@ -110,6 +110,7 @@ def run_accounts_new(
     override_state: Optional[str] = None,
     override_filing_status: Optional[str] = None,
     override_rmd_table: Optional[str] = None,
+    n_years: Optional[int] = None,
 ) -> Dict[str, Any]:
 
 
@@ -132,6 +133,7 @@ def run_accounts_new(
     np.random.seed(42)
     paths = int(paths)
     spy = int(spy)
+    n_years = int(n_years) if n_years is not None else 30
 
     # -----------------------------------------------------------------------
     # Resolve effective run parameters: runtime overrides win over person_cfg.
@@ -152,7 +154,7 @@ def run_accounts_new(
     # Core Monte Carlo
     acct_eoy_nom, total_nom_paths, total_real_paths, acct_class_eoy_nom = simulate_balances(
         paths=paths,
-        years=YEARS,
+        years=n_years,
         spy=spy,
         alloc_accounts=alloc_accounts,
         assets_path=assets_path,
@@ -162,10 +164,10 @@ def run_accounts_new(
     )
 
     # ── Rebalancing ────────────────────────────────────────────────────────────
-    rebal_gains_brokerage = np.zeros((paths, YEARS), dtype=float)
+    rebal_gains_brokerage = np.zeros((paths, n_years), dtype=float)
     if rebalancing_enabled:
         econ_policy_yearly = build_econ_policy_yearly(
-            econ_policy or {}, YEARS
+            econ_policy or {}, n_years
         )
         rebal_gains_brokerage, _, _ = apply_rebalancing(
             acct_eoy_nom       = acct_eoy_nom,
@@ -173,7 +175,7 @@ def run_accounts_new(
             alloc_accounts     = alloc_accounts,
             econ_policy_yearly = econ_policy_yearly,
             paths              = paths,
-            years              = YEARS,
+            years              = n_years,
         )
         if cap_gains_cur_paths is not None:
             cap_gains_cur_paths = cap_gains_cur_paths + rebal_gains_brokerage
@@ -185,12 +187,12 @@ def run_accounts_new(
         )
 
     # Snapshot core-only totals and account means before RMD/withdrawals/reinvest (for debug)
-    core_total_nom_before = np.zeros((paths, YEARS), dtype=float)
+    core_total_nom_before = np.zeros((paths, n_years), dtype=float)
     core_acct_mean_before = {}
     for acct, bal in acct_eoy_nom.items():
         core_acct_mean_before[acct] = bal.mean(axis=0).copy()
 
-    for y in range(YEARS):
+    for y in range(n_years):
         total_nom_y = None
         for acct, bal in acct_eoy_nom.items():
             v = np.where(np.isfinite(bal[:, y]), bal[:, y], 0.0)
@@ -214,14 +216,14 @@ def run_accounts_new(
     # deflator not yet built here — compute year-1 inflation factor inline
     _infl_arr = np.asarray(infl_yearly, dtype=float).reshape(-1) if (
         infl_yearly is not None and np.asarray(infl_yearly).size > 0
-    ) else np.zeros(YEARS, dtype=float)
+    ) else np.zeros(n_years, dtype=float)
     _deflator_y1 = float(1.0 + _infl_arr[0]) if len(_infl_arr) > 0 else 1.0
 
     inv_nom_yoy_paths_core = pct_change_paths(total_nom_paths_core,
                                                prior_col=starting_total_nom)
 
     # Build full deflator inline for real conversion of core paths
-    _deflator_core = np.cumprod(1.0 + _infl_arr[:YEARS]) if len(_infl_arr) >= YEARS                      else np.ones(YEARS, dtype=float)
+    _deflator_core = np.cumprod(1.0 + _infl_arr[:n_years]) if len(_infl_arr) >= n_years                      else np.ones(n_years, dtype=float)
     _total_real_paths_core = total_nom_paths_core / np.maximum(_deflator_core, 1e-12)
     # Real prior = starting_total in nominal terms (base year has no deflation yet)
     # real_bal[0] = nom[0]/deflator[0], prior = starting_total
@@ -273,10 +275,10 @@ def run_accounts_new(
     rmd_factors = None
     rmd_total_nom_paths = None
     rmd_nom_per_acct = None
-    rmd_future_mean = np.zeros(YEARS, dtype=float)
-    rmd_current_mean = np.zeros(YEARS, dtype=float)
+    rmd_future_mean = np.zeros(n_years, dtype=float)
+    rmd_current_mean = np.zeros(n_years, dtype=float)
     
-    rmd_extra_current = np.zeros(YEARS, dtype=float)
+    rmd_extra_current = np.zeros(n_years, dtype=float)
 
     #if trad_accounts and rmd_table_path is not None and person_cfg is not None:
     if (
@@ -292,7 +294,7 @@ def run_accounts_new(
         rmd_factors = build_rmd_factors(
             rmd_table_path=rmd_table_path,
             owner_current_age=owner_current_age,
-            years=YEARS,
+            years=n_years,
             owner_birth_year=owner_birth_year,
         )
     
@@ -302,7 +304,7 @@ def run_accounts_new(
         )
     
         # Subtract RMDs from TRAD balances
-        for y in range(YEARS):
+        for y in range(n_years):
             for a in trad_accounts:
                 bal = np.where(np.isfinite(acct_eoy_nom[a][:, y]), acct_eoy_nom[a][:, y], 0.0)
                 take = np.where(np.isfinite(rmd_nom_per_acct[a][:, y]), rmd_nom_per_acct[a][:, y], 0.0)
@@ -313,27 +315,27 @@ def run_accounts_new(
             rmd_future_mean = rmd_total_nom_paths.mean(axis=0)
             if infl_yearly is not None and np.asarray(infl_yearly).size > 0:
                 arr_rmd = np.asarray(infl_yearly, dtype=float).reshape(-1)
-                if arr_rmd.size < YEARS:
+                if arr_rmd.size < n_years:
                     arr_rmd = np.concatenate(
-                        [arr_rmd, np.full(YEARS - arr_rmd.size, arr_rmd[-1] if arr_rmd.size > 0 else 0.0)]
+                        [arr_rmd, np.full(n_years - arr_rmd.size, arr_rmd[-1] if arr_rmd.size > 0 else 0.0)]
                     )
-                elif arr_rmd.size > YEARS:
-                    arr_rmd = arr_rmd[:YEARS]
+                elif arr_rmd.size > n_years:
+                    arr_rmd = arr_rmd[:n_years]
                 deflator_rmd = np.cumprod(1.0 + arr_rmd)
             else:
-                deflator_rmd = np.ones(YEARS, dtype=float)
+                deflator_rmd = np.ones(n_years, dtype=float)
             rmd_current_mean = rmd_future_mean / np.maximum(deflator_rmd, 1e-12)
     
             # Add per-path RMD in current USD into ordinary income (optional)
             if ordinary_income_cur_paths is not None:
-                for y in range(YEARS):
+                for y in range(n_years):
                     rmd_cur_paths_y = rmd_total_nom_paths[:, y] / max(deflator_rmd[y], 1e-12)
                     ordinary_income_cur_paths[:, y] += rmd_cur_paths_y
 
 
     # --- Roth conversions — policy-driven ---
     conversion_nom_paths = None
-    conversion_tax_cost_cur_paths = np.zeros((paths, YEARS), dtype=float)
+    conversion_tax_cost_cur_paths = np.zeros((paths, n_years), dtype=float)
     conv_out_per_trad: Dict[str, np.ndarray] = {}
     conv_in_per_roth:  Dict[str, np.ndarray] = {}
     conv_tax_per_brok: Dict[str, np.ndarray] = {}
@@ -363,21 +365,21 @@ def run_accounts_new(
         _window_start_y, _window_end_y = compute_conversion_window_years(
             current_age=_current_age,
             window_end_age=_window_end_age,
-            years=YEARS,
+            years=n_years,
         )
     else:
-        _window_start_y, _window_end_y = 0, YEARS
+        _window_start_y, _window_end_y = 0, n_years
 
     # Build deflator for conversion block (STEP 1 builds it again later; this is intentional)
-    _deflator_conv = np.ones(YEARS, dtype=float)
+    _deflator_conv = np.ones(n_years, dtype=float)
     if infl_yearly is not None and np.asarray(infl_yearly).size > 0:
         _arr_conv = np.asarray(infl_yearly, dtype=float).reshape(-1)
-        if _arr_conv.size < YEARS:
+        if _arr_conv.size < n_years:
             _arr_conv = np.concatenate(
-                [_arr_conv, np.full(YEARS - _arr_conv.size, _arr_conv[-1] if _arr_conv.size > 0 else 0.0)]
+                [_arr_conv, np.full(n_years - _arr_conv.size, _arr_conv[-1] if _arr_conv.size > 0 else 0.0)]
             )
-        elif _arr_conv.size > YEARS:
-            _arr_conv = _arr_conv[:YEARS]
+        elif _arr_conv.size > n_years:
+            _arr_conv = _arr_conv[:n_years]
         _deflator_conv = np.cumprod(1.0 + _arr_conv)
 
     if trad_accounts and roth_accounts and _conv_enabled and conversions_enabled:
@@ -391,7 +393,7 @@ def run_accounts_new(
             #   - computes tax cost
             #   - debits tax from brokerage
             brokerage_balances_nom = {a: acct_eoy_nom[a] for a in brokerage_accounts}
-            _ytd = ytd_income_nom_paths if ytd_income_nom_paths is not None else np.zeros((paths, YEARS), dtype=float)
+            _ytd = ytd_income_nom_paths if ytd_income_nom_paths is not None else np.zeros((paths, n_years), dtype=float)
 
             _conv_result = apply_bracket_fill_conversions(
                     trad_ira_balances_nom      = {a: acct_eoy_nom[a] for a in trad_accounts},
@@ -477,10 +479,10 @@ def run_accounts_new(
     # (no legacy withdrawals block here anymore)
 
     # --- Taxes over all years (current USD, per-path) — modular path only ---
-    taxes_fed_cur_paths = np.zeros((paths, YEARS), dtype=float)
-    taxes_state_cur_paths = np.zeros((paths, YEARS), dtype=float)
-    taxes_niit_cur_paths = np.zeros((paths, YEARS), dtype=float)
-    taxes_excise_cur_paths = np.zeros((paths, YEARS), dtype=float)
+    taxes_fed_cur_paths = np.zeros((paths, n_years), dtype=float)
+    taxes_state_cur_paths = np.zeros((paths, n_years), dtype=float)
+    taxes_niit_cur_paths = np.zeros((paths, n_years), dtype=float)
+    taxes_excise_cur_paths = np.zeros((paths, n_years), dtype=float)
     
     if (
         tax_cfg is not None
@@ -489,7 +491,7 @@ def run_accounts_new(
         and cap_gains_cur_paths is not None
         and ytd_income_nom_paths is not None
     ):
-        for y in range(YEARS):
+        for y in range(n_years):
             (
                 taxes_fed_cur_paths[:, y],
                 taxes_state_cur_paths[:, y],
@@ -507,21 +509,21 @@ def run_accounts_new(
     # =========================================================================
     # STEP 1: Build deflator once — used by withdrawals, reinvestment, and stats
     # =========================================================================
-    deflator = np.ones(YEARS, dtype=float)
+    deflator = np.ones(n_years, dtype=float)
     if infl_yearly is not None and np.asarray(infl_yearly).size > 0:
         _arr = np.asarray(infl_yearly, dtype=float).reshape(-1)
-        if _arr.size < YEARS:
+        if _arr.size < n_years:
             _arr = np.concatenate(
-                [_arr, np.full(YEARS - _arr.size, _arr[-1] if _arr.size > 0 else 0.0)]
+                [_arr, np.full(n_years - _arr.size, _arr[-1] if _arr.size > 0 else 0.0)]
             )
-        elif _arr.size > YEARS:
-            _arr = _arr[:YEARS]
+        elif _arr.size > n_years:
+            _arr = _arr[:n_years]
         deflator = np.cumprod(1.0 + _arr)
 
     # =========================================================================
     # STEP 2: Withdrawals dict — init all zeros; populated below if enabled
     # =========================================================================
-    zeros = np.zeros(YEARS, dtype=float)
+    zeros = np.zeros(n_years, dtype=float)
     withdrawals = {
         "planned_current":              zeros.tolist(),
         "realized_current_mean":        zeros.tolist(),
@@ -545,7 +547,7 @@ def run_accounts_new(
         "net_spendable_current_mean":   zeros.tolist(),
     }
 
-    planned_cur = np.zeros(YEARS, dtype=float)
+    planned_cur = np.zeros(n_years, dtype=float)
 
     # =========================================================================
     # STEP 3: Apply discretionary withdrawals (amount above RMD) if enabled
@@ -565,28 +567,28 @@ def run_accounts_new(
         for acct, bal in acct_eoy_nom.items()
     }
 
-    # Per-account withdrawal outflow tracker (paths × YEARS).
+    # Per-account withdrawal outflow tracker (paths × n_years).
     # Accumulated inside the STEP 3 loop; available in STEP 6 for per-account stats.
     withdrawal_out_nom_per_acct: Dict[str, np.ndarray] = {
-        acct: np.zeros((paths, YEARS), dtype=float) for acct in acct_eoy_nom.keys()
+        acct: np.zeros((paths, n_years), dtype=float) for acct in acct_eoy_nom.keys()
     }
 
     if apply_withdrawals and sched is not None:
         sched_vec = np.asarray(sched, dtype=float).reshape(-1)
-        if sched_vec.size < YEARS:
+        if sched_vec.size < n_years:
             sched_vec = np.concatenate(
-                [sched_vec, np.full(YEARS - sched_vec.size, sched_vec[-1])]
+                [sched_vec, np.full(n_years - sched_vec.size, sched_vec[-1])]
             )
-        elif sched_vec.size > YEARS:
-            sched_vec = sched_vec[:YEARS]
+        elif sched_vec.size > n_years:
+            sched_vec = sched_vec[:n_years]
 
         planned_cur = sched_vec.copy()
 
         # Mean-basis: how much does the plan exceed the mean RMD each year?
         extra_cur = np.maximum(planned_cur - rmd_current_mean, 0.0)
 
-        realized_cur   = np.zeros(YEARS, dtype=float)
-        shortfall_cur  = np.zeros(YEARS, dtype=float)
+        realized_cur   = np.zeros(n_years, dtype=float)
+        shortfall_cur  = np.zeros(n_years, dtype=float)
         withdrawals["realized_current_per_acct_mean"]  = {}
         withdrawals["shortfall_current_per_acct_mean"] = {}
 
@@ -594,13 +596,13 @@ def run_accounts_new(
         # Normalise to per-year so the simulator always uses seq_y for year y.
         _fallback_seq = list(acct_eoy_nom.keys())
         if withdraw_sequence is None:
-            _seq_per_year = [_fallback_seq] * YEARS
+            _seq_per_year = [_fallback_seq] * n_years
         elif withdraw_sequence and isinstance(withdraw_sequence[0], list):
             # Already per-year list-of-lists
             _seq_per_year = withdraw_sequence
         else:
             # Flat list — use same sequence every year
-            _seq_per_year = [withdraw_sequence] * YEARS
+            _seq_per_year = [withdraw_sequence] * n_years
 
         # ---------------------------------------------------------------
         # IRS age gate: before 59.5, TRAD IRA and ROTH withdrawals incur
@@ -616,13 +618,21 @@ def run_accounts_new(
         _seq_per_year = [
             brokerage_only_seq if (owner_age_y0 + y) < 59.5 else
             (_seq_per_year[y] if y < len(_seq_per_year) else _fallback_seq)
-            for y in range(YEARS)
+            for y in range(n_years)
         ]
 
-        # Base (floor) withdrawal schedule — use zeros if not supplied
-        _sched_base = sched_base if sched_base is not None else np.zeros(YEARS, dtype=float)
+        # Base (floor) withdrawal schedule — pad/trim to n_years
+        if sched_base is not None:
+            _sb = np.asarray(sched_base, dtype=float)
+            if _sb.size < n_years:
+                _sb = np.concatenate([_sb, np.full(n_years - _sb.size, _sb[-1] if _sb.size else 0.0)])
+            elif _sb.size > n_years:
+                _sb = _sb[:n_years]
+            _sched_base = _sb
+        else:
+            _sched_base = np.zeros(n_years, dtype=float)
 
-        for y in range(YEARS):
+        for y in range(n_years):
             extra_nom = extra_cur[y] * deflator[y]
             amount_nom_paths = np.full(paths, extra_nom, dtype=float)
             seq = _seq_per_year[y] if y < len(_seq_per_year) else _fallback_seq
@@ -676,10 +686,10 @@ def run_accounts_new(
                 rn = realized_per_acct_nom.get(acct)
                 sn = shortfall_per_acct_nom.get(acct)
                 if rn is not None:
-                    withdrawals["realized_current_per_acct_mean"].setdefault(acct, [0.0] * YEARS)
+                    withdrawals["realized_current_per_acct_mean"].setdefault(acct, [0.0] * n_years)
                     withdrawals["realized_current_per_acct_mean"][acct][y] = (rn / scale).mean()
                 if sn is not None:
-                    withdrawals["shortfall_current_per_acct_mean"].setdefault(acct, [0.0] * YEARS)
+                    withdrawals["shortfall_current_per_acct_mean"].setdefault(acct, [0.0] * n_years)
                     withdrawals["shortfall_current_per_acct_mean"][acct][y] = (sn / scale).mean()
 
         # realized_current_mean = total cash the person actually receives:
@@ -693,7 +703,7 @@ def run_accounts_new(
         withdrawals["shortfall_current_mean"] = shortfall_cur.tolist()
         withdrawals["realized_future_mean"]   = (total_realized_cur * deflator).tolist()
         # Base (floor) schedule — useful for tax engine and UI to show desired vs minimum
-        _base_cur = _sched_base if '_sched_base' in dir() else np.zeros(YEARS, dtype=float)
+        _base_cur = _sched_base if '_sched_base' in dir() else np.zeros(n_years, dtype=float)
         withdrawals["base_current"]           = _base_cur.tolist()
         withdrawals["base_future_mean"]       = (_base_cur * deflator).tolist()
 
@@ -718,9 +728,9 @@ def run_accounts_new(
     if person_cfg is not None:
         extra_handling = person_cfg.get("rmd_policy", {}).get("extra_handling", "cash_out")
 
-    # Track per-account reinvestment (paths x YEARS) for pure-investment YoY
+    # Track per-account reinvestment (paths x n_years) for pure-investment YoY
     reinvest_nom_per_acct: Dict[str, np.ndarray] = {
-        acct: np.zeros((paths, YEARS), dtype=float) for acct in acct_eoy_nom.keys()
+        acct: np.zeros((paths, n_years), dtype=float) for acct in acct_eoy_nom.keys()
     }
 
     if (
@@ -728,7 +738,7 @@ def run_accounts_new(
         and rmd_total_nom_paths is not None
         and brokerage_accounts
     ):
-        for y in range(YEARS):
+        for y in range(n_years):
             # Spending plan in nominal dollars (scalar, mean-basis)
             plan_nom_y = planned_cur[y] * deflator[y]
             # Per-path surplus RMD above the plan
@@ -763,7 +773,7 @@ def run_accounts_new(
             total_realized_cur = total_realized_cur + rmd_extra_current
             withdrawals["realized_current_mean"] = total_realized_cur.tolist()
             withdrawals["realized_future_mean"]  = (total_realized_cur * deflator).tolist()
-        rmd_extra_current = np.zeros(YEARS, dtype=float)
+        rmd_extra_current = np.zeros(n_years, dtype=float)
 
     # =========================================================================
     # STEP 4b: Debit ordinary income taxes from brokerage accounts
@@ -774,12 +784,12 @@ def run_accounts_new(
     # (conv_tax_per_brok) — subtract that to avoid double-debiting.
     # =========================================================================
     if brokerage_accounts and tax_cfg is not None:
-        for y in range(YEARS):
+        for y in range(n_years):
             scale = max(float(deflator[y]), 1e-12)
             # Total ordinary tax this year (nominal $), net of conversion tax already debited
             conv_tax_nom_y = np.zeros(paths, dtype=float)
             for b in brokerage_accounts:
-                conv_tax_nom_y += conv_tax_per_brok.get(b, np.zeros((paths, YEARS)))[: ,y]
+                conv_tax_nom_y += conv_tax_per_brok.get(b, np.zeros((paths, n_years)))[: ,y]
             total_tax_nom_y = (
                 taxes_fed_cur_paths[:, y]
                 + taxes_state_cur_paths[:, y]
@@ -807,8 +817,8 @@ def run_accounts_new(
     # STEP 5: Recompute total portfolio paths — AFTER all cashflows
     #   (RMD deductions, withdrawal pulls, reinvestment additions all done above)
     # =========================================================================
-    total_nom_paths = np.zeros((paths, YEARS), dtype=float)
-    for y in range(YEARS):
+    total_nom_paths = np.zeros((paths, n_years), dtype=float)
+    for y in range(n_years):
         total_nom_y = None
         for acct, bal in acct_eoy_nom.items():
             v = np.where(np.isfinite(bal[:, y]), bal[:, y], 0.0)
@@ -845,7 +855,7 @@ def run_accounts_new(
     # -----------------------------------------------------------------------
     rmd_covers_plan_per_acct: Dict[str, np.ndarray] = {}
     if rmd_nom_per_acct is not None and rmd_total_nom_paths is not None:
-        for y in range(YEARS):
+        for y in range(n_years):
             plan_nom_y  = planned_cur[y] * deflator[y]            # scalar
             rmd_total_y = rmd_total_nom_paths[:, y]               # per-path total RMD
             rmd_covers_total_y = np.minimum(rmd_total_y, plan_nom_y)  # per-path plan covered
@@ -857,7 +867,7 @@ def run_accounts_new(
                                   acct_rmd_y / np.maximum(rmd_total_y, 1e-12),
                                   0.0)
                 if a not in rmd_covers_plan_per_acct:
-                    rmd_covers_plan_per_acct[a] = np.zeros((paths, YEARS), dtype=float)
+                    rmd_covers_plan_per_acct[a] = np.zeros((paths, n_years), dtype=float)
                 rmd_covers_plan_per_acct[a][:, y] = frac_y * rmd_covers_total_y
 
     for acct in list(acct_eoy_nom.keys()):
@@ -871,7 +881,7 @@ def run_accounts_new(
         lvl_nom_inv  = acct_eoy_nom_core.get(acct, lvl_nom)
         lvl_real_inv = lvl_nom_inv / deflator
         # Keep reinvest_nom available for the reinvestment summary below
-        reinvest_nom = reinvest_nom_per_acct.get(acct, np.zeros((paths, YEARS), dtype=float))
+        reinvest_nom = reinvest_nom_per_acct.get(acct, np.zeros((paths, n_years), dtype=float))
 
         acct_start = float(starting.get(acct, 0.0))
         acct_start_nom = np.full(paths, acct_start, dtype=float)
@@ -890,20 +900,12 @@ def run_accounts_new(
         # Use nanmean/nanmedian so NaN cells (prior balance < $1k) are excluded
         # rather than polluting the mean with division-by-near-zero garbage.
         def _pct_tolist(arr2d):
-            """nanmean over paths, scale to %, replace NaN with None for JSON.
-            catch_warnings suppresses expected 'mean of empty slice' when all
-            paths have NaN for a given year (e.g. ignore_conv runs)."""
-            import warnings
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", RuntimeWarning)
-                m = np.nanmean(arr2d, axis=0) * 100.0
+            """nanmean over paths, scale to %, replace NaN with None for JSON."""
+            m = np.nanmean(arr2d, axis=0) * 100.0
             return [None if np.isnan(v) else float(v) for v in m]
 
         def _pct_med_tolist(arr2d):
-            import warnings
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore", RuntimeWarning)
-                m = np.nanmedian(arr2d, axis=0) * 100.0
+            m = np.nanmedian(arr2d, axis=0) * 100.0
             return [None if np.isnan(v) else float(v) for v in m]
 
         inv_nom_yoy_mean_pct_acct[acct]               = _pct_tolist(yoy_nom_inv)
@@ -920,7 +922,7 @@ def run_accounts_new(
         inv_nom_levels_mean_acct[acct + "__reinvest_fut"] = reinvest_fut_mean.tolist()
 
         # RMD outflow per account (non-zero for TRAD IRAs only)
-        rmd_out_nom = (rmd_nom_per_acct or {}).get(acct, np.zeros((paths, YEARS), dtype=float))
+        rmd_out_nom = (rmd_nom_per_acct or {}).get(acct, np.zeros((paths, n_years), dtype=float))
         rmd_out_cur_mean = (rmd_out_nom / np.maximum(deflator, 1e-12)).mean(axis=0)
         rmd_out_fut_mean = rmd_out_nom.mean(axis=0)
         inv_nom_levels_mean_acct[acct + "__rmd_out_cur"] = rmd_out_cur_mean.tolist()
@@ -935,12 +937,12 @@ def run_accounts_new(
         # When plan > RMD: RMD covers plan up to its amount, discretionary sold covers the rest.
         #
         # Reinvested (surplus) = RMD Out - rmd_covers_plan = max(RMD - plan, 0) * frac
-        discretionary_nom = withdrawal_out_nom_per_acct.get(acct, np.zeros((paths, YEARS), dtype=float))
+        discretionary_nom = withdrawal_out_nom_per_acct.get(acct, np.zeros((paths, n_years), dtype=float))
 
         if _is_trad(acct) and rmd_nom_per_acct is not None:
             # Use waterfall pre-computed coverage (sequential, not proportional)
             rmd_covers_plan_nom = rmd_covers_plan_per_acct.get(
-                acct, np.zeros((paths, YEARS), dtype=float)
+                acct, np.zeros((paths, n_years), dtype=float)
             )
             # Total withdrawal = RMD-covered plan portion + any extra discretionary sold
             withdrawal_out_nom   = rmd_covers_plan_nom + discretionary_nom
@@ -948,7 +950,7 @@ def run_accounts_new(
             reinvest_surplus_nom = np.maximum(rmd_out_nom - rmd_covers_plan_nom, 0.0)
         else:
             withdrawal_out_nom   = discretionary_nom
-            reinvest_surplus_nom = np.zeros((paths, YEARS), dtype=float)
+            reinvest_surplus_nom = np.zeros((paths, n_years), dtype=float)
 
         withdrawal_out_cur_mean = (withdrawal_out_nom / np.maximum(deflator, 1e-12)).mean(axis=0)
         withdrawal_out_fut_mean = withdrawal_out_nom.mean(axis=0)
@@ -961,7 +963,7 @@ def run_accounts_new(
             reinvest_nom = reinvest_surplus_nom
 
         # Conversion flows per account (from roth_conversion_core per-account tracking)
-        _zeros_pa = np.zeros((paths, YEARS), dtype=float)
+        _zeros_pa = np.zeros((paths, n_years), dtype=float)
         if _is_trad(acct):
             conv_out_nom = conv_out_per_trad.get(acct, _zeros_pa)
             inv_nom_levels_mean_acct[acct + "__conversion_out_cur"] = \
@@ -1016,8 +1018,8 @@ def run_accounts_new(
     start_real = np.maximum(total_real_paths[:,  0], 1e-12)
     end_real   = np.maximum(total_real_paths[:, -1], 1e-12)
 
-    cagr_nom_paths  = (end_nom  / start_nom)  ** (1.0 / YEARS) - 1.0
-    cagr_real_paths = (end_real / start_real) ** (1.0 / YEARS) - 1.0
+    cagr_nom_paths  = (end_nom  / start_nom)  ** (1.0 / n_years) - 1.0
+    cagr_real_paths = (end_real / start_real) ** (1.0 / n_years) - 1.0
 
     cagr_nom_mean   = float(cagr_nom_paths.mean())
     cagr_nom_median = float(np.median(cagr_nom_paths))
@@ -1035,7 +1037,7 @@ def run_accounts_new(
     drawdown_p90 = float(np.percentile(dd_end, 90))
 
     success_rate_pct       = 100.0
-    success_rate_by_year   = [100.0] * YEARS
+    success_rate_by_year   = [100.0] * n_years
     shortfall_years_mean   = 0.0
 
     # --- Attach RMD summaries and total-withdrawal totals to withdrawals dict ---
@@ -1070,7 +1072,7 @@ def run_accounts_new(
     res["spy"] = int(spy)
 
     res["portfolio"] = {
-        "years": list(range(1, YEARS + 1)),
+        "years": list(range(1, n_years + 1)),
         "future_mean": fut_mean.tolist(),
         "future_median": fut_med.tolist(),
         "future_p10_mean": fut_p10.tolist(),
@@ -1113,13 +1115,13 @@ def run_accounts_new(
 #    res["meta"] = {
 #        "success": success_rate_pct,
 #        "paths": int(paths),
-#        "years": YEARS,
+#        "years": n_years,
 #    }
 
     res["meta"] = {
         "success":      success_rate_pct,
         "paths":        int(paths),
-        "years":        YEARS,
+        "years":        n_years,
         # --- Run parameters: what actually drove this simulation ---
         # Always present so results are fully self-describing.
         # UI should display these alongside results so user knows
@@ -1198,7 +1200,7 @@ def run_accounts_new(
     }
 
     # Roth conversion summary
-    _conv_nom = conversion_nom_paths if conversion_nom_paths is not None else np.zeros((paths, YEARS), dtype=float)
+    _conv_nom = conversion_nom_paths if conversion_nom_paths is not None else np.zeros((paths, n_years), dtype=float)
     _conv_cur = _conv_nom / np.maximum(_deflator_conv, 1e-12)
     _conv_tax = conversion_tax_cost_cur_paths  # already current USD
     res["conversions"] = {

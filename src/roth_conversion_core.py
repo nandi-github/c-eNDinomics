@@ -181,14 +181,9 @@ def compute_bracket_fill_conversion_paths(
     # of how far along in the simulation we are.
     deflator_y = max(deflator_y, 1e-12)
 
-    # Pre-scale: inflate bracket ceilings and NIIT threshold to year-y nominal $.
-    # IMPORTANT: preserve None for the top bracket (up_to=null in JSON).
-    # Previously `b.get("up_to") or 1e12` converted null → 1e12, then × deflator_y
-    # produced a ~$1.38T ceiling that bypassed _find_current_bracket_ceiling's
-    # top-bracket fallback, causing runaway conversions equal to the full TRAD
-    # balance in years when ordinary income (e.g. RMDs) exceeded all real brackets.
+    # Pre-scale: inflate bracket ceilings and NIIT threshold to year-y nominal $
     scaled_brackets = [
-        {**b, "up_to": (float(b["up_to"]) * deflator_y if b.get("up_to") is not None else None)}
+        {**b, "up_to": float(b.get("up_to") or 1e12) * deflator_y}
         for b in fed_ord_brackets
     ]
     niit_thresh_scaled = niit_thresh * deflator_y
@@ -223,7 +218,12 @@ def compute_bracket_fill_conversion_paths(
 
         # NIIT guard: use inflation-scaled threshold so the guard is consistent
         # across simulation years (same real income level triggers it each year).
-        if avoid_niit and inc_nom < niit_thresh_scaled:
+        # Always clamp when avoid_niit=True: if income already exceeds the threshold
+        # (e.g. large RMD), headroom = 0 (any conversion makes NIIT exposure worse).
+        # The old guard "if inc_nom < niit_thresh_scaled" silently skipped this case,
+        # allowing the entire TRAD balance to be converted in one year — causing
+        # 100%+ effective tax rates in RMD years.
+        if avoid_niit:
             niit_headroom_nom = max(0.0, niit_thresh_scaled - inc_nom)
             headroom_nom = min(headroom_nom, niit_headroom_nom)
 
@@ -341,7 +341,10 @@ def apply_simple_conversions(
         for acct, bal in roth_ira_balances_nom.items()
     }
 
-    conversion_nom_paths = np.zeros((paths, YEARS), dtype=float)
+    # Infer _n_years from actual array shape (supports dynamic sim length)
+    _n_years = next(iter(trad_ira_balances_nom.values())).shape[1]
+
+    conversion_nom_paths = np.zeros((paths, _n_years), dtype=float)
 
     trad_accts = list(trad_ira_balances_nom.keys())
     roth_accts = list(roth_ira_balances_nom.keys())
@@ -354,7 +357,7 @@ def apply_simple_conversions(
     roth_gf = _calc_growth_factors(roth_ira_balances_nom, paths)
 
     # For each year in the window, convert up to conversion_per_year_nom pro-rata
-    for y in range(window_start_y, min(window_end_y, YEARS)):
+    for y in range(window_start_y, min(window_end_y, _n_years)):
         # Compute total trad balance across all TRAD accounts and paths for this year
         total_trad_y = np.zeros(paths, dtype=float)
         for acct in trad_accts:
@@ -412,7 +415,7 @@ def apply_simple_conversions(
             if not np.any(np.abs(delta) > 1e-12):
                 continue
             running = delta.copy()
-            for yy in range(y + 1, YEARS):
+            for yy in range(y + 1, _n_years):
                 running = running * trad_gf[acct][:, yy]
                 updated_trad[acct][:, yy] = np.maximum(
                     updated_trad[acct][:, yy] + running, 0.0
@@ -422,7 +425,7 @@ def apply_simple_conversions(
             if not np.any(np.abs(delta) > 1e-12):
                 continue
             running = delta.copy()
-            for yy in range(y + 1, YEARS):
+            for yy in range(y + 1, _n_years):
                 running = running * roth_gf[acct][:, yy]
                 updated_roth[acct][:, yy] += running
         # ─────────────────────────────────────────────────────────────────────
@@ -459,8 +462,9 @@ def _calc_growth_factors(
     """
     gf: Dict[str, np.ndarray] = {}
     for a, bal in balances.items():
-        g = np.ones((paths, years), dtype=float)
-        for y in range(1, years):
+        n_yr = bal.shape[1]  # infer from actual array, ignore years param
+        g = np.ones((paths, n_yr), dtype=float)
+        for y in range(1, n_yr):
             prev = bal[:, y - 1]
             with np.errstate(divide="ignore", invalid="ignore"):
                 ratio = np.where(
@@ -533,18 +537,21 @@ def apply_bracket_fill_conversions(
     tax_source_acct = roth_policy.get("tax_payment_source", "BROKERAGE")
     paying_acct = _find_paying_account(tax_source_acct, brok_accts)
 
-    conversion_nom_paths = np.zeros((paths, YEARS), dtype=float)
-    tax_cost_cur_paths   = np.zeros((paths, YEARS), dtype=float)
+    # Infer _n_years from actual array shape (supports dynamic sim length)
+    _n_years = next(iter(trad_ira_balances_nom.values())).shape[1]
+
+    conversion_nom_paths = np.zeros((paths, _n_years), dtype=float)
+    tax_cost_cur_paths   = np.zeros((paths, _n_years), dtype=float)
 
     # Per-account conversion flow tracking (nominal $, mean emitted in STEP 6)
     conv_out_per_trad: Dict[str, np.ndarray] = {
-        a: np.zeros((paths, YEARS), dtype=float) for a in trad_accts
+        a: np.zeros((paths, _n_years), dtype=float) for a in trad_accts
     }
     conv_in_per_roth: Dict[str, np.ndarray] = {
-        a: np.zeros((paths, YEARS), dtype=float) for a in roth_accts
+        a: np.zeros((paths, _n_years), dtype=float) for a in roth_accts
     }
     conv_tax_per_brok: Dict[str, np.ndarray] = {
-        a: np.zeros((paths, YEARS), dtype=float) for a in brok_accts
+        a: np.zeros((paths, _n_years), dtype=float) for a in brok_accts
     }
 
     # ── Phase 2: cascade growth factors ──────────────────────────────────────
@@ -557,7 +564,7 @@ def apply_bracket_fill_conversions(
     brok_gf = _calc_growth_factors(brokerage_balances_nom, paths)
     # ─────────────────────────────────────────────────────────────────────────
 
-    for y in range(window_start_y, min(window_end_y, YEARS)):
+    for y in range(window_start_y, min(window_end_y, _n_years)):
         deflator_y = float(deflator[y]) if y < len(deflator) else 1.0
 
         # Total TRAD balance this year (nominal)
@@ -679,7 +686,7 @@ def apply_bracket_fill_conversions(
             if not np.any(np.abs(delta) > 1e-12):
                 continue
             running = delta.copy()
-            for yy in range(y + 1, YEARS):
+            for yy in range(y + 1, _n_years):
                 running = running * trad_gf[acct][:, yy]
                 updated_trad[acct][:, yy] = np.maximum(
                     updated_trad[acct][:, yy] + running, 0.0
@@ -691,7 +698,7 @@ def apply_bracket_fill_conversions(
             if not np.any(np.abs(delta) > 1e-12):
                 continue
             running = delta.copy()
-            for yy in range(y + 1, YEARS):
+            for yy in range(y + 1, _n_years):
                 running = running * roth_gf[acct][:, yy]
                 updated_roth[acct][:, yy] += running
 
@@ -700,7 +707,7 @@ def apply_bracket_fill_conversions(
             delta = updated_brok[paying_acct][:, y] - brok_y_before
             if np.any(np.abs(delta) > 1e-12):
                 running = delta.copy()
-                for yy in range(y + 1, YEARS):
+                for yy in range(y + 1, _n_years):
                     running = running * brok_gf[paying_acct][:, yy]
                     updated_brok[paying_acct][:, yy] = np.maximum(
                         updated_brok[paying_acct][:, yy] + running, 0.0

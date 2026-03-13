@@ -30,7 +30,6 @@ from loaders import (
     load_economic_policy,
 )
 from simulator_new import run_accounts_new
-from insights import compute_insights
 
 from income_core import build_income_streams
 
@@ -631,6 +630,12 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
     person_cfg = load_person(person_path)
     print("[DEBUG api] person_cfg.rmd_policy:", person_cfg.get("rmd_policy") if person_cfg else None)
 
+    # Dynamic simulation years: target_age - current_age (default target=95, min 10, max 60)
+    _current_age = int((person_cfg or {}).get("current_age", 55))
+    _target_age  = int((person_cfg or {}).get("target_age",  95))
+    _n_years     = max(10, min(60, _target_age - _current_age))
+    print(f"[api] sim years: {_n_years} (age {_current_age} → {_target_age})")
+
     income_cfg = load_income(income_path)
     econ_policy = load_economic_policy(economic_path_effective, global_path=economic_global_path)
 
@@ -751,14 +756,14 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
             ordinary_other_cur,
             qual_div_cur,
             cap_gains_cur,
-        ) = build_income_streams(income_cfg, years=YEARS)
+        ) = build_income_streams(income_cfg, years=_n_years)
 
-        ordinary_income_cur_paths = np.zeros((paths, YEARS), dtype=float)
-        qual_div_cur_paths = np.zeros((paths, YEARS), dtype=float)
-        cap_gains_cur_paths = np.zeros((paths, YEARS), dtype=float)
-        ytd_income_nom_paths = np.zeros((paths, YEARS), dtype=float)
+        ordinary_income_cur_paths = np.zeros((paths, _n_years), dtype=float)
+        qual_div_cur_paths = np.zeros((paths, _n_years), dtype=float)
+        cap_gains_cur_paths = np.zeros((paths, _n_years), dtype=float)
+        ytd_income_nom_paths = np.zeros((paths, _n_years), dtype=float)
 
-        for y in range(YEARS):
+        for y in range(_n_years):
             ordinary_income_cur_paths[:, y] = (
                 w2_cur[y] + rental_cur[y] + interest_cur[y] + ordinary_other_cur[y]
             )
@@ -876,6 +881,7 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
             override_state         = payload.get("state"),
             override_filing_status = payload.get("filing"),
             override_rmd_table     = payload.get("rmd_table"),
+            n_years                = _n_years,
         )
 
     # -- Tax diagnostic (server log -- remove once tax table confirmed working) --
@@ -925,18 +931,7 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
         },
     }
 
-    # 9) Insights — computed before snapshot so they can be saved into it
-    try:
-        insight_report = compute_insights(
-            result=res,
-            profile_cfg=person_cfg or {},
-            global_cfg=tax_cfg or {},
-        )
-        insights_data = insight_report.to_dict()
-    except Exception as _ins_exc:
-        insights_data = {"insights": [], "error": str(_ins_exc)}
-
-    # 9b) Snapshot + run_meta
+    # 9) Snapshot + run_meta
     save_raw_snapshot_accounts(
         out_dir=run_dir,
         res=res,
@@ -947,7 +942,6 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
         infl_yearly=infl_yearly,
         shocks_events=shocks_events,
         shocks_mode=str(shocks_mode or "augment"),
-        insights=insights_data,
     )
     _write_run_meta(run_dir=run_dir, profile=profile, run_id=run_id, run_info=run_info)
 
