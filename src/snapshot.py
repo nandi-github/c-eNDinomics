@@ -22,7 +22,6 @@ def save_raw_snapshot_accounts(
     infl_yearly: Optional[List[float]] = None,
     shocks_events: Optional[List[Dict[str, Any]]] = None,
     shocks_mode: Optional[str] = None,
-    insights: Optional[Dict[str, Any]] = None,
 ) -> None:
     """
     Save a rich snapshot the UI Results and CLI can both use.
@@ -71,7 +70,7 @@ def save_raw_snapshot_accounts(
         if isinstance(port.get("years"), list) and port["years"]:
             years = [int(y) for y in port["years"]]
         else:
-            years = list(range(1, 31))
+            years = list(range(1, 31))  # fallback only; api.py always sets res['years']
 
     # 3) Build snapshot object from res
     snapshot: Dict[str, Any] = {}
@@ -81,6 +80,7 @@ def save_raw_snapshot_accounts(
 
     # Years
     snapshot["years"] = years
+    snapshot["n_years"] = len(years)
 
     # Portfolio totals
     snapshot["portfolio"] = res.get("portfolio", {})
@@ -117,10 +117,6 @@ def save_raw_snapshot_accounts(
         snapshot["person"] = dict(res["person"])
     else:
         snapshot["person"] = {}
-
-    # Insights (computed by insights.py, passed in from api.py)
-    if insights is not None:
-        snapshot["insights"] = insights
 
     # 4) Write snapshot JSON
     out_path = os.path.join(out_dir, "raw_snapshot_accounts.json")

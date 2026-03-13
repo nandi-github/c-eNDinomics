@@ -98,13 +98,14 @@ def compute_rmd_schedule_nominal(
     else:
         paths = next(iter(trad_ira_balances_nom.values())).shape[0]
 
-    total_rmd_nom_paths = np.zeros((paths, YEARS), dtype=float)
+    _n = len(rmd_factors)  # use actual sim length, not module constant
+    total_rmd_nom_paths = np.zeros((paths, _n), dtype=float)
     rmd_nom_per_acct: Dict[str, np.ndarray] = {
-        acct: np.zeros((paths, YEARS), dtype=float)
+        acct: np.zeros((paths, _n), dtype=float)
         for acct in trad_ira_balances_nom.keys()
     }
 
-    for y in range(YEARS):
+    for y in range(_n):
         f = rmd_factors[y]
         if f <= 0.0:
             continue  # no RMD required this year
