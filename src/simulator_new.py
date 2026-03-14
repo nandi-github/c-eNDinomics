@@ -573,6 +573,10 @@ def run_accounts_new(
         acct: np.zeros((paths, n_years), dtype=float) for acct in acct_eoy_nom.keys()
     }
 
+    # Per-path shortfall tracker — populated inside withdrawal loop.
+    # Always defined here so success rate computation is unconditional.
+    _shortfall_any_path = np.zeros((paths, n_years), dtype=bool)
+
     if apply_withdrawals and sched is not None:
         sched_vec = np.asarray(sched, dtype=float).reshape(-1)
         if sched_vec.size < n_years:
@@ -589,6 +593,8 @@ def run_accounts_new(
 
         realized_cur   = np.zeros(n_years, dtype=float)
         shortfall_cur  = np.zeros(n_years, dtype=float)
+        # Per-path shortfall tracker: True if path had any shortfall in that year
+        _shortfall_any_path = np.zeros((paths, n_years), dtype=bool)
         withdrawals["realized_current_per_acct_mean"]  = {}
         withdrawals["shortfall_current_per_acct_mean"] = {}
 
@@ -681,6 +687,8 @@ def run_accounts_new(
             scale = max(deflator[y], 1e-12)
             realized_cur[y]  = (realized_total_nom / scale).mean()
             shortfall_cur[y] = (shortfall_total_nom / scale).mean()
+            # Track which paths had shortfall this year (for success rate)
+            _shortfall_any_path[:, y] = shortfall_total_nom > 1e-6
 
             for acct in acct_eoy_nom.keys():
                 rn = realized_per_acct_nom.get(acct)
@@ -1051,25 +1059,26 @@ def run_accounts_new(
     drawdown_p50   = float(np.percentile(dd_max_per_path, 50))
     drawdown_p90   = float(np.percentile(dd_max_per_path, 90))
 
-    # Success rate: % of paths where total portfolio stays above zero every year.
-    # A path "fails" the moment total_nom drops to or below zero in any year.
-    # success_rate_by_year[y] = % of paths still solvent at year y (cumulative).
-    # shortfall_years_mean = average number of years a failing path was insolvent.
-    _solvent = total_nom_paths > 0.0                            # (paths, n_years) bool
-    _ever_failed = ~_solvent.all(axis=1)                        # (paths,) — failed at some yr
-    _first_fail_yr = np.where(
-        _ever_failed,
-        np.argmax(~_solvent, axis=1),   # index of first year that went to zero
-        n_years,                         # sentinel: never failed
+    # Success rate: % of paths that FULLY delivered the planned withdrawal every year.
+    # A path "fails" in any year where realized < planned (shortfall > 0).
+    # Uses _shortfall_any_path accumulated during STEP 3 (only set when withdrawals enabled).
+    # When withdrawals are disabled, all paths succeed by definition.
+    # _shortfall_any_path always defined above (zeros when withdrawals disabled)
+    _path_ever_short = _shortfall_any_path.any(axis=1)
+    _first_short_yr  = np.where(
+        _path_ever_short,
+        np.argmax(_shortfall_any_path, axis=1),
+        n_years,
     )
-    success_rate_pct = float(100.0 * (~_ever_failed).mean())
-    # Per-year: % of paths still solvent up to and including year y
+
+    success_rate_pct = float(100.0 * (~_path_ever_short).mean())
+    # Per-year: % of paths with no shortfall up to and including year y
     success_rate_by_year = [
-        float(100.0 * (_first_fail_yr > y).mean()) for y in range(n_years)
+        float(100.0 * (_first_short_yr > y).mean()) for y in range(n_years)
     ]
-    # Mean shortfall years (only among paths that failed)
-    _fail_yrs = n_years - _first_fail_yr[_ever_failed]
-    shortfall_years_mean = float(_fail_yrs.mean()) if _fail_yrs.size > 0 else 0.0
+    # Mean shortfall duration (only among paths that failed)
+    _fail_dur = n_years - _first_short_yr[_path_ever_short]
+    shortfall_years_mean = float(_fail_dur.mean()) if _fail_dur.size > 0 else 0.0
 
     # --- Attach RMD summaries and total-withdrawal totals to withdrawals dict ---
     withdrawals["rmd_current_mean"] = rmd_current_mean.tolist()
