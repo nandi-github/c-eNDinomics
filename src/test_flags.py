@@ -441,8 +441,10 @@ def _rmd(res):  return res.get("withdrawals", {}).get("rmd_current_mean", [0]*YE
 def _wd(res):   return res.get("withdrawals", {}).get("planned_current", [0]*YEARS)
 def _tax_fed(res): return res.get("taxes", {}).get("fed_cur_mean_by_year", [0]*YEARS)
 def _tax_niit(res): return res.get("taxes", {}).get("niit_cur_mean_by_year", [0]*YEARS)
-def _portfolio_future(res): return res.get("portfolio", {}).get("future_mean", [])
-def _portfolio_current(res): return res.get("portfolio", {}).get("current_mean", [])
+def _portfolio_future(res):        return res.get("portfolio", {}).get("future_mean", [])
+def _portfolio_current(res):       return res.get("portfolio", {}).get("current_mean", [])
+def _portfolio_future_med(res):    return res.get("portfolio", {}).get("future_median", [])
+def _portfolio_current_med(res):   return res.get("portfolio", {}).get("current_median", [])
 
 def _sidecar(res, suffix):
     return {k[:-len(suffix)]: v for k, v in _lvls(res).items() if k.endswith(suffix)}
@@ -1915,9 +1917,16 @@ def group13_yoy_sanity(paths: int):
 
     # ── 13i: CAGR summary fields present and consistent with YoY arrays ───
     cagr_nom_sum = float(res.get("summary", {}).get("cagr_nominal_mean", -999.0))
+    cagr_nom_med = float(res.get("summary", {}).get("cagr_nominal_median", -999.0))
     checks.append(chk("summary.cagr_nominal_mean present (not missing / not extreme)",
                        cagr_nom_sum > -10.0,
                        f"cagr_nominal_mean={cagr_nom_sum:.2f}% (negative ok with 50 paths)"))
+    checks.append(chk("summary.cagr_nominal_median present and > -10%",
+                       cagr_nom_med > -10.0,
+                       f"cagr_nominal_median={cagr_nom_med:.2f}%"))
+    checks.append(chk("cagr_nominal_median <= cagr_nominal_mean (compounding skew)",
+                       cagr_nom_med <= cagr_nom_sum + 0.5,   # allow 0.5ppt noise
+                       f"median={cagr_nom_med:.2f}% mean={cagr_nom_sum:.2f}%"))
     # CAGR from summary and CAGR from BROKERAGE-1 YoY geo mean should be in same ballpark
     # Allow wider tolerance (10ppt) — summary uses portfolio total, BROKERAGE-1 is one account
     checks.append(chk_range("summary CAGR nominal within 10ppt of BROKERAGE-1 geo mean",
@@ -2405,6 +2414,26 @@ def group16_dynamic_sim_years(paths: int):
         "16b: taxes_fed_current_mean length == 40",
         len(fed_arr) == 40,
         f"len={len(fed_arr)}"
+    ))
+
+    # ── 16b2: portfolio median arrays present alongside mean ──────────────
+    fut_med = res.get("portfolio", {}).get("future_median", [])
+    cur_med = res.get("portfolio", {}).get("current_median", [])
+    checks.append(chk(
+        "16b2: portfolio.future_median present and length == 40",
+        len(fut_med) == 40,
+        f"len={len(fut_med)}"
+    ))
+    checks.append(chk(
+        "16b2: portfolio.current_median present and length == 40",
+        len(cur_med) == 40,
+        f"len={len(cur_med)}"
+    ))
+    checks.append(chk(
+        "16b2: future_median <= future_mean (right-skewed distribution)",
+        (res.get("portfolio", {}).get("future_median", [0])[-1] <=
+         res.get("portfolio", {}).get("future_mean",   [0])[-1] * 1.05),  # 5% tolerance
+        f"med={fut_med[-1]:,.0f} mean={res.get('portfolio',{}).get('future_mean',[0])[-1]:,.0f}"
     ))
 
     port_arr = res.get("portfolio", {}).get("future_mean", [])

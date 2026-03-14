@@ -144,25 +144,29 @@ def _plot_aggregate_band(
 def compute_account_ending_balances(
     inv_nom_levels_mean_acct: Dict[str, List[Any]],
     inv_real_levels_mean_acct: Dict[str, List[Any]],
+    inv_nom_levels_med_acct: Optional[Dict[str, List[Any]]] = None,
+    inv_real_levels_med_acct: Optional[Dict[str, List[Any]]] = None,
 ) -> List[Dict[str, Any]]:
     """
     Compute ending (final-year) balances per account in both Future (nominal)
-    and Current (real) mean dollars.
+    and Current (real) dollars — median (primary) and mean (secondary).
     """
     accounts = sorted(inv_nom_levels_mean_acct.keys())
+    med_nom = inv_nom_levels_med_acct or {}
+    med_real = inv_real_levels_med_acct or {}
     out: List[Dict[str, Any]] = []
     for acct in accounts:
         fn_mean = inv_nom_levels_mean_acct.get(acct, []) or []
         cr_mean = inv_real_levels_mean_acct.get(acct, []) or []
-        ending_future = float(fn_mean[-1]) if fn_mean else 0.0
-        ending_current = float(cr_mean[-1]) if cr_mean else 0.0
-        out.append(
-            {
-                "account": acct,
-                "ending_future_mean": ending_future,
-                "ending_current_mean": ending_current,
-            }
-        )
+        fn_med  = med_nom.get(acct, []) or []
+        cr_med  = med_real.get(acct, []) or []
+        out.append({
+            "account":              acct,
+            "ending_future_mean":   float(fn_mean[-1]) if fn_mean else 0.0,
+            "ending_current_mean":  float(cr_mean[-1]) if cr_mean else 0.0,
+            "ending_future_median": float(fn_med[-1])  if fn_med  else float(fn_mean[-1]) if fn_mean else 0.0,
+            "ending_current_median":float(cr_med[-1])  if cr_med  else float(cr_mean[-1]) if cr_mean else 0.0,
+        })
     return out
 
 def report_and_plot_accounts(

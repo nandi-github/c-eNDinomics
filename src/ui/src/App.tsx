@@ -106,12 +106,18 @@ type Snapshot = {
   returns_acct_levels?: SnapshotReturnsAcctLevels;
   accounts?: SnapshotAccount[];
   starting?: Record<string, number>;
+  ending_balances?: EndingBalance[];
+  person?: Record<string, any>;
+  n_years?: number;
+  meta?: Record<string, any>;
 };
 
 type EndingBalance = {
   account: string;
   ending_future_mean: number;
   ending_current_mean: number;
+  ending_future_median?: number;
+  ending_current_median?: number;
 };
 
 type RunResponse = {
@@ -465,6 +471,8 @@ const App: React.FC = () => {
         )}/raw_snapshot_accounts.json`,
       );
       setSnapshot(res);
+      // Load ending_balances from snapshot (persisted since the run)
+      setEndingBalances(res.ending_balances ?? null);
     } catch (e: any) {
       setResultsError(String(e?.message || e));
     }
@@ -500,14 +508,14 @@ const App: React.FC = () => {
       if (!eb) continue;
 
       if (acct.type === "taxable") {
-        brokerageCurrent += eb.ending_current_mean;
-        brokerageFuture += eb.ending_future_mean;
+        brokerageCurrent += eb.ending_current_median ?? eb.ending_current_mean;
+        brokerageFuture  += eb.ending_future_median  ?? eb.ending_future_mean;
       } else if (acct.type === "traditional_ira") {
-        tradCurrent += eb.ending_current_mean;
-        tradFuture += eb.ending_future_mean;
+        tradCurrent += eb.ending_current_median ?? eb.ending_current_mean;
+        tradFuture  += eb.ending_future_median  ?? eb.ending_future_mean;
       } else if (acct.type === "roth_ira") {
-        rothCurrent += eb.ending_current_mean;
-        rothFuture += eb.ending_future_mean;
+        rothCurrent += eb.ending_current_median ?? eb.ending_current_mean;
+        rothFuture  += eb.ending_future_median  ?? eb.ending_future_mean;
       }
     }
 
@@ -1003,7 +1011,7 @@ const App: React.FC = () => {
                   <thead>
                     <tr>
                       <th>Metric</th>
-                      <th>Value (Median / Mean / P10 / P90)</th>
+                      <th>Value (Median · Mean · P10 stress · P90 upside)</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1018,8 +1026,8 @@ const App: React.FC = () => {
                       <td>
                         Median: {formatPct(snapshot.summary?.cagr_nominal_median ?? 0)} ·
                         Mean: {formatPct(snapshot.summary?.cagr_nominal_mean ?? 0)} ·
-                        P10: {formatPct(snapshot.summary?.cagr_nominal_p10 ?? 0)} ·
-                        P90: {formatPct(snapshot.summary?.cagr_nominal_p90 ?? 0)}
+                        P10 (stress): {formatPct(snapshot.summary?.cagr_nominal_p10 ?? 0)} ·
+                        P90 (upside): {formatPct(snapshot.summary?.cagr_nominal_p90 ?? 0)}
                       </td>
                     </tr>
                     <tr>
@@ -1027,8 +1035,8 @@ const App: React.FC = () => {
                       <td>
                         Median: {formatPct(snapshot.summary?.cagr_real_median ?? 0)} ·
                         Mean: {formatPct(snapshot.summary?.cagr_real_mean ?? 0)} ·
-                        P10: {formatPct(snapshot.summary?.cagr_real_p10 ?? 0)} ·
-                        P90: {formatPct(snapshot.summary?.cagr_real_p90 ?? 0)}
+                        P10 (stress): {formatPct(snapshot.summary?.cagr_real_p10 ?? 0)} ·
+                        P90 (upside): {formatPct(snapshot.summary?.cagr_real_p90 ?? 0)}
                       </td>
                     </tr>
 
@@ -1287,8 +1295,8 @@ const App: React.FC = () => {
                       <tr>
                         <th>Aggregate</th>
                         <th>Starting balance</th>
-                        <th>Ending balance (Current USD, mean)</th>
-                        <th>Ending balance (Future USD, mean)</th>
+                        <th>Ending balance (Current USD, median)</th>
+                        <th>Ending balance (Future USD, median)</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1357,8 +1365,8 @@ const App: React.FC = () => {
                       <th>Account</th>
                       <th>Type</th>
                       <th>Starting balance</th>
-                      <th>Ending balance (Current USD, mean)</th>
-                      <th>Ending balance (Future USD, mean)</th>
+                      <th>Ending balance (Current USD, median)</th>
+                      <th>Ending balance (Future USD, median)</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1375,12 +1383,12 @@ const App: React.FC = () => {
                           <td>${formatUSD(start)}</td>
                           <td>
                             {ending
-                              ? `$${formatUSD(ending.ending_current_mean)}`
+                              ? `$${formatUSD(ending.ending_current_median ?? ending.ending_current_mean)}`
                               : ""}
                           </td>
                           <td>
                             {ending
-                              ? `$${formatUSD(ending.ending_future_mean)}`
+                              ? `$${formatUSD(ending.ending_future_median ?? ending.ending_future_mean)}`
                               : ""}
                           </td>
                         </tr>
@@ -1397,9 +1405,9 @@ const App: React.FC = () => {
                     <tr>
                       <th>Year</th>
                       <th>Age</th>
-                      <th>Future mean</th>
-                      <th>Current mean</th>
                       <th>Future Median</th>
+                      <th>Current Median</th>
+                      <th>Future Mean</th>
                       <th>Future P10</th>
                       <th>Future P90</th>
                       <th>YoY Future Nom (Portfolio)</th>
@@ -1416,6 +1424,7 @@ const App: React.FC = () => {
                       const futMean = P?.future_mean?.[i] ?? 0;
                       const curMean = P?.current_mean?.[i] ?? 0;
                       const futMed = P?.future_median?.[i] ?? 0;
+                      const curMed = P?.current_median?.[i] ?? 0;
                       const futP10 = P?.future_p10_mean?.[i] ?? 0;
                       const futP90 = P?.future_p90_mean?.[i] ?? 0;
               
@@ -1436,9 +1445,9 @@ const App: React.FC = () => {
                         <tr key={y}>
                           <td>{y}</td>
                           <td>{ageDisplay}</td>
-                          <td>{formatUSD(futMean)}</td>
-                          <td>{formatUSD(curMean)}</td>
                           <td>{formatUSD(futMed)}</td>
+                          <td>{formatUSD(curMed)}</td>
+                          <td>{formatUSD(futMean)}</td>
                           <td>{formatUSD(futP10)}</td>
                           <td>{formatUSD(futP90)}</td>
                           <td>{formatPct(nomWith)}</td>
@@ -1629,7 +1638,7 @@ const App: React.FC = () => {
                       if (t === "traditional_ira") return (
                         <tr>
                           <th>Account</th><th>Year</th>
-                          <th>$ Future - mean</th><th>$ Future - median</th>
+                          <th>$ Future - median</th><th>$ Future - mean</th>
                           <th>$ Future - p10</th><th>$ Future - p90</th>
                           <th>Nominal Portfolio YoY</th><th>Real Portfolio YoY</th>
                           <th>Nominal Inv YoY</th><th>Real Inv YoY</th>
@@ -1643,7 +1652,7 @@ const App: React.FC = () => {
                       if (t === "roth_ira") return (
                         <tr>
                           <th>Account</th><th>Year</th>
-                          <th>$ Future - mean</th><th>$ Future - median</th>
+                          <th>$ Future - median</th><th>$ Future - mean</th>
                           <th>$ Future - p10</th><th>$ Future - p90</th>
                           <th>Nominal Portfolio YoY</th><th>Real Portfolio YoY</th>
                           <th>Nominal Inv YoY</th><th>Real Inv YoY</th>
@@ -1656,7 +1665,7 @@ const App: React.FC = () => {
                       return (
                         <tr>
                           <th>Account</th><th>Year</th>
-                          <th>$ Future - mean</th><th>$ Future - median</th>
+                          <th>$ Future - median</th><th>$ Future - mean</th>
                           <th>$ Future - p10</th><th>$ Future - p90</th>
                           <th>Nominal Portfolio YoY</th><th>Real Portfolio YoY</th>
                           <th>Nominal Inv YoY</th><th>Real Inv YoY</th>
@@ -1752,8 +1761,8 @@ const App: React.FC = () => {
                             <tr key={`${name}-${yr}`}>
                               <td>{idx === 0 ? name : ""}</td>
                               <td>{yr}</td>
-                              <td>{formatUSD(mean[idx])}</td>
                               <td>{formatUSD(med[idx])}</td>
+                              <td>{formatUSD(mean[idx])}</td>
                               <td>{formatUSD(p10[idx])}</td>
                               <td>{formatUSD(p90[idx])}</td>
                               <td>{formatPct(yoyNomAgg[idx])}</td>
@@ -1801,7 +1810,7 @@ const App: React.FC = () => {
                       if (t === "traditional_ira") return (
                         <tr>
                           <th>Account</th><th>Year</th>
-                          <th>$ Current - mean</th><th>$ Current - median</th>
+                          <th>$ Current - median</th><th>$ Current - mean</th>
                           <th>$ Current - p10</th><th>$ Current - p90</th>
                           <th>Nominal Portfolio YoY</th><th>Real Portfolio YoY</th>
                           <th>Nominal Inv YoY</th><th>Real Inv YoY</th>
@@ -1815,7 +1824,7 @@ const App: React.FC = () => {
                       if (t === "roth_ira") return (
                         <tr>
                           <th>Account</th><th>Year</th>
-                          <th>$ Current - mean</th><th>$ Current - median</th>
+                          <th>$ Current - median</th><th>$ Current - mean</th>
                           <th>$ Current - p10</th><th>$ Current - p90</th>
                           <th>Nominal Portfolio YoY</th><th>Real Portfolio YoY</th>
                           <th>Nominal Inv YoY</th><th>Real Inv YoY</th>
@@ -1827,7 +1836,7 @@ const App: React.FC = () => {
                       return (
                         <tr>
                           <th>Account</th><th>Year</th>
-                          <th>$ Current - mean</th><th>$ Current - median</th>
+                          <th>$ Current - median</th><th>$ Current - mean</th>
                           <th>$ Current - p10</th><th>$ Current - p90</th>
                           <th>Nominal Portfolio YoY</th><th>Real Portfolio YoY</th>
                           <th>Nominal Inv YoY</th><th>Real Inv YoY</th>
@@ -1923,8 +1932,8 @@ const App: React.FC = () => {
                             <tr key={`cur-${name}-${yr}`}>
                               <td>{idx === 0 ? name : ""}</td>
                               <td>{yr}</td>
-                              <td>{formatUSD(mean[idx])}</td>
                               <td>{formatUSD(med[idx])}</td>
+                              <td>{formatUSD(mean[idx])}</td>
                               <td>{formatUSD(p10[idx])}</td>
                               <td>{formatUSD(p90[idx])}</td>
                               <td>{formatPct(yoyNomAggCur[idx])}</td>

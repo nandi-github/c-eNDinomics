@@ -931,7 +931,24 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
         },
     }
 
-    # 9) Snapshot + run_meta
+    # 9a) Compute ending balances first so they get saved into the snapshot
+    accounts_levels = res.get("returns_acct_levels", {}) or {}
+    inv_nom_levels_mean_acct = accounts_levels.get("inv_nom_levels_mean_acct", {}) or {}
+    inv_real_levels_mean_acct = accounts_levels.get("inv_real_levels_mean_acct", {}) or {}
+    inv_nom_levels_med_acct  = accounts_levels.get("inv_nom_levels_med_acct",  {}) or {}
+    inv_real_levels_med_acct = accounts_levels.get("inv_real_levels_med_acct", {}) or {}
+    try:
+        ending_balances_pre = compute_account_ending_balances(
+            inv_nom_levels_mean_acct=inv_nom_levels_mean_acct,
+            inv_real_levels_mean_acct=inv_real_levels_mean_acct,
+            inv_nom_levels_med_acct=inv_nom_levels_med_acct,
+            inv_real_levels_med_acct=inv_real_levels_med_acct,
+        )
+    except Exception:
+        ending_balances_pre = []
+    res["ending_balances"] = ending_balances_pre
+
+    # 9b) Snapshot + run_meta (now includes ending_balances)
     save_raw_snapshot_accounts(
         out_dir=run_dir,
         res=res,
@@ -973,24 +990,11 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
     except Exception:
         pass
 
-    # 11) Compute ending balances per account for UI
-    accounts_levels = res.get("returns_acct_levels", {}) or {}
-    inv_nom_levels_mean_acct = accounts_levels.get("inv_nom_levels_mean_acct", {}) or {}
-    inv_real_levels_mean_acct = accounts_levels.get("inv_real_levels_mean_acct", {}) or {}
-
-    try:
-        ending_balances = compute_account_ending_balances(
-            inv_nom_levels_mean_acct=inv_nom_levels_mean_acct,
-            inv_real_levels_mean_acct=inv_real_levels_mean_acct,
-        )
-    except Exception:
-        ending_balances = []
-
     return {
         "ok": True,
         "profile": profile,
         "run": run_id,
-        "ending_balances": ending_balances,
+        "ending_balances": ending_balances_pre,
     }
 
 # --- End of file ---

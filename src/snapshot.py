@@ -101,6 +101,10 @@ def save_raw_snapshot_accounts(
     snapshot["starting"] = res.get("starting", {})
     snapshot["accounts"] = res.get("accounts", {})
 
+    # Ending balances per account (median + mean) — persisted so past runs load correctly
+    if "ending_balances" in res:
+        snapshot["ending_balances"] = res["ending_balances"]
+
     # Input paths (useful for debugging / UI links)
     if input_paths is not None:
         snapshot["input_paths"] = dict(input_paths)
