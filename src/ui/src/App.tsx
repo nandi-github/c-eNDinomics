@@ -1014,7 +1014,7 @@ const App: React.FC = () => {
               
               
                     <tr>
-                      <td>Investment YoY (Nominal, 30-year Geometric)</td>
+                      <td>Investment YoY (Nominal, Lifetime Geometric)</td>
                       <td>
                         Median: {formatPct(snapshot.summary?.cagr_nominal_median ?? 0)} ·
                         Mean: {formatPct(snapshot.summary?.cagr_nominal_mean ?? 0)} ·
@@ -1023,7 +1023,7 @@ const App: React.FC = () => {
                       </td>
                     </tr>
                     <tr>
-                      <td>Investment YoY (Real, 30-year Geometric)</td>
+                      <td>Investment YoY (Real, Lifetime Geometric)</td>
                       <td>
                         Median: {formatPct(snapshot.summary?.cagr_real_median ?? 0)} ·
                         Mean: {formatPct(snapshot.summary?.cagr_real_mean ?? 0)} ·

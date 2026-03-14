@@ -2511,6 +2511,41 @@ def group16_dynamic_sim_years(paths: int):
         f"len={len(sr_arr)}"
     ))
 
+    # ── 16j2: success_rate is computed (not hardcoded 100%) ───────────────
+    # With a healthy 40yr run + large starting portfolio, success should be high
+    # but is a real computed value (not the old placeholder 100.0 literal).
+    # We verify it's a float in (0, 100] and success_rate_by_year is non-increasing.
+    sr_val = res.get("summary", {}).get("success_rate", -1)
+    checks.append(chk(
+        "16j2: success_rate is a real computed value in (0, 100]",
+        0 < sr_val <= 100.0,
+        f"success_rate={sr_val}"
+    ))
+    sr_non_increasing = all(
+        sr_arr[i] >= sr_arr[i+1] - 0.01   # allow tiny float noise
+        for i in range(len(sr_arr) - 1)
+    )
+    checks.append(chk(
+        "16j2: success_rate_by_year is non-increasing over time",
+        sr_non_increasing,
+        f"first={sr_arr[0]:.1f} last={sr_arr[-1]:.1f}"
+    ))
+
+    # ── 16j3: drawdown reflects worst during full period (not just end) ───
+    # drawdown_p90 must be >= drawdown_p50; both > 0 (market has volatility)
+    dd50 = res.get("summary", {}).get("drawdown_p50", -1)
+    dd90 = res.get("summary", {}).get("drawdown_p90", -1)
+    checks.append(chk(
+        "16j3: drawdown_p90 >= drawdown_p50 (worse scenario is worse)",
+        dd90 >= dd50,
+        f"p50={dd50:.1f}% p90={dd90:.1f}%"
+    ))
+    checks.append(chk(
+        "16j3: drawdown_p50 > 0 (portfolio experienced some drawdown)",
+        dd50 > 0,
+        f"p50={dd50:.1f}%"
+    ))
+
 
     # ── 16k: born 1940 → RMD fires at age 72 (BASE_RMD table starts at 72) ─
     # birth_year=1940 → rmd_start_age=70.5 → int(70.5)=70 → age guard passes at 70

@@ -1040,14 +1040,36 @@ def run_accounts_new(
     cagr_real_p10    = float(np.percentile(cagr_real_paths, 10))
     cagr_real_p90    = float(np.percentile(cagr_real_paths, 90))
 
-    max_to_date = np.maximum.accumulate(total_nom_paths, axis=1)
-    dd_end = (1.0 - (total_nom_paths / np.clip(max_to_date, 1e-12, None))[:, -1]) * 100.0
-    drawdown_p50 = float(np.percentile(dd_end, 50))
-    drawdown_p90 = float(np.percentile(dd_end, 90))
+    # Drawdown: worst peak-to-trough over the FULL simulation period per path.
+    # max_to_date[path, y] = running portfolio peak up to year y.
+    # dd_each[path, y] = fractional drawdown from peak at that year.
+    # dd_max_per_path = worst single drawdown any path experienced at any year.
+    # P50/P90 across paths: median and bad-case worst-drawdown experience.
+    max_to_date    = np.maximum.accumulate(total_nom_paths, axis=1)
+    dd_each        = (1.0 - total_nom_paths / np.clip(max_to_date, 1e-12, None)) * 100.0
+    dd_max_per_path = dd_each.max(axis=1)   # worst drawdown this path ever saw
+    drawdown_p50   = float(np.percentile(dd_max_per_path, 50))
+    drawdown_p90   = float(np.percentile(dd_max_per_path, 90))
 
-    success_rate_pct       = 100.0
-    success_rate_by_year   = [100.0] * n_years
-    shortfall_years_mean   = 0.0
+    # Success rate: % of paths where total portfolio stays above zero every year.
+    # A path "fails" the moment total_nom drops to or below zero in any year.
+    # success_rate_by_year[y] = % of paths still solvent at year y (cumulative).
+    # shortfall_years_mean = average number of years a failing path was insolvent.
+    _solvent = total_nom_paths > 0.0                            # (paths, n_years) bool
+    _ever_failed = ~_solvent.all(axis=1)                        # (paths,) — failed at some yr
+    _first_fail_yr = np.where(
+        _ever_failed,
+        np.argmax(~_solvent, axis=1),   # index of first year that went to zero
+        n_years,                         # sentinel: never failed
+    )
+    success_rate_pct = float(100.0 * (~_ever_failed).mean())
+    # Per-year: % of paths still solvent up to and including year y
+    success_rate_by_year = [
+        float(100.0 * (_first_fail_yr > y).mean()) for y in range(n_years)
+    ]
+    # Mean shortfall years (only among paths that failed)
+    _fail_yrs = n_years - _first_fail_yr[_ever_failed]
+    shortfall_years_mean = float(_fail_yrs.mean()) if _fail_yrs.size > 0 else 0.0
 
     # --- Attach RMD summaries and total-withdrawal totals to withdrawals dict ---
     withdrawals["rmd_current_mean"] = rmd_current_mean.tolist()
