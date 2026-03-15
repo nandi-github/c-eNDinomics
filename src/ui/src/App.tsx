@@ -1,6 +1,33 @@
 // filename: ui/src/App.tsx
 import React, { useEffect, useMemo, useState } from "react";
 
+
+// ── Column tooltip helper ─────────────────────────────────────────────────
+// Pure JS show/hide — no CSS :hover dependency (reliable inside any container).
+// position:fixed on the popover so it escapes overflow/transform ancestors.
+const Tip: React.FC<{ label: string; tip: string }> = ({ label, tip }) => {
+  const boxRef = React.useRef<HTMLSpanElement>(null);
+  const show = (e: React.MouseEvent) => {
+    if (!boxRef.current) return;
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const box = boxRef.current;
+    box.style.top     = `${rect.bottom + 6}px`;
+    box.style.left    = `${Math.min(rect.left, window.innerWidth - 260)}px`;
+    box.style.display = "block";
+  };
+  const hide = () => {
+    if (boxRef.current) boxRef.current.style.display = "none";
+  };
+  return (
+    <span className="col-tip" onMouseEnter={show} onMouseLeave={hide}>
+      <span className="tip-label">{label}</span>
+      <span className="tip-icon">ⓘ</span>
+      <span className="tip-box" ref={boxRef} style={{ display: "none" }}>{tip}</span>
+    </span>
+  );
+};
+// ─────────────────────────────────────────────────────────────────────────
+
 type RunFlags = {
   ignore_withdrawals?: boolean;
   ignore_rmds?: boolean;
@@ -34,11 +61,25 @@ type SnapshotWithdrawals = {
   planned_current?: number[];
   realized_current_mean?: number[];
   shortfall_current_mean?: number[];
+  realized_current_median_path?: number[];
+  realized_future_median_path?: number[];
+  shortfall_current_median_path?: number[];
+  rmd_current_median_path?: number[];
+  rmd_future_median_path?: number[];
+  total_withdraw_current_median_path?: number[];
+  total_withdraw_future_median_path?: number[];
   realized_future_mean?: number[];
   taxes_fed_current_mean?: number[];
   taxes_state_current_mean?: number[];
   taxes_niit_current_mean?: number[];
   taxes_excise_current_mean?: number[];
+  // Median-path tax arrays — merged from simulator taxes dict into withdrawals
+  taxes_fed_current_median_path?: number[];
+  taxes_state_current_median_path?: number[];
+  taxes_niit_current_median_path?: number[];
+  taxes_excise_current_median_path?: number[];
+  // Full taxable income denominator: W2 + RMD + conversions + cap gains + dividends
+  total_ordinary_income_median_path?: number[];
   tax_shortfall_current_mean?: number[];
   realized_gains_current_mean?: number[];
   rmd_current_mean?: number[];
@@ -90,6 +131,9 @@ type SnapshotAccount = { name: string; type: string };
 
 type SnapshotConversions = {
   conversion_tax_cur_mean_by_year?: number[];
+  conversion_cur_median_path_by_year?: number[];
+  conversion_tax_cur_median_path_by_year?: number[];
+  total_ordinary_income_median_path?: number[];
   conversion_nom_mean_by_year?: number[];
   conversion_cur_mean_by_year?: number[];
 };
@@ -1011,7 +1055,7 @@ const App: React.FC = () => {
                   <thead>
                     <tr>
                       <th>Metric</th>
-                      <th>Value (Median · Mean · P10 stress · P90 upside)</th>
+                      <th><Tip label="Value" tip="Median = typical outcome (half of scenarios above, half below). Mean = mathematical average, skewed up by outlier paths. P10 stress = only 10% of scenarios worse than this. P90 upside = only 10% of scenarios better than this." /></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1041,11 +1085,11 @@ const App: React.FC = () => {
                     </tr>
 
                     <tr>
-                      <td>Drawdown P90</td>
+                      <td><Tip label="Worst drop — bad scenario" tip="90th percentile of worst peak-to-trough decline across all simulation paths and years. Only 10% of scenarios had a larger drop. Higher number = worse outcome." /></td>
                       <td>{formatPct(snapshot.summary?.drawdown_p90)}</td>
                     </tr>
                     <tr>
-                      <td>Drawdown P50</td>
+                      <td><Tip label="Worst drop — typical (P50)" tip="Median worst peak-to-trough decline. Half of simulation scenarios experienced a larger drop, half a smaller one. Higher number = worse outcome." /></td>
                       <td>{formatPct(snapshot.summary?.drawdown_p50)}</td>
                     </tr>
                   </tbody>
@@ -1061,19 +1105,21 @@ const App: React.FC = () => {
                 const YEARS_N = snapshot.years.length;
                 const RMD_START = 20;
 
-                const fedYr    = W?.taxes_fed_current_mean    ?? [];
-                const stateYr  = W?.taxes_state_current_mean  ?? [];
-                const niitYr   = W?.taxes_niit_current_mean   ?? [];
-                const exYr     = W?.taxes_excise_current_mean ?? [];
+                // Insights use median-path arrays for consistent scenario analysis
+                const fedYr    = W?.taxes_fed_current_median_path    ?? W?.taxes_fed_current_mean    ?? [];
+                const stateYr  = W?.taxes_state_current_median_path  ?? W?.taxes_state_current_mean  ?? [];
+                const niitYr   = W?.taxes_niit_current_median_path   ?? W?.taxes_niit_current_mean   ?? [];
+                const exYr     = W?.taxes_excise_current_median_path ?? W?.taxes_excise_current_mean ?? [];
                 const totalTaxYr = fedYr.map((v,i) => v + (stateYr[i]??0) + (niitYr[i]??0) + (exYr[i]??0));
-                const totalWdYr  = W?.total_withdraw_current_mean ?? [];
+                const totalWdYr  = W?.total_withdraw_current_median_path ?? W?.total_withdraw_current_mean ?? [];
                 const plannedYr  = W?.planned_current ?? [];
-                const convCurYr  = C?.conversion_cur_mean_by_year ?? [];
+                const convCurYr  = C?.conversion_cur_median_path_by_year ?? C?.conversion_cur_mean_by_year ?? [];
 
                 const effPre: number[] = [];
                 const effRmd: number[] = [];
                 for (let i = 0; i < YEARS_N; i++) {
-                  const gross = (totalWdYr[i] ?? 0) > 0 ? totalWdYr[i] : (plannedYr[i] ?? 0);
+                  const ordInc = W?.total_ordinary_income_median_path?.[i] ?? 0;
+                  const gross = ordInc > 0 ? ordInc : ((totalWdYr[i] ?? 0) > 0 ? totalWdYr[i] : (plannedYr[i] ?? 0));
                   const rate  = gross > 0 ? (totalTaxYr[i] ?? 0) / gross * 100 : 0;
                   if (i < RMD_START) effPre.push(rate);
                   else               effRmd.push(rate);
@@ -1124,7 +1170,7 @@ const App: React.FC = () => {
                   insights.push({
                     id: "brokerage_depletion", sev: "warn",
                     title: `Taxable brokerage depletes early (year ${brokDepletionYr + 1})`,
-                    body: `Mean brokerage balance drops near zero by year ${brokDepletionYr + 1}. This shortens the 0% federal LTCG window and forces earlier TRAD withdrawals at ordinary income rates. Consider reducing spending or adjusting the withdrawal sequence.`,
+                    body: `Typical (median scenario) brokerage balance drops near zero by year ${brokDepletionYr + 1}. This shortens the 0% federal LTCG window and forces earlier TRAD withdrawals at ordinary income rates. Consider reducing spending or adjusting the withdrawal sequence.`,
                   });
                 }
                 if (rothEndPct < 10 && totalEndBal > 0) {
@@ -1142,6 +1188,23 @@ const App: React.FC = () => {
                     body: `3.8% Net Investment Income Tax is firing on investment income above the threshold. If avoid_niit is enabled in your profile, income spikes (e.g. large RMDs + gains) are pushing past the ceiling. Consider spreading conversions or gains across more years.`,
                   });
                 }
+                // Drawdown insight — correlates to investment allocation risk
+                const dd50 = snapshot.summary?.drawdown_p50 ?? 0;
+                const dd90 = snapshot.summary?.drawdown_p90 ?? 0;
+                if (dd90 > 60) {
+                  insights.push({
+                    id: "drawdown_risk", sev: "warn",
+                    title: `High drawdown risk: typical ${dd50.toFixed(0)}%, stress ${dd90.toFixed(0)}%`,
+                    body: `In the typical scenario your portfolio declined ${dd50.toFixed(0)}% from peak at some point over the simulation. In 10% of scenarios it fell ${dd90.toFixed(0)}% or more. This is consistent with a high-equity allocation. Sequence-of-returns risk is highest in early retirement — a large drawdown in years 1–5 permanently reduces your portfolio base. Consider whether your equity allocation matches your withdrawal timeline.`,
+                  });
+                } else if (dd90 > 35) {
+                  insights.push({
+                    id: "drawdown_moderate", sev: "tip",
+                    title: `Moderate drawdown: typical ${dd50.toFixed(0)}%, stress ${dd90.toFixed(0)}%`,
+                    body: `Your portfolio shows moderate drawdown risk — typical worst-case drop of ${dd50.toFixed(0)}%, with ${dd90.toFixed(0)}% in bad-market scenarios. This is consistent with a balanced allocation. Monitor your withdrawal rate if a large drawdown coincides with early retirement years.`,
+                  });
+                }
+
                 if (insights.length === 0) {
                   insights.push({
                     id: "all_clear", sev: "good",
@@ -1405,15 +1468,15 @@ const App: React.FC = () => {
                     <tr>
                       <th>Year</th>
                       <th>Age</th>
-                      <th>Future Median</th>
-                      <th>Current Median</th>
-                      <th>Future Mean</th>
-                      <th>Future P10</th>
-                      <th>Future P90</th>
-                      <th>YoY Future Nom (Portfolio)</th>
-                      <th>YoY Future Real (Portfolio)</th>
-                      <th>YoY Future Nom (Inv only)</th>
-                      <th>YoY Future Real (Inv only)</th>
+                      <th><Tip label="Typical balance (median)" tip="Portfolio value in future dollars where half of all simulated market scenarios land above and half below. Use this as your primary planning number." /></th>
+                      <th><Tip label="Typical balance — today's $ (median)" tip="Same as typical balance but adjusted for inflation back to today's purchasing power." /></th>
+                      <th><Tip label="Average balance (mean)" tip="Mathematical average across all paths. Skewed upward by a few exceptional market scenarios. The typical (median) column is usually more representative." /></th>
+                      <th><Tip label="Floor balance (P10)" tip="In 90% of simulated market scenarios, your portfolio exceeds this value in this year. This is your stress-test floor — plan for it to still cover essential needs." /></th>
+                      <th><Tip label="Ceiling balance (P90)" tip="In 90% of simulated scenarios, your portfolio is below this value. Represents your upside — don't plan spending on this number." /></th>
+                      <th><Tip label="Annual growth — total portfolio" tip="Year-over-year growth of the total portfolio in future (nominal) dollars. Includes investment returns, withdrawals, deposits, and RMDs." /></th>
+                      <th><Tip label="Annual growth — inflation-adjusted" tip="Year-over-year growth after removing the effect of inflation. This is your real purchasing-power gain each year." /></th>
+                      <th><Tip label="Investment return only (nominal)" tip="Pure investment return, excluding cashflows like withdrawals and deposits. Shows how your assets performed in the market." /></th>
+                      <th><Tip label="Investment return only (real)" tip="Pure investment return after inflation. This is the closest measure to what your money actually earned in real terms." /></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1468,42 +1531,54 @@ const App: React.FC = () => {
                     <tr>
                       <th>Year</th>
                       <th>Age</th>
-                      <th>Current USD Planned</th>
-                      <th>Current USD Realized mean</th>
-                      <th>Current USD Diff (Mean – Planned)</th>
-                      <th>Future USD Realized mean</th>
-                      <th>RMD Current USD mean</th>
-                      <th>RMD Future USD mean</th>
-                      <th>Total Current USD mean</th>
-                      <th>Total Future USD mean</th>
-                      <th>Reinvested Current USD mean</th>
-                      <th>Reinvested Future USD mean</th>
-                      <th>Roth Conv Current USD mean</th>
-                      <th>Conv Tax Current USD mean</th>
+                      <th><Tip label="Planned withdrawal" tip="The withdrawal amount you scheduled in today's dollars, as specified in your withdrawal schedule." /></th>
+                      <th><Tip label="For spending (median path)" tip="Amount that goes toward your planned spending in today's dollars. In RMD years where RMD exceeds plan, this equals the planned amount (surplus RMD is reinvested). Shows shortfall when portfolio cannot meet the plan." /></th>
+                      <th><Tip label="Diff vs plan (median path)" tip="Total received minus planned withdrawal. Zero or positive means fully met (including via RMD). Negative means genuine shortfall — the portfolio could not cover the planned amount." /></th>
+                      <th><Tip label="For spending — future $" tip="Spending amount in nominal (future) dollars." /></th>
+                      <th><Tip label="Required minimum distribution" tip="IRS-mandated minimum withdrawal from tax-deferred accounts (TRAD IRA). Begins at age 73 or 75 depending on birth year." /></th>
+                      <th><Tip label="RMD — future $" tip="Required minimum distribution in nominal (future) dollars." /></th>
+                      <th><Tip label="Total withdrawal (today's $)" tip="Larger of planned withdrawal and RMD. This is your effective total outflow each year in today's purchasing power." /></th>
+                      <th><Tip label="Total withdrawal (future $)" tip="Total outflow in nominal dollars — what you physically receive each year." /></th>
+                      <th><Tip label="RMD reinvested (today's $)" tip="Portion of RMD above your spending need that is reinvested into a taxable brokerage account." /></th>
+                      <th><Tip label="RMD reinvested (future $)" tip="Reinvested RMD surplus in nominal dollars." /></th>
+                      <th><Tip label="Roth conversion (today's $)" tip="Amount converted from Traditional IRA to Roth IRA this year, in today's dollars. Taxed as ordinary income in the conversion year." /></th>
+                      <th><Tip label="Conversion tax cost (today's $)" tip="Tax paid on Roth conversion this year, debited from your brokerage account." /></th>
                     </tr>
                   </thead>
                   <tbody>
                     {snapshot.years.map((y, i) => {
                       const W = snapshot.withdrawals;
-                      const planned = W?.planned_current?.[i] ?? 0;
-                      const realizedCur = W?.realized_current_mean?.[i] ?? 0;
-                      const realizedFut = W?.realized_future_mean?.[i] ?? 0;
-                      const diff = realizedCur - planned;
-              
-                      // New: RMD means per year (current & future)
-                      const rmdCur = W?.rmd_current_mean?.[i] ?? 0;
-                      const rmdFut = W?.rmd_future_mean?.[i] ?? 0;
-              
-                      // New: Total withdrawals = discretionary + RMD
-                      const totalCur = (W?.total_withdraw_current_mean?.[i] ??
-                        (realizedCur + rmdCur));
-                      const totalFut = (W?.total_withdraw_future_mean?.[i] ??
-                        (realizedFut + rmdFut));
+                      const planned     = W?.planned_current?.[i] ?? 0;
+                      const rmdCur = W?.rmd_current_median_path?.[i] ?? W?.rmd_current_mean?.[i] ?? 0;
+                      const rmdFut = W?.rmd_future_median_path?.[i] ?? W?.rmd_future_mean?.[i] ?? 0;
+
+                      // Total outflow (max of planned or RMD — includes reinvested surplus)
+                      const totalCur = (W?.total_withdraw_current_median_path?.[i] ?? W?.total_withdraw_current_mean?.[i] ?? rmdCur);
+                      const totalFut = (W?.total_withdraw_future_median_path?.[i]  ?? W?.total_withdraw_future_mean?.[i]  ?? rmdFut);
+
+                      // Spendable (current $) = portion of total outflow that goes toward planned spending.
+                      // In normal years:  spendable = min(totalCur, planned)  — meets plan or shortfall
+                      // In RMD years where RMD > planned: spendable = planned (surplus is reinvested/cash)
+                      // In shortfall years: spendable = totalCur < planned
+                      const spendable = Math.min(totalCur, planned > 0 ? planned : totalCur);
+
+                      // Spendable (future $): scale current spendable by the same inflation factor
+                      // implicit in the total arrays, so it always shows a non-zero value in RMD years.
+                      // deflatorRatio = totalFut / totalCur — the year's cumulative inflation multiplier.
+                      const deflatorRatio = totalCur > 0 ? totalFut / totalCur : 1.0;
+                      const spendableFut  = spendable * deflatorRatio;
+
+                      // Diff: negative only on genuine portfolio shortfall (could not meet planned spending)
+                      const diff = spendable - planned;
+
+                      // realizedCur = spendable for display; realizedFut = inflation-adjusted spendable
+                      const realizedCur = spendable;
+                      const realizedFut = spendableFut;
                       // Reinvested = surplus RMD actually added to brokerage (0 if cash_out policy)
                       const reinvestedCur = W?.rmd_extra_current?.[i] ?? 0;
                       const reinvestedFut = W?.rmd_extra_future?.[i] ?? 0;
-                      const convCurWd  = snapshot.conversions?.conversion_cur_mean_by_year?.[i] ?? 0;
-                      const convTaxWd  = snapshot.conversions?.conversion_tax_cur_mean_by_year?.[i] ?? 0;
+                      const convCurWd  = snapshot.conversions?.conversion_cur_median_path_by_year?.[i] ?? snapshot.conversions?.conversion_cur_mean_by_year?.[i] ?? 0;
+                      const convTaxWd  = snapshot.conversions?.conversion_tax_cur_median_path_by_year?.[i] ?? snapshot.conversions?.conversion_tax_cur_mean_by_year?.[i] ?? 0;
               
                       // New: Age = starting age + (year index)
                       const startAge =
@@ -1545,22 +1620,22 @@ const App: React.FC = () => {
               <section className="results-section">
                 <h3>Taxes by Type</h3>
                 <p style={{ marginBottom: 8, fontSize: 13, color: "#555" }}>
-                  All values in Current USD (mean across paths).
+                  All values in Current USD (median path — the simulation path closest to the typical portfolio outcome).
                   Federal&nbsp;=&nbsp;ordinary income&nbsp;+&nbsp;conversion income brackets.
                   State&nbsp;=&nbsp;state ordinary&nbsp;+&nbsp;capital gains.
                   NIIT&nbsp;=&nbsp;3.8% on net investment income above threshold.
                   Excise&nbsp;=&nbsp;state capital gains surcharge where applicable.
                   Total&nbsp;=&nbsp;sum of all four.
-                  Effective rate&nbsp;=&nbsp;total taxes&nbsp;÷&nbsp;gross income (withdrawals&nbsp;+&nbsp;conversions, pre-tax).
+                  Effective rate&nbsp;=&nbsp;total taxes&nbsp;÷&nbsp;total taxable income (W2 + RMDs + conversions + cap gains + dividends).
                 </p>
                 <table className="table">
                   <thead>
                     <tr>
                       <th>Year</th><th>Age</th>
-                      <th>Federal</th><th>State</th><th>NIIT</th><th>Excise</th>
-                      <th>Total Taxes</th>
-                      <th>Take-Home (Withdrawal)</th>
-                      <th>Effective Rate</th>
+                      <th><Tip label="Federal tax" tip="Federal income tax on ordinary income (wages, IRA withdrawals, conversions) plus any applicable capital gains tax." /></th><th><Tip label="State tax" tip="State income and capital gains tax based on your selected state." /></th><th><Tip label="Investment income tax" tip="3.8% Net Investment Income Tax on investment income above the $250k threshold (MFJ). Applies to capital gains, dividends, and interest." /></th><th><Tip label="Capital gains surcharge" tip="State-specific surcharge on capital gains above threshold (e.g. California 1% mental health surcharge)." /></th>
+                      <th><Tip label="Total taxes" tip="Sum of federal, state, NIIT, and excise. All values are current USD mean across simulation paths." /></th>
+                      <th><Tip label="Take-home withdrawal" tip="Your planned withdrawal amount in today's dollars — what you actually spend. Taxes are paid separately from brokerage." /></th>
+                      <th><Tip label="Effective tax rate" tip="Total taxes divided by total taxable income — includes W2, RMDs, conversions, capital gains, and dividends. This is your true all-in tax rate on everything the IRS can see." /></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1569,20 +1644,27 @@ const App: React.FC = () => {
                       const C = snapshot.conversions;
                       // Federal = ordinary income taxes + conversion income taxes
                       // Conversion taxes are federal income taxes (bracket-fill on converted amount)
-                      const ordFed    = W?.taxes_fed_current_mean?.[i]   ?? 0;
-                      const convTax   = C?.conversion_tax_cur_mean_by_year?.[i] ?? 0;
+                      const ordFed    = W?.taxes_fed_current_median_path?.[i]   ?? W?.taxes_fed_current_mean?.[i]   ?? 0;
+                      const convTax   = C?.conversion_tax_cur_median_path_by_year?.[i] ?? C?.conversion_tax_cur_mean_by_year?.[i] ?? 0;
                       const fedTotal  = ordFed + convTax;
-                      const state     = W?.taxes_state_current_mean?.[i]  ?? 0;
-                      const niit      = W?.taxes_niit_current_mean?.[i]   ?? 0;
-                      const excise    = W?.taxes_excise_current_mean?.[i] ?? 0;
+                      const state     = W?.taxes_state_current_median_path?.[i]  ?? W?.taxes_state_current_mean?.[i]  ?? 0;
+                      const niit      = W?.taxes_niit_current_median_path?.[i]   ?? W?.taxes_niit_current_mean?.[i]   ?? 0;
+                      const excise    = W?.taxes_excise_current_median_path?.[i] ?? W?.taxes_excise_current_mean?.[i] ?? 0;
                       const total     = fedTotal + state + niit + excise;
                       const planned   = W?.planned_current?.[i] ?? 0;
-                      const rmdE = W?.rmd_current_mean?.[i] ?? 0;
-                      const wdE  = W?.realized_current_mean?.[i] ?? 0;
-                      const twE  = W?.total_withdraw_current_mean?.[i] ?? (wdE + rmdE);
-                      const cvE  = C?.conversion_cur_mean_by_year?.[i] ?? 0;
-                      const denom     = twE + cvE;  // gross pre-tax income
-                      const effRate   = denom > 0 ? total / denom : null;
+                      const rmdE = W?.rmd_current_median_path?.[i] ?? W?.rmd_current_mean?.[i] ?? 0;
+                      const wdE  = W?.realized_current_median_path?.[i] ?? W?.realized_current_mean?.[i] ?? 0;
+                      const twE  = W?.total_withdraw_current_median_path?.[i] ?? W?.total_withdraw_current_mean?.[i] ?? (wdE + rmdE);
+                      const cvE  = C?.conversion_cur_median_path_by_year?.[i] ?? C?.conversion_cur_mean_by_year?.[i] ?? 0;
+                      // Denominator = total taxable income on the median path:
+                      //   W2 + RMD + conversions + qualified dividends + capital gains (including rebalancing).
+                      // simulator_new.py now merges total_ordinary_income_median_path into withdrawals,
+                      // so W is always the right place to look. Falls back to (twE + cvE) for old snapshots.
+                      const totalOrdIncome = W?.total_ordinary_income_median_path?.[i] ?? 0;
+                      const denom = totalOrdIncome > 0 ? totalOrdIncome : (twE + cvE > 0 ? twE + cvE : null);
+                      // Guard: never show rate > 100% — if denominator still too small, show dash
+                      const effRateRaw = (denom !== null && denom > 0) ? total / denom : null;
+                      const effRate = (effRateRaw !== null && effRateRaw <= 1.0) ? effRateRaw : null;
 
                       const startAge = snapshot.person?.current_age ?? snapshot.person?.age ?? undefined;
                       const ageDisplay = startAge !== undefined ? Math.floor(startAge + i) : "";
@@ -1637,11 +1719,11 @@ const App: React.FC = () => {
                       const t = selAcct?.type ?? "";
                       if (t === "traditional_ira") return (
                         <tr>
-                          <th>Account</th><th>Year</th>
-                          <th>$ Future - median</th><th>$ Future - mean</th>
-                          <th>$ Future - p10</th><th>$ Future - p90</th>
-                          <th>Nominal Portfolio YoY</th><th>Real Portfolio YoY</th>
-                          <th>Nominal Inv YoY</th><th>Real Inv YoY</th>
+                          <th>Year</th><th>Age</th>
+                          <th><Tip label="Typical balance (median)" tip="Account balance in future dollars at the median — half of all simulation paths land above this, half below." /></th><th><Tip label="Average balance (mean)" tip="Mean account balance in future dollars. Skewed upward by outperforming paths." /></th>
+                          <th><Tip label="Floor balance (P10)" tip="In 90% of scenarios this account exceeds this value. Per-year cross-section across all simulation paths." /></th><th><Tip label="Ceiling balance (P90)" tip="In 90% of scenarios this account is below this value. Per-year cross-section across all simulation paths." /></th>
+                          <th><Tip label="Portfolio growth (nominal)" tip="Year-over-year total portfolio growth in future dollars, including all cashflows." /></th><th><Tip label="Portfolio growth (real)" tip="Year-over-year total portfolio growth after adjusting for inflation." /></th>
+                          <th><Tip label="Investment return (nominal)" tip="Pure investment return for this account in nominal terms, excluding deposits and withdrawals." /></th><th><Tip label="Investment return (real)" tip="Pure investment return after inflation for this account." /></th>
                           <th>Conversion Out Future USD</th>
                           <th>RMD Out Future USD</th>
                           <th>Reinvested Out Future USD</th>
@@ -1651,11 +1733,11 @@ const App: React.FC = () => {
                       );
                       if (t === "roth_ira") return (
                         <tr>
-                          <th>Account</th><th>Year</th>
-                          <th>$ Future - median</th><th>$ Future - mean</th>
-                          <th>$ Future - p10</th><th>$ Future - p90</th>
-                          <th>Nominal Portfolio YoY</th><th>Real Portfolio YoY</th>
-                          <th>Nominal Inv YoY</th><th>Real Inv YoY</th>
+                          <th>Year</th><th>Age</th>
+                          <th><Tip label="Typical balance (median)" tip="Account balance in future dollars at the median — half of all simulation paths land above this, half below." /></th><th><Tip label="Average balance (mean)" tip="Mean account balance in future dollars. Skewed upward by outperforming paths." /></th>
+                          <th><Tip label="Floor balance (P10)" tip="In 90% of scenarios this account exceeds this value. Per-year cross-section across all simulation paths." /></th><th><Tip label="Ceiling balance (P90)" tip="In 90% of scenarios this account is below this value. Per-year cross-section across all simulation paths." /></th>
+                          <th><Tip label="Portfolio growth (nominal)" tip="Year-over-year total portfolio growth in future dollars, including all cashflows." /></th><th><Tip label="Portfolio growth (real)" tip="Year-over-year total portfolio growth after adjusting for inflation." /></th>
+                          <th><Tip label="Investment return (nominal)" tip="Pure investment return for this account in nominal terms, excluding deposits and withdrawals." /></th><th><Tip label="Investment return (real)" tip="Pure investment return after inflation for this account." /></th>
                           <th>Conversion In Future USD</th>
                           <th>Withdrawal Out Future USD</th>
                           <th>Total Out Future USD</th>
@@ -1664,11 +1746,11 @@ const App: React.FC = () => {
                       // brokerage (default)
                       return (
                         <tr>
-                          <th>Account</th><th>Year</th>
-                          <th>$ Future - median</th><th>$ Future - mean</th>
-                          <th>$ Future - p10</th><th>$ Future - p90</th>
-                          <th>Nominal Portfolio YoY</th><th>Real Portfolio YoY</th>
-                          <th>Nominal Inv YoY</th><th>Real Inv YoY</th>
+                          <th>Year</th><th>Age</th>
+                          <th><Tip label="Typical balance (median)" tip="Account balance in future dollars at the median — half of all simulation paths land above this, half below." /></th><th><Tip label="Average balance (mean)" tip="Mean account balance in future dollars. Skewed upward by outperforming paths." /></th>
+                          <th><Tip label="Floor balance (P10)" tip="In 90% of scenarios this account exceeds this value. Per-year cross-section across all simulation paths." /></th><th><Tip label="Ceiling balance (P90)" tip="In 90% of scenarios this account is below this value. Per-year cross-section across all simulation paths." /></th>
+                          <th><Tip label="Portfolio growth (nominal)" tip="Year-over-year total portfolio growth in future dollars, including all cashflows." /></th><th><Tip label="Portfolio growth (real)" tip="Year-over-year total portfolio growth after adjusting for inflation." /></th>
+                          <th><Tip label="Investment return (nominal)" tip="Pure investment return for this account in nominal terms, excluding deposits and withdrawals." /></th><th><Tip label="Investment return (real)" tip="Pure investment return after inflation for this account." /></th>
                           <th>Conversion Tax Out Future USD</th>
                           <th>Reinvested In Future USD</th>
                           <th>Withdrawal Out Future USD</th>
@@ -1759,8 +1841,8 @@ const App: React.FC = () => {
 
                           rows.push(
                             <tr key={`${name}-${yr}`}>
-                              <td>{idx === 0 ? name : ""}</td>
                               <td>{yr}</td>
+                              <td>{(snapshot.person?.current_age ?? snapshot.person?.age) !== undefined ? Math.floor((snapshot.person?.current_age ?? snapshot.person?.age ?? 0) + idx) : ""}</td>
                               <td>{formatUSD(med[idx])}</td>
                               <td>{formatUSD(mean[idx])}</td>
                               <td>{formatUSD(p10[idx])}</td>
@@ -1809,11 +1891,11 @@ const App: React.FC = () => {
                       const t = selAcct?.type ?? "";
                       if (t === "traditional_ira") return (
                         <tr>
-                          <th>Account</th><th>Year</th>
-                          <th>$ Current - median</th><th>$ Current - mean</th>
-                          <th>$ Current - p10</th><th>$ Current - p90</th>
-                          <th>Nominal Portfolio YoY</th><th>Real Portfolio YoY</th>
-                          <th>Nominal Inv YoY</th><th>Real Inv YoY</th>
+                          <th>Year</th><th>Age</th>
+                          <th><Tip label="Typical balance — today's $ (median)" tip="Account balance in inflation-adjusted today's dollars at the median scenario." /></th><th><Tip label="Average balance — today's $ (mean)" tip="Mean account balance in today's dollars." /></th>
+                          <th><Tip label="Floor — today's $ (P10)" tip="In 90% of scenarios this account in today's dollars exceeds this value." /></th><th><Tip label="Ceiling — today's $ (P90)" tip="In 90% of scenarios this account in today's dollars is below this value." /></th>
+                          <th><Tip label="Portfolio growth (nominal)" tip="Year-over-year total portfolio growth in future dollars, including all cashflows." /></th><th><Tip label="Portfolio growth (real)" tip="Year-over-year total portfolio growth after adjusting for inflation." /></th>
+                          <th><Tip label="Investment return (nominal)" tip="Pure investment return for this account in nominal terms, excluding deposits and withdrawals." /></th><th><Tip label="Investment return (real)" tip="Pure investment return after inflation for this account." /></th>
                           <th>Conversion Out Current USD</th>
                           <th>RMD Out Current USD</th>
                           <th>Reinvested Out Current USD</th>
@@ -1823,11 +1905,11 @@ const App: React.FC = () => {
                       );
                       if (t === "roth_ira") return (
                         <tr>
-                          <th>Account</th><th>Year</th>
-                          <th>$ Current - median</th><th>$ Current - mean</th>
-                          <th>$ Current - p10</th><th>$ Current - p90</th>
-                          <th>Nominal Portfolio YoY</th><th>Real Portfolio YoY</th>
-                          <th>Nominal Inv YoY</th><th>Real Inv YoY</th>
+                          <th>Year</th><th>Age</th>
+                          <th><Tip label="Typical balance — today's $ (median)" tip="Account balance in inflation-adjusted today's dollars at the median scenario." /></th><th><Tip label="Average balance — today's $ (mean)" tip="Mean account balance in today's dollars." /></th>
+                          <th><Tip label="Floor — today's $ (P10)" tip="In 90% of scenarios this account in today's dollars exceeds this value." /></th><th><Tip label="Ceiling — today's $ (P90)" tip="In 90% of scenarios this account in today's dollars is below this value." /></th>
+                          <th><Tip label="Portfolio growth (nominal)" tip="Year-over-year total portfolio growth in future dollars, including all cashflows." /></th><th><Tip label="Portfolio growth (real)" tip="Year-over-year total portfolio growth after adjusting for inflation." /></th>
+                          <th><Tip label="Investment return (nominal)" tip="Pure investment return for this account in nominal terms, excluding deposits and withdrawals." /></th><th><Tip label="Investment return (real)" tip="Pure investment return after inflation for this account." /></th>
                           <th>Conversion In Current USD</th>
                           <th>Withdrawal Out Current USD</th>
                           <th>Total Out Current USD</th>
@@ -1835,11 +1917,11 @@ const App: React.FC = () => {
                       );
                       return (
                         <tr>
-                          <th>Account</th><th>Year</th>
-                          <th>$ Current - median</th><th>$ Current - mean</th>
-                          <th>$ Current - p10</th><th>$ Current - p90</th>
-                          <th>Nominal Portfolio YoY</th><th>Real Portfolio YoY</th>
-                          <th>Nominal Inv YoY</th><th>Real Inv YoY</th>
+                          <th>Year</th><th>Age</th>
+                          <th><Tip label="Typical balance — today's $ (median)" tip="Account balance in inflation-adjusted today's dollars at the median scenario." /></th><th><Tip label="Average balance — today's $ (mean)" tip="Mean account balance in today's dollars." /></th>
+                          <th><Tip label="Floor — today's $ (P10)" tip="In 90% of scenarios this account in today's dollars exceeds this value." /></th><th><Tip label="Ceiling — today's $ (P90)" tip="In 90% of scenarios this account in today's dollars is below this value." /></th>
+                          <th><Tip label="Portfolio growth (nominal)" tip="Year-over-year total portfolio growth in future dollars, including all cashflows." /></th><th><Tip label="Portfolio growth (real)" tip="Year-over-year total portfolio growth after adjusting for inflation." /></th>
+                          <th><Tip label="Investment return (nominal)" tip="Pure investment return for this account in nominal terms, excluding deposits and withdrawals." /></th><th><Tip label="Investment return (real)" tip="Pure investment return after inflation for this account." /></th>
                           <th>Conversion Tax Out Current USD</th>
                           <th>Reinvested In Current USD</th>
                           <th>Withdrawal Out Current USD</th>
@@ -1930,8 +2012,8 @@ const App: React.FC = () => {
 
                           rows.push(
                             <tr key={`cur-${name}-${yr}`}>
-                              <td>{idx === 0 ? name : ""}</td>
                               <td>{yr}</td>
+                              <td>{(snapshot.person?.current_age ?? snapshot.person?.age) !== undefined ? Math.floor((snapshot.person?.current_age ?? snapshot.person?.age ?? 0) + idx) : ""}</td>
                               <td>{formatUSD(med[idx])}</td>
                               <td>{formatUSD(mean[idx])}</td>
                               <td>{formatUSD(p10[idx])}</td>

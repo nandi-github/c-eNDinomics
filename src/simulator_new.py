@@ -534,10 +534,11 @@ def run_accounts_new(
         "sequence_good_market":         [],
         "sequence_bad_market":          [],
         "bad_market_drawdown_threshold": 0.0,
-        "taxes_fed_current_mean":       taxes_fed_cur_paths.mean(axis=0).tolist(),
-        "taxes_state_current_mean":     taxes_state_cur_paths.mean(axis=0).tolist(),
-        "taxes_niit_current_mean":      taxes_niit_cur_paths.mean(axis=0).tolist(),
-        "taxes_excise_current_mean":    taxes_excise_cur_paths.mean(axis=0).tolist(),
+        "taxes_fed_current_mean":          taxes_fed_cur_paths.mean(axis=0).tolist(),
+        "taxes_state_current_mean":        taxes_state_cur_paths.mean(axis=0).tolist(),
+        "taxes_niit_current_mean":         taxes_niit_cur_paths.mean(axis=0).tolist(),
+        "taxes_excise_current_mean":       taxes_excise_cur_paths.mean(axis=0).tolist(),
+
         "tax_shortfall_current_mean":   zeros.tolist(),
         "realized_gains_current_mean":  zeros.tolist(),
         "rmd_current_mean":             zeros.tolist(),
@@ -593,6 +594,9 @@ def run_accounts_new(
 
         realized_cur   = np.zeros(n_years, dtype=float)
         shortfall_cur  = np.zeros(n_years, dtype=float)
+        # Full per-path realized/shortfall — needed for median-path reporting
+        realized_nom_paths   = np.zeros((paths, n_years), dtype=float)
+        shortfall_nom_paths  = np.zeros((paths, n_years), dtype=float)
         # Per-path shortfall tracker: True if path had any shortfall in that year
         _shortfall_any_path = np.zeros((paths, n_years), dtype=bool)
         withdrawals["realized_current_per_acct_mean"]  = {}
@@ -689,6 +693,9 @@ def run_accounts_new(
             shortfall_cur[y] = (shortfall_total_nom / scale).mean()
             # Track which paths had shortfall this year (for success rate)
             _shortfall_any_path[:, y] = shortfall_total_nom > 1e-6
+            # Accumulate per-path realized/shortfall for median-path reporting
+            realized_nom_paths[:, y]  = realized_total_nom
+            shortfall_nom_paths[:, y] = shortfall_total_nom
 
             for acct in acct_eoy_nom.keys():
                 rn = realized_per_acct_nom.get(acct)
@@ -834,6 +841,47 @@ def run_accounts_new(
         total_nom_paths[:, y] = total_nom_y
 
     total_real_paths = total_nom_paths / np.maximum(deflator, 1e-12)
+
+    # =========================================================================
+    # STEP 5b: Identify median path — the path whose final-year portfolio
+    # is closest to the cross-sectional median. Used to report withdrawals,
+    # taxes, RMD, and conversions as a fully consistent single-path scenario
+    # rather than independent per-year means.
+    # =========================================================================
+    _final_balances   = total_nom_paths[:, -1]
+    _median_balance   = float(np.median(_final_balances))
+    _median_path_idx  = int(np.argmin(np.abs(_final_balances - _median_balance)))
+
+    def _med_path(arr2d: np.ndarray) -> np.ndarray:
+        """Extract the median path row from a (paths, n_years) array."""
+        return arr2d[_median_path_idx, :]
+
+    # Store median-path tax arrays — merged into res["taxes"] AND withdrawals at assembly time.
+    # total_ordinary_income_median_path = all income sources the IRS taxes on the median path:
+    #   ordinary_income_cur_paths already contains W2 + RMD + conversions (mutated in-place above)
+    #   + qual_div_cur_paths (qualified dividends from portfolio rebalancing / distributions)
+    #   + cap_gains_cur_paths (rebalancing LTCG + external cap gains)
+    # This full denominator prevents effective-rate > 100% when the portfolio is large and
+    # rebalancing generates capital gains that dwarf the withdrawal/conversion amounts.
+    _ord_income_med = None
+    if ordinary_income_cur_paths is not None:
+        _all_taxable_cur = ordinary_income_cur_paths.copy()
+        if qual_div_cur_paths is not None:
+            _all_taxable_cur = _all_taxable_cur + qual_div_cur_paths
+        if cap_gains_cur_paths is not None:
+            _all_taxable_cur = _all_taxable_cur + cap_gains_cur_paths
+        _ord_income_med = _med_path(_all_taxable_cur).tolist()
+
+    _taxes_median_path = {
+        "taxes_fed_current_median_path":       _med_path(taxes_fed_cur_paths).tolist(),
+        "taxes_state_current_median_path":     _med_path(taxes_state_cur_paths).tolist(),
+        "taxes_niit_current_median_path":      _med_path(taxes_niit_cur_paths).tolist(),
+        "taxes_excise_current_median_path":    _med_path(taxes_excise_cur_paths).tolist(),
+        "total_ordinary_income_median_path":   _ord_income_med or [0.0] * n_years,
+    }
+    # Also publish median-path tax fields into withdrawals so the UI can read them
+    # from snapshot.withdrawals (which is where App.tsx looks for all per-year arrays).
+    withdrawals.update(_taxes_median_path)
 
     # =========================================================================
     # STEP 6: Per-account levels and YoY stats (post-cashflow account balances)
@@ -1090,6 +1138,31 @@ def run_accounts_new(
 
     withdrawals["total_withdraw_current_mean"] = total_cur.tolist()
     withdrawals["total_withdraw_future_mean"]  = total_fut.tolist()
+
+    # ── Median-path withdrawal arrays ─────────────────────────────────────
+    # All values from the single path whose final portfolio is closest to the
+    # cross-sectional median — fully consistent scenario (no per-year mixing).
+    if apply_withdrawals and sched is not None and 'realized_nom_paths' in locals():
+        _rz_med = _med_path(realized_nom_paths)
+        _sf_med = _med_path(shortfall_nom_paths)
+        _rz_med_cur = _rz_med / np.maximum(deflator, 1e-12)
+        _rmd_med_cur = (_med_path(rmd_total_nom_paths) / np.maximum(deflator, 1e-12)
+                        if rmd_total_nom_paths is not None else np.zeros(n_years))
+        withdrawals["realized_current_median_path"]  = _rz_med_cur.tolist()
+        withdrawals["realized_future_median_path"]   = (_rz_med_cur * deflator).tolist()
+        withdrawals["shortfall_current_median_path"] = (_sf_med / np.maximum(deflator, 1e-12)).tolist()
+        withdrawals["rmd_current_median_path"]       = _rmd_med_cur.tolist()
+        withdrawals["rmd_future_median_path"]        = (_rmd_med_cur * deflator).tolist()
+        _total_med = np.maximum(_rz_med_cur, _rmd_med_cur)
+        withdrawals["total_withdraw_current_median_path"] = _total_med.tolist()
+        withdrawals["total_withdraw_future_median_path"]  = (_total_med * deflator).tolist()
+    else:
+        # No withdrawals enabled — deterministic zeros on median path too
+        withdrawals["realized_current_median_path"]       = [0.0] * n_years
+        withdrawals["shortfall_current_median_path"]      = [0.0] * n_years
+        withdrawals["rmd_current_median_path"]            = rmd_current_mean.tolist()
+        withdrawals["total_withdraw_current_median_path"] = total_cur.tolist()
+        withdrawals["total_withdraw_future_median_path"]  = total_fut.tolist()
     withdrawals["rmd_extra_current"]           = rmd_extra_current.tolist()
     withdrawals["rmd_extra_future"]            = (rmd_extra_current * deflator).tolist()
 
@@ -1237,6 +1310,7 @@ def run_accounts_new(
         "state_total_cur_mean":  float(taxes_state_cur_paths.sum(axis=1).mean()),
         "niit_total_cur_mean":   float(taxes_niit_cur_paths.sum(axis=1).mean()),
         "excise_total_cur_mean": float(taxes_excise_cur_paths.sum(axis=1).mean()),
+        **_taxes_median_path,
     }
 
     # Roth conversion summary
@@ -1247,7 +1321,9 @@ def run_accounts_new(
         # Per-year mean (future USD nominal)
         "conversion_nom_mean_by_year":  _conv_nom.mean(axis=0).tolist(),
         # Per-year mean (current USD deflated)
-        "conversion_cur_mean_by_year":  _conv_cur.mean(axis=0).tolist(),
+        "conversion_cur_mean_by_year":          _conv_cur.mean(axis=0).tolist(),
+        "conversion_cur_median_path_by_year":   _med_path(_conv_cur).tolist(),
+        "conversion_tax_cur_median_path_by_year":_med_path(_conv_tax).tolist(),
         # Per-year tax cost (current USD)
         "conversion_tax_cur_mean_by_year": _conv_tax.mean(axis=0).tolist(),
         # Net benefit = conversion - tax (current USD, per year)

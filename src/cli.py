@@ -54,7 +54,6 @@ def main() -> int:
     ap.add_argument("--alloc-yearly", help="Path to allocation_yearly.json")
     ap.add_argument("--person",       help="Path to person.json")
     ap.add_argument("--income",       help="Path to income.json")
-    ap.add_argument("--rmd",          help="Path to rmd.json")
     ap.add_argument("--economic",     help="Path to economic.json")
     ap.add_argument("--assets",       help="Optional path to assets.json")
 
@@ -80,6 +79,10 @@ def main() -> int:
 
     args = ap.parse_args()
 
+    # RMD table is global (IRS law) — always read from config/, never per-profile
+    _cli_root = os.path.abspath(os.path.dirname(__file__))
+    rmd_path = os.path.join(_cli_root, "config", "rmd.json")
+
     # Resolve all paths via profile if provided
     if args.profile:
         base = os.path.abspath(os.path.join(os.getcwd(), "profiles", args.profile))
@@ -94,7 +97,6 @@ def main() -> int:
         args.alloc_yearly = args.alloc_yearly or P("allocation_yearly.json")
         args.person       = args.person       or P("person.json")
         args.income       = args.income       or P("income.json")
-        args.rmd          = args.rmd          or P("rmd.json")
         args.economic     = args.economic     or P("economic.json")
         if not args.out:
             from datetime import datetime
@@ -113,7 +115,6 @@ def main() -> int:
         ("--alloc-yearly", args.alloc_yearly),
         ("--person",     args.person),
         ("--income",     args.income),
-        ("--rmd",        args.rmd),
         ("--economic",   args.economic),
         ("--out",        args.out),
     ]:
@@ -249,7 +250,7 @@ def main() -> int:
         cap_gains_cur_paths=cap_gains_cur_paths,
         ytd_income_nom_paths=ytd_income_nom_paths,
         person_cfg=person_cfg,
-        rmd_table_path=args.rmd,
+        rmd_table_path=rmd_path,
         conversion_per_year_nom=None,
         rmds_enabled=not args.ignore_rmds,
         conversions_enabled=not args.ignore_conversions,
@@ -269,7 +270,7 @@ def main() -> int:
         "person":   args.person,
         "income":   args.income,
         "economic": economic_path,
-        "rmd":      args.rmd,
+        "rmd":      rmd_path,
         "assets":   args.assets or "",
     }
 

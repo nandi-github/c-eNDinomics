@@ -50,6 +50,7 @@ DEFAULT_PROFILE = "default"
 # Files that live at APP_ROOT, not per-profile
 ECONOMIC_GLOBAL_PATH = os.path.join(APP_ROOT, "economicglobal.json")
 TAX_GLOBAL_PATH      = os.path.join(APP_ROOT, "config", "taxes_states_mfj_single.json")
+RMD_GLOBAL_PATH      = os.path.join(APP_ROOT, "config", "rmd.json")
 BENCHMARKS_GLOBAL_PATH = os.path.join(APP_ROOT, "benchmarks.json")
 SYSTEM_SHOCKS_PATH   = os.path.join(APP_ROOT, "system_shocks.json")
 SYSTEM_SHOCK_PRESETS = {"average", "below_average", "bad", "worst"}
@@ -60,6 +61,7 @@ _GLOBAL_ONLY_NAMES = {
     "taxes_states_mfj_single.json",
     "benchmarks.json",
     "assets.json",
+    "rmd.json",          # IRS law — global only, not user-editable
 }
 
 app = FastAPI(title="eNDinomics API", version="1.0.0")
@@ -134,7 +136,7 @@ def _write_run_meta(run_dir: str, profile: str, run_id: str, run_info: Dict[str,
 
 
 def _default_json_names() -> List[str]:
-    # Only per-profile files; global files (taxes, benchmarks, economicglobal) live at APP_ROOT
+    # Only per-profile files; global files (taxes, benchmarks, economicglobal, rmd) live in config/
     return [
         "allocation_yearly.json",
         "withdrawal_schedule.json",
@@ -142,7 +144,6 @@ def _default_json_names() -> List[str]:
         "inflation_yearly.json",
         "person.json",
         "income.json",
-        "rmd.json",
         "economic.json",
     ]
 
@@ -208,8 +209,6 @@ def _default_scaffold(name: str) -> Dict[str, Any]:
             "qualified_div": [],
             "cap_gains": [],
         }
-    if name == "rmd.json":
-        return {"factors": []}
     if name == "economic.json":
         return {"defaults": {}, "overrides": []}
     if name == "benchmarks.json":
@@ -475,7 +474,7 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
     alloc_path = payload.get("alloc_yearly") or P("allocation_yearly.json")
     person_path = payload.get("person") or P("person.json")
     income_path = payload.get("income") or P("income.json")
-    rmd_path = payload.get("rmd") or P("rmd.json")
+    rmd_path = payload.get("rmd") or RMD_GLOBAL_PATH
     economic_path        = payload.get("economic") or P("economic.json")
     economic_global_path = ECONOMIC_GLOBAL_PATH if os.path.isfile(ECONOMIC_GLOBAL_PATH) else None
     # Always resolve assets.json from APP_ROOT (global file, never per-profile)

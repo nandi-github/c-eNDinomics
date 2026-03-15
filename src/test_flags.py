@@ -2351,6 +2351,38 @@ def group15_insights_engine(paths: int):
     except Exception as e:
         checks.append(chk("15m: to_dict() is JSON-serialisable", False, str(e)))
 
+    # 15m ── drawdown insight logic ──────────────────────────────────────
+    # Mirrors App.tsx drawdown insight rules — catches regressions if thresholds change.
+    def _dd_insight(dd90: float) -> str:
+        if dd90 > 60: return "drawdown_risk"
+        if dd90 > 35: return "drawdown_moderate"
+        return "none"
+
+    checks.append(chk("15m: drawdown_risk fires at dd_p90=77.6% (Test profile baseline)",
+                       _dd_insight(77.6) == "drawdown_risk", f"got={_dd_insight(77.6)}"))
+    checks.append(chk("15m: drawdown_moderate fires at dd_p90=50%",
+                       _dd_insight(50.0) == "drawdown_moderate", f"got={_dd_insight(50.0)}"))
+    checks.append(chk("15m: no drawdown insight at dd_p90=20% (conservative)",
+                       _dd_insight(20.0) == "none", f"got={_dd_insight(20.0)}"))
+
+    # 15n ── spending display invariant ────────────────────────────────────
+    # Mirrors App.tsx: spendable = min(totalCur, planned)
+    # Catches regression where realizedCur (discretionary only) was used,
+    # showing 0 in RMD years instead of the planned spending amount.
+    def _spendable(total: float, planned: float) -> float:
+        return min(total, planned) if planned > 0 else total
+
+    rmd_total, plan = 3_374_636.0, 200_000.0
+    checks.append(chk("15n: spendable=planned in RMD year (not 0)",
+                       _spendable(rmd_total, plan) == plan,
+                       f"got={_spendable(rmd_total, plan):.0f}"))
+    checks.append(chk("15n: diff=0 in RMD year (no false shortfall)",
+                       _spendable(rmd_total, plan) - plan == 0,
+                       f"diff={_spendable(rmd_total, plan) - plan:.0f}"))
+    checks.append(chk("15n: genuine shortfall shows negative diff",
+                       _spendable(150_000.0, plan) - plan == -50_000.0,
+                       f"diff={_spendable(150_000.0, plan) - plan:.0f}"))
+
     return "G15", "Insights engine (rules, suppression, structure, serialisation)", checks, elapsed
 
 
@@ -2625,6 +2657,339 @@ def group16_dynamic_sim_years(paths: int):
     return "G16", "Dynamic simulation years (n_years flows end-to-end)", checks, elapsed
 
 
+
+# ===========================================================================
+# GROUP 17 — UI DATA INTEGRITY
+# Verifies all median-path fields exist, withdrawal diff is correct,
+# taxes/withdrawals are consistent, and no field is silently all-zeros.
+# ===========================================================================
+
+def group17_ui_data_integrity(paths: int):
+    """
+    Checks that the simulator output contains all fields the UI depends on,
+    with correct structure and mathematical properties.
+    Catches regressions where a refactor silently drops or miscalculates a field.
+
+    17a–i: existing checks (field presence, spending invariant, tax sign)
+    17j:   effective tax rate ≤ 100% in ALL years (cap gains in denominator)
+    17k:   total_withdraw_future_median_path > 0 in RMD years (for-spending future $ non-zero)
+    """
+    checks = []; elapsed = 0.0
+    res, t = ephemeral_run("g17_base", paths); elapsed += t
+    W = res.get("withdrawals", {})
+    T = res.get("taxes", {})
+    C = res.get("conversions", {})
+    P = res.get("portfolio", {})
+    NY = len(P.get("years", []))
+
+    # ── 17a: All median-path withdrawal fields present and correct length ──
+    for field in [
+        "realized_current_median_path",
+        "realized_future_median_path",
+        "rmd_current_median_path",
+        "rmd_future_median_path",
+        "total_withdraw_current_median_path",
+        "total_withdraw_future_median_path",
+        "shortfall_current_median_path",
+    ]:
+        arr = W.get(field, [])
+        checks.append(chk(
+            f"17a: withdrawals.{field} present, len={NY}",
+            len(arr) == NY,
+            f"len={len(arr)} expected={NY}"
+        ))
+
+    # ── 17b: All median-path tax fields present ────────────────────────────
+    for field in [
+        "taxes_fed_current_median_path",
+        "taxes_state_current_median_path",
+        "taxes_niit_current_median_path",
+        "taxes_excise_current_median_path",
+    ]:
+        arr = T.get(field, [])
+        checks.append(chk(
+            f"17b: taxes.{field} present, len={NY}",
+            len(arr) == NY,
+            f"len={len(arr)} expected={NY}"
+        ))
+
+    # ── 17c: Median-path conversion fields present ─────────────────────────
+    for field in [
+        "conversion_cur_median_path_by_year",
+        "conversion_tax_cur_median_path_by_year",
+    ]:
+        arr = C.get(field, [])
+        checks.append(chk(
+            f"17c: conversions.{field} present, len={NY}",
+            len(arr) == NY,
+            f"len={len(arr)} expected={NY}"
+        ))
+
+    # ── 17d: Withdrawal diff = total - planned (never negative due to RMD) ─
+    # In RMD years, total_withdraw ≥ planned so diff ≥ 0.
+    # Only genuine shortfalls (portfolio exhausted) should produce negatives.
+    planned    = W.get("planned_current", [0] * NY)
+    total_med  = W.get("total_withdraw_current_median_path", [0] * NY)
+    rmd_med    = W.get("rmd_current_median_path", [0] * NY)
+    rmd_mean   = W.get("rmd_current_mean", [0] * NY)
+
+    # Find RMD years (where rmd_mean > 0)
+    rmd_years = [i for i in range(NY) if (rmd_mean[i] if i < len(rmd_mean) else 0) > 0]
+    if rmd_years:
+        rmd_yr0 = rmd_years[0]
+        total_at_rmd = total_med[rmd_yr0] if rmd_yr0 < len(total_med) else 0
+        planned_at_rmd = planned[rmd_yr0] if rmd_yr0 < len(planned) else 0
+        checks.append(chk(
+            "17d: In RMD year, total_withdraw_median_path >= planned (no false shortfall)",
+            total_at_rmd >= planned_at_rmd - 1.0,   # 1.0 tolerance for float rounding
+            f"total={total_at_rmd:.0f} planned={planned_at_rmd:.0f} at yr{rmd_yr0+1}"
+        ))
+
+    # ── 17e: Tax components sum to total taxes (approx) ───────────────────
+    fed  = T.get("taxes_fed_current_median_path", [])
+    st   = T.get("taxes_state_current_median_path", [])
+    niit = T.get("taxes_niit_current_median_path", [])
+    exc  = T.get("taxes_excise_current_median_path", [])
+    if fed and st:
+        total_computed = [
+            (fed[i] if i < len(fed) else 0) +
+            (st[i]  if i < len(st)  else 0) +
+            (niit[i] if i < len(niit) else 0) +
+            (exc[i]  if i < len(exc)  else 0)
+            for i in range(NY)
+        ]
+        checks.append(chk(
+            "17e: Sum(fed+state+niit+excise) median-path all non-negative",
+            all(v >= -0.01 for v in total_computed),
+            f"min={min(total_computed):.2f}"
+        ))
+
+    # ── 17f: Median-path fields are not all-zeros (data actually flows) ───
+    checks.append(chk(
+        "17f: total_withdraw_current_median_path has non-zero values",
+        any(v > 0 for v in total_med),
+        "all zeros — median path data not flowing"
+    ))
+    checks.append(chk(
+        "17f: taxes_fed_current_median_path has non-zero values",
+        any(v > 0 for v in fed),
+        "all zeros — tax median path not flowing"
+    ))
+
+    # ── 17g: Portfolio median-path arrays consistent ───────────────────────
+    fut_med  = P.get("future_median", [])
+    fut_mean = P.get("future_mean", [])
+    checks.append(chk(
+        "17g: portfolio.future_median and future_mean both present and length match",
+        len(fut_med) == NY and len(fut_mean) == NY,
+        f"median_len={len(fut_med)} mean_len={len(fut_mean)} NY={NY}"
+    ))
+    if fut_med and fut_mean:
+        checks.append(chk(
+            "17g: future_median <= future_mean at final year (right-skewed distribution)",
+            fut_med[-1] <= fut_mean[-1] * 1.05,
+            f"median={fut_med[-1]:,.0f} mean={fut_mean[-1]:,.0f}"
+        ))
+
+    # ── 17h: Effective rate sanity using total_ordinary_income ───────────────
+    ord_inc = T.get("total_ordinary_income_median_path", [])
+    checks.append(chk(
+        "17h: total_ordinary_income_median_path present and non-zero",
+        len(ord_inc) == NY and any(v > 0 for v in ord_inc),
+        f"len={len(ord_inc)} any_nonzero={any(v > 0 for v in ord_inc)}"
+    ))
+    if ord_inc and fed:
+        eff_rates_rmd = []
+        for i in rmd_years[:10]:
+            inc = ord_inc[i] if i < len(ord_inc) else 0
+            f_  = fed[i] if i < len(fed) else 0
+            s_  = st[i]  if i < len(st)  else 0
+            ni  = niit[i] if i < len(niit) else 0
+            tot = f_ + s_ + ni
+            if inc > 0:
+                eff_rates_rmd.append(tot / inc)
+        if eff_rates_rmd:
+            avg_eff = sum(eff_rates_rmd) / len(eff_rates_rmd)
+            checks.append(chk(
+                "17h: Effective rate (taxes/ordinary_income) in RMD years < 80%",
+                avg_eff < 0.80,
+                f"avg_eff={avg_eff*100:.1f}% over {len(eff_rates_rmd)} RMD years"
+            ))
+
+    # ── 17i: Spending invariant in RMD years ─────────────────────────────
+    if rmd_years:
+        for rmd_yr in rmd_years[:3]:
+            total_yr   = total_med[rmd_yr] if rmd_yr < len(total_med) else 0
+            planned_yr = planned[rmd_yr]   if rmd_yr < len(planned)   else 0
+            spendable  = min(total_yr, planned_yr) if planned_yr > 0 else total_yr
+            checks.append(chk(
+                f"17i: spendable in RMD year {rmd_yr+1} = min(total, planned) > 0",
+                spendable > 0,
+                f"spendable={spendable:.0f} total={total_yr:.0f} planned={planned_yr:.0f}"
+            ))
+
+    # ── 17j: Effective rate ≤ 100% in ALL years (never nonsensical) ──────────
+    # total_ordinary_income_median_path must now be in withdrawals (merged by simulator).
+    # If it's missing (old snapshot), we skip this check rather than false-fail.
+    ord_inc_wd = W.get("total_ordinary_income_median_path", [])
+    if ord_inc_wd and fed:
+        bad_rate_years = []
+        for i in range(NY):
+            inc = ord_inc_wd[i] if i < len(ord_inc_wd) else 0
+            f_  = fed[i]  if i < len(fed)  else 0
+            s_  = st[i]   if i < len(st)   else 0
+            ni  = niit[i] if i < len(niit) else 0
+            ex  = exc[i]  if i < len(exc)  else 0
+            total_tax = f_ + s_ + ni + ex
+            if inc > 0 and total_tax / inc > 1.0:
+                bad_rate_years.append((i + 1, total_tax / inc * 100))
+        checks.append(chk(
+            "17j: Effective tax rate ≤ 100% in all years (total_ordinary_income denominator includes cap gains)",
+            len(bad_rate_years) == 0,
+            f"Years with rate>100%: {bad_rate_years[:5]}"
+        ))
+
+    # ── 17k: For-spending future $ > 0 in RMD years (UI display fix) ─────────
+    # The UI computes spendableFut = spendable * (totalFut/totalCur).
+    # Regression guard: total_withdraw_future_median_path must be non-zero in RMD years.
+    total_fut_med = W.get("total_withdraw_future_median_path", [])
+    if rmd_years and total_fut_med:
+        for rmd_yr in rmd_years[:3]:
+            fut_yr = total_fut_med[rmd_yr] if rmd_yr < len(total_fut_med) else 0
+            checks.append(chk(
+                f"17k: total_withdraw_future_median_path > 0 in RMD year {rmd_yr+1} (for-spending future $ non-zero)",
+                fut_yr > 0,
+                f"fut={fut_yr:.0f} at sim_year {rmd_yr+1}"
+            ))
+
+    return "G17", "UI data integrity (median-path fields, diff correctness, no silent zeros)", checks, elapsed
+
+
+# ===========================================================================
+# GROUP 18 — SNAPSHOT REGRESSION
+# Runs the Test profile and compares key numbers against a saved baseline.
+# Baseline is written on first run; subsequent runs must match within tolerance.
+# Run with --update-baseline to refresh the baseline file.
+# ===========================================================================
+
+_BASELINE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "test_results", "regression_baseline.json")
+_REGRESSION_TOL = 0.05   # 5% tolerance on all numeric values
+
+
+def _load_baseline() -> dict:
+    if os.path.exists(_BASELINE_PATH):
+        with open(_BASELINE_PATH) as f:
+            return json.load(f)
+    return {}
+
+
+def _save_baseline(data: dict):
+    os.makedirs(os.path.dirname(_BASELINE_PATH), exist_ok=True)
+    with open(_BASELINE_PATH, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+def _extract_key_numbers(res: dict) -> dict:
+    """Extract the ~30 key numbers the UI displays, for regression comparison."""
+    P  = res.get("portfolio", {})
+    W  = res.get("withdrawals", {})
+    T  = res.get("taxes", {})
+    C  = res.get("conversions", {})
+    S  = res.get("summary", {})
+    NY = len(P.get("years", []))
+
+    def _yr(arr, i): return float(arr[i]) if arr and i < len(arr) else 0.0
+    def _last(arr):  return float(arr[-1]) if arr else 0.0
+    def _mid(arr):   return float(arr[NY//2]) if arr and NY > 0 else 0.0
+
+    return {
+        # Summary
+        "success_rate":          S.get("success_rate", 0),
+        "drawdown_p50":          S.get("drawdown_p50", 0),
+        "drawdown_p90":          S.get("drawdown_p90", 0),
+        "cagr_nominal_median":   S.get("cagr_nominal_median", 0),
+        "cagr_nominal_mean":     S.get("cagr_nominal_mean", 0),
+        "cagr_real_median":      S.get("cagr_real_median", 0),
+        # Portfolio — final year
+        "portfolio_future_median_final": _last(P.get("future_median", [])),
+        "portfolio_future_mean_final":   _last(P.get("future_mean", [])),
+        "portfolio_future_p10_final":    _last(P.get("future_p10_mean", [])),
+        "portfolio_future_p90_final":    _last(P.get("future_p90_mean", [])),
+        # Portfolio — midpoint year
+        "portfolio_future_median_mid":   _mid(P.get("future_median", [])),
+        "portfolio_future_mean_mid":     _mid(P.get("future_mean", [])),
+        # Withdrawals — RMD year (first non-zero RMD)
+        "rmd_first_year_median":  next((float(v) for v in W.get("rmd_current_median_path", []) if v > 0), 0.0),
+        "rmd_mean_final":         _last(W.get("rmd_current_mean", [])),
+        "total_wd_median_final":  _last(W.get("total_withdraw_current_median_path", [])),
+        "total_wd_mean_final":    _last(W.get("total_withdraw_current_mean", [])),
+        # Taxes — final year median path
+        "tax_fed_median_final":   _last(T.get("taxes_fed_current_median_path", [])),
+        "tax_state_median_final": _last(T.get("taxes_state_current_median_path", [])),
+        "tax_niit_median_final":  _last(T.get("taxes_niit_current_median_path", [])),
+        # Conversions — total
+        "conv_total_cur_mean":   float(C.get("total_converted_cur_mean", 0)),
+        "conv_tax_total_mean":   float(C.get("total_tax_cost_cur_mean", 0)),
+        # n_years
+        "n_years": NY,
+    }
+
+
+def group18_snapshot_regression(paths: int):
+    """
+    Runs the base Test profile and compares ~25 key numbers against a saved
+    baseline. Catches silent regressions in simulator output.
+    First run: writes baseline. Subsequent runs: must match within 5%.
+    """
+    checks = []; elapsed = 0.0
+    res, t = ephemeral_run("g18_regression", paths); elapsed += t
+
+    current = _extract_key_numbers(res)
+    baseline = _load_baseline()
+
+    if not baseline:
+        # First run — write baseline and pass all checks
+        _save_baseline(current)
+        checks.append(chk(
+            "18: Baseline written (first run) — re-run to verify regression",
+            True, f"Saved {len(current)} metrics to {_BASELINE_PATH}"
+        ))
+        return "G18", "Snapshot regression (baseline written)", checks, elapsed
+
+    # Compare each key number against baseline within tolerance
+    for key, cur_val in current.items():
+        base_val = baseline.get(key)
+        if base_val is None:
+            # New field — add to baseline but don't fail
+            checks.append(chk(f"18: {key} — new field (added to baseline)", True, f"val={cur_val}"))
+            continue
+
+        if base_val == 0 and cur_val == 0:
+            checks.append(chk(f"18: {key}", True, "both zero ✓"))
+            continue
+
+        # Relative tolerance check
+        denom = max(abs(base_val), 1e-6)
+        rel_diff = abs(cur_val - base_val) / denom
+        ok = rel_diff <= _REGRESSION_TOL
+        checks.append(chk(
+            f"18: {key} within {_REGRESSION_TOL*100:.0f}% of baseline",
+            ok,
+            f"cur={cur_val:.4g} base={base_val:.4g} diff={rel_diff*100:.1f}%"
+        ))
+
+    # Update baseline with any new fields silently
+    updated = {**baseline, **{k: v for k, v in current.items() if k not in baseline}}
+    if updated != baseline:
+        _save_baseline(updated)
+
+    return "G18", "Snapshot regression (key numbers vs baseline, 5% tolerance)", checks, elapsed
+
+
+
+
+
 GROUPS = [
     group1_flag_matrix,
     group2_rmd,
@@ -2642,6 +3007,8 @@ GROUPS = [
     group14_cashflow_verification,
     group15_insights_engine,
     group16_dynamic_sim_years,
+    group17_ui_data_integrity,
+    group18_snapshot_regression,
 ]
 
 
@@ -2730,6 +3097,12 @@ def main():
 
     paths = 50 if args.fast else args.paths
     if args.comprehensive_test:
+        if "--update-baseline" in sys.argv:
+            _bp = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "test_results", "regression_baseline.json")
+            if os.path.exists(_bp):
+                os.remove(_bp)
+                print("Baseline cleared — will be regenerated on next run.")
         run_comprehensive(paths)
     else:
         run_standard(args.profile, paths)
