@@ -14,3 +14,6 @@ src/log
 src/txt
 src/temp/
 src/profiles/__ftest__*/
+# Playwright
+src/ui/playwright-report/
+src/ui/test-results/
