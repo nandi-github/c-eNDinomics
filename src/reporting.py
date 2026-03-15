@@ -92,8 +92,8 @@ def _plot_aggregate_band(
     Plot one aggregate:
       - X: years
       - mean & median lines
-      - green shaded band P10–P90
-      - pink lines at P10 and P90
+      - green shaded band Floor (stress)–Ceiling (upside)
+      - axis formatted as $M or $B (never engineering notation like 1e8)
     """
     try:
         y = np.asarray(years, dtype=float)
@@ -109,30 +109,46 @@ def _plot_aggregate_band(
             )
             return
 
+        # Choose scale based on max value: $B if ≥ 1B, else $M
+        max_val = max(hi.max() if len(hi) else 0,
+                      m.max()  if len(m)  else 0,
+                      med.max() if len(med) else 0)
+        if max_val >= 1_000_000_000:
+            scale = 1_000_000_000
+            unit_label = "$B"
+        else:
+            scale = 1_000_000
+            unit_label = "$M"
+
         fig, ax = plt.subplots(figsize=(9, 4.5))
 
-        # Shaded band P10–P90
+        # Shaded band: Floor (stress) to Ceiling (upside)
         ax.fill_between(
             y,
-            lo,
-            hi,
+            lo / scale,
+            hi / scale,
             color="green",
             alpha=0.15,
-            label="P10–P90 band",
+            label="Floor–Ceiling band",
         )
-        # Pink lines at P10 and P90
-        ax.plot(y, lo, color="pink", alpha=0.6, linewidth=1, label="P10")
-        ax.plot(y, hi, color="pink", alpha=0.6, linewidth=1, label="P90")
-
-        # Mean & median lines
-        ax.plot(y, m, color="blue", linewidth=2, label="Mean")
-        ax.plot(y, med, color="orange", linewidth=2, label="Median")
+        # Boundary lines — matching table terminology
+        ax.plot(y, lo  / scale, color="pink",   alpha=0.6, linewidth=1, label="Floor (stress)")
+        ax.plot(y, hi  / scale, color="pink",   alpha=0.6, linewidth=1, label="Ceiling (upside)")
+        ax.plot(y, m   / scale, color="blue",   linewidth=2,            label="Mean")
+        ax.plot(y, med / scale, color="orange", linewidth=2,            label="Median (typical)")
 
         ax.set_title(title)
         ax.set_xlabel("Year")
-        ax.set_ylabel(ylabel)
+        ax.set_ylabel(f"{ylabel} ({unit_label})")
         ax.grid(True, alpha=0.25)
         ax.legend(loc="best", fontsize=9)
+
+        # Format y-axis ticks as e.g. "$1.2" (unit is in label)
+        import matplotlib.ticker as mticker
+        ax.yaxis.set_major_formatter(
+            mticker.FuncFormatter(lambda x, _: f"${x:,.1f}")
+        )
+
         fig.tight_layout()
         fig.savefig(out_path)
         plt.close(fig)

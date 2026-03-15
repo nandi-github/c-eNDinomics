@@ -32,6 +32,7 @@ type RunFlags = {
   ignore_withdrawals?: boolean;
   ignore_rmds?: boolean;
   ignore_conversions?: boolean;
+  ignore_taxes?: boolean;
 };
 
 type RunInfo = {
@@ -73,12 +74,12 @@ type SnapshotWithdrawals = {
   taxes_state_current_mean?: number[];
   taxes_niit_current_mean?: number[];
   taxes_excise_current_mean?: number[];
-  // Median-path tax arrays — merged from simulator taxes dict into withdrawals
+  // Median-path tax arrays merged from simulator taxes dict
   taxes_fed_current_median_path?: number[];
   taxes_state_current_median_path?: number[];
   taxes_niit_current_median_path?: number[];
   taxes_excise_current_median_path?: number[];
-  // Full taxable income denominator: W2 + RMD + conversions + cap gains + dividends
+  // Full taxable income denominator for effective rate
   total_ordinary_income_median_path?: number[];
   tax_shortfall_current_mean?: number[];
   realized_gains_current_mean?: number[];
@@ -266,6 +267,7 @@ const App: React.FC = () => {
   const [runIgnoreWithdrawals, setRunIgnoreWithdrawals] = useState(false);
   const [runIgnoreRmds, setRunIgnoreRmds] = useState(false);
   const [runIgnoreConversions, setRunIgnoreConversions] = useState(false);
+  const [runIgnoreTaxes,       setRunIgnoreTaxes]       = useState(false);
 
   const [runs, setRuns] = useState<string[]>([]);
   const [selectedRun, setSelectedRun] = useState<string>("");
@@ -493,6 +495,7 @@ const App: React.FC = () => {
         ignore_withdrawals: runIgnoreWithdrawals,
         ignore_rmds: runIgnoreRmds,
         ignore_conversions: runIgnoreConversions,
+        ignore_taxes:       runIgnoreTaxes,
       });
       if (!res.ok) throw new Error("Run failed");
       setEndingBalances(res.ending_balances ?? null);
@@ -947,6 +950,14 @@ const App: React.FC = () => {
               />
               Ignore conversions
             </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={runIgnoreTaxes}
+                onChange={(e) => setRunIgnoreTaxes(e.target.checked)}
+              />
+              Ignore taxes
+            </label>
           </div>
 
           <div className="run-actions">
@@ -1044,6 +1055,10 @@ const App: React.FC = () => {
                   <div>
                     <strong>Ignore RMDs:</strong>{" "}
                     {snapshot.run_info.flags?.ignore_rmds ? "Yes" : "No"}
+                  </div>
+                  <div>
+                    <strong>Ignore taxes:</strong>{" "}
+                    {snapshot.run_info.flags?.ignore_taxes ? "Yes" : "No"}
                   </div>
                 </div>
               </section>
@@ -1556,22 +1571,19 @@ const App: React.FC = () => {
                       const totalCur = (W?.total_withdraw_current_median_path?.[i] ?? W?.total_withdraw_current_mean?.[i] ?? rmdCur);
                       const totalFut = (W?.total_withdraw_future_median_path?.[i]  ?? W?.total_withdraw_future_mean?.[i]  ?? rmdFut);
 
-                      // Spendable (current $) = portion of total outflow that goes toward planned spending.
-                      // In normal years:  spendable = min(totalCur, planned)  — meets plan or shortfall
-                      // In RMD years where RMD > planned: spendable = planned (surplus is reinvested/cash)
-                      // In shortfall years: spendable = totalCur < planned
+                      // Spendable (current $): min(totalCur, planned) in normal years;
+                      // in RMD years where RMD > planned, spendable = planned (surplus reinvested).
                       const spendable = Math.min(totalCur, planned > 0 ? planned : totalCur);
 
-                      // Spendable (future $): scale current spendable by the same inflation factor
-                      // implicit in the total arrays, so it always shows a non-zero value in RMD years.
-                      // deflatorRatio = totalFut / totalCur — the year's cumulative inflation multiplier.
+                      // Spendable (future $): scale by implicit inflation factor from total arrays.
+                      // deflatorRatio = totalFut / totalCur — never produces zero in RMD years.
                       const deflatorRatio = totalCur > 0 ? totalFut / totalCur : 1.0;
                       const spendableFut  = spendable * deflatorRatio;
 
-                      // Diff: negative only on genuine portfolio shortfall (could not meet planned spending)
+                      // Diff: negative only on genuine portfolio shortfall
                       const diff = spendable - planned;
 
-                      // realizedCur = spendable for display; realizedFut = inflation-adjusted spendable
+                      // realizedCur/Fut = spendable for display
                       const realizedCur = spendable;
                       const realizedFut = spendableFut;
                       // Reinvested = surplus RMD actually added to brokerage (0 if cash_out policy)
@@ -1656,13 +1668,15 @@ const App: React.FC = () => {
                       const wdE  = W?.realized_current_median_path?.[i] ?? W?.realized_current_mean?.[i] ?? 0;
                       const twE  = W?.total_withdraw_current_median_path?.[i] ?? W?.total_withdraw_current_mean?.[i] ?? (wdE + rmdE);
                       const cvE  = C?.conversion_cur_median_path_by_year?.[i] ?? C?.conversion_cur_mean_by_year?.[i] ?? 0;
-                      // Denominator = total taxable income on the median path:
-                      //   W2 + RMD + conversions + qualified dividends + capital gains (including rebalancing).
-                      // simulator_new.py now merges total_ordinary_income_median_path into withdrawals,
-                      // so W is always the right place to look. Falls back to (twE + cvE) for old snapshots.
+                      // Denominator = total taxable income on the median path.
+                      // simulator_new.py merges total_ordinary_income_median_path into
+                      // snapshot.withdrawals (includes W2 + RMD + conversions + cap gains + divs).
+                      // Old snapshots won't have it → fall back to (twE + cvE).
+                      // Guard: never display > 100% — old snapshots or edge cases show dash.
                       const totalOrdIncome = W?.total_ordinary_income_median_path?.[i] ?? 0;
-                      const denom = totalOrdIncome > 0 ? totalOrdIncome : (twE + cvE > 0 ? twE + cvE : null);
-                      // Guard: never show rate > 100% — if denominator still too small, show dash
+                      const denom = totalOrdIncome > 0
+                        ? totalOrdIncome
+                        : (twE + cvE > 0 ? twE + cvE : null);
                       const effRateRaw = (denom !== null && denom > 0) ? total / denom : null;
                       const effRate = (effRateRaw !== null && effRateRaw <= 1.0) ? effRateRaw : null;
 

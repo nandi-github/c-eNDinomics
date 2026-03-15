@@ -8,6 +8,8 @@ from rmd import load_rmd_table, uniform_factor
 
 logger = logging.getLogger(__name__)
 
+# Default horizon for standalone use; all call sites from api.py pass years explicitly.
+# Do not use this constant in new code — pass n_years as a parameter instead.
 YEARS = 30
 
 

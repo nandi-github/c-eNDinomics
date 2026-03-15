@@ -20,7 +20,8 @@ from roth_conversion_core import (
 logger = logging.getLogger(__name__)
 
 
-YEARS = 30
+# NOTE: YEARS = 30 removed — all call sites pass n_years explicitly.
+# The simulation horizon is driven by target_age - current_age (api.py).
 
 
 #def pct_change_paths(series_2d: np.ndarray) -> np.ndarray:
@@ -97,6 +98,7 @@ def run_accounts_new(
     conversion_per_year_nom: Optional[float] = None,  # NEW
     rmds_enabled: bool = True,
     conversions_enabled: bool = True,
+    ignore_taxes: bool = False,     # When True: skip all tax computation, zero all tax arrays
     shocks_events: Optional[list] = None,
     shocks_mode: str = "augment",
     econ_policy: Optional[Dict[str, Any]] = None,
@@ -483,9 +485,10 @@ def run_accounts_new(
     taxes_state_cur_paths = np.zeros((paths, n_years), dtype=float)
     taxes_niit_cur_paths = np.zeros((paths, n_years), dtype=float)
     taxes_excise_cur_paths = np.zeros((paths, n_years), dtype=float)
-    
+
     if (
-        tax_cfg is not None
+        not ignore_taxes
+        and tax_cfg is not None
         and ordinary_income_cur_paths is not None
         and qual_div_cur_paths is not None
         and cap_gains_cur_paths is not None
@@ -856,21 +859,12 @@ def run_accounts_new(
         """Extract the median path row from a (paths, n_years) array."""
         return arr2d[_median_path_idx, :]
 
-    # Store median-path tax arrays — merged into res["taxes"] AND withdrawals at assembly time.
-    # total_ordinary_income_median_path = all income sources the IRS taxes on the median path:
-    #   ordinary_income_cur_paths already contains W2 + RMD + conversions (mutated in-place above)
-    #   + qual_div_cur_paths (qualified dividends from portfolio rebalancing / distributions)
-    #   + cap_gains_cur_paths (rebalancing LTCG + external cap gains)
-    # This full denominator prevents effective-rate > 100% when the portfolio is large and
-    # rebalancing generates capital gains that dwarf the withdrawal/conversion amounts.
+    # Store median-path tax arrays — merged into res["taxes"] at assembly time below
+    # Total ordinary income = everything taxed (W2 + RMD + conversions + cap gains + dividends)
+    # This is the correct denominator for effective tax rate
     _ord_income_med = None
     if ordinary_income_cur_paths is not None:
-        _all_taxable_cur = ordinary_income_cur_paths.copy()
-        if qual_div_cur_paths is not None:
-            _all_taxable_cur = _all_taxable_cur + qual_div_cur_paths
-        if cap_gains_cur_paths is not None:
-            _all_taxable_cur = _all_taxable_cur + cap_gains_cur_paths
-        _ord_income_med = _med_path(_all_taxable_cur).tolist()
+        _ord_income_med = _med_path(ordinary_income_cur_paths).tolist()
 
     _taxes_median_path = {
         "taxes_fed_current_median_path":       _med_path(taxes_fed_cur_paths).tolist(),
@@ -879,8 +873,10 @@ def run_accounts_new(
         "taxes_excise_current_median_path":    _med_path(taxes_excise_cur_paths).tolist(),
         "total_ordinary_income_median_path":   _ord_income_med or [0.0] * n_years,
     }
-    # Also publish median-path tax fields into withdrawals so the UI can read them
-    # from snapshot.withdrawals (which is where App.tsx looks for all per-year arrays).
+    # Merge into withdrawals so snapshot.withdrawals has these fields.
+    # App.tsx reads all per-year arrays from W = snapshot.withdrawals.
+    # Without this, the effective rate denominator falls back to (twE+cvE)
+    # which is far too small → rate > 100% → guard shows dash.
     withdrawals.update(_taxes_median_path)
 
     # =========================================================================

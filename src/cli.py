@@ -25,8 +25,6 @@ from income_core import build_income_streams
 from snapshot import save_raw_snapshot_accounts
 from reporting import report_and_plot_accounts
 
-YEARS = 30
-
 
 def _read_json(path: Optional[str]) -> Dict[str, Any]:
     if not path or not os.path.isfile(path):
@@ -54,6 +52,7 @@ def main() -> int:
     ap.add_argument("--alloc-yearly", help="Path to allocation_yearly.json")
     ap.add_argument("--person",       help="Path to person.json")
     ap.add_argument("--income",       help="Path to income.json")
+    ap.add_argument("--rmd",          help="Path to rmd.json")
     ap.add_argument("--economic",     help="Path to economic.json")
     ap.add_argument("--assets",       help="Optional path to assets.json")
 
@@ -79,10 +78,6 @@ def main() -> int:
 
     args = ap.parse_args()
 
-    # RMD table is global (IRS law) — always read from config/, never per-profile
-    _cli_root = os.path.abspath(os.path.dirname(__file__))
-    rmd_path = os.path.join(_cli_root, "config", "rmd.json")
-
     # Resolve all paths via profile if provided
     if args.profile:
         base = os.path.abspath(os.path.join(os.getcwd(), "profiles", args.profile))
@@ -97,6 +92,7 @@ def main() -> int:
         args.alloc_yearly = args.alloc_yearly or P("allocation_yearly.json")
         args.person       = args.person       or P("person.json")
         args.income       = args.income       or P("income.json")
+        args.rmd          = args.rmd          or P("rmd.json")
         args.economic     = args.economic     or P("economic.json")
         if not args.out:
             from datetime import datetime
@@ -115,6 +111,7 @@ def main() -> int:
         ("--alloc-yearly", args.alloc_yearly),
         ("--person",     args.person),
         ("--income",     args.income),
+        ("--rmd",        args.rmd),
         ("--economic",   args.economic),
         ("--out",        args.out),
     ]:
@@ -157,7 +154,18 @@ def main() -> int:
     # Load configs
     tax_cfg     = load_tax_unified(args.tax, state=args.state, filing=args.filing)
     sched_arr, sched_base = load_sched(withdraw_path)
-    infl_yearly = load_inflation_yearly(args.inflation, years_count=YEARS)
+
+    person_cfg  = load_person(args.person)
+    income_cfg  = load_income(args.income)
+    econ_policy = load_economic_policy(economic_path)
+
+    # Derive simulation horizon from person.json (mirrors api.py logic)
+    _current_age = int((person_cfg or {}).get("current_age", 55))
+    _target_age  = int((person_cfg or {}).get("target_age",  95))
+    n_years      = max(10, min(60, _target_age - _current_age))
+    print(f"[cli] sim years: {n_years} (age {_current_age} → {_target_age})")
+
+    infl_yearly = load_inflation_yearly(args.inflation, years_count=n_years)
 
     shocks_events, shocks_mode_file, _ = (
         load_shocks(shocks_path) if shocks_path and os.path.isfile(shocks_path)
@@ -172,21 +180,17 @@ def main() -> int:
         print(f"error: allocation validation failed: {e}", file=sys.stderr)
         return 2
 
-    person_cfg  = load_person(args.person)
-    income_cfg  = load_income(args.income)
-    econ_policy = load_economic_policy(economic_path)
-
     # Build income path arrays
     (w2_cur, rental_cur, interest_cur, ordinary_other_cur,
-     qual_div_cur, cap_gains_cur) = build_income_streams(income_cfg, years=YEARS)
+     qual_div_cur, cap_gains_cur) = build_income_streams(income_cfg, years=n_years)
 
     paths = int(args.paths)
-    ordinary_income_cur_paths = np.zeros((paths, YEARS), dtype=float)
-    qual_div_cur_paths        = np.zeros((paths, YEARS), dtype=float)
-    cap_gains_cur_paths       = np.zeros((paths, YEARS), dtype=float)
-    ytd_income_nom_paths      = np.zeros((paths, YEARS), dtype=float)
+    ordinary_income_cur_paths = np.zeros((paths, n_years), dtype=float)
+    qual_div_cur_paths        = np.zeros((paths, n_years), dtype=float)
+    cap_gains_cur_paths       = np.zeros((paths, n_years), dtype=float)
+    ytd_income_nom_paths      = np.zeros((paths, n_years), dtype=float)
 
-    for y in range(YEARS):
+    for y in range(n_years):
         ordinary_income_cur_paths[:, y] = (
             w2_cur[y] + rental_cur[y] + interest_cur[y] + ordinary_other_cur[y]
         )
@@ -230,7 +234,7 @@ def main() -> int:
         _expand(order_good, acct_names,
                 (starting_age + y) >= tira_age_gate,
                 (starting_age + y) >= tira_age_gate)
-        for y in range(YEARS)
+        for y in range(n_years)
     ]
 
     # Execute simulation
@@ -250,7 +254,7 @@ def main() -> int:
         cap_gains_cur_paths=cap_gains_cur_paths,
         ytd_income_nom_paths=ytd_income_nom_paths,
         person_cfg=person_cfg,
-        rmd_table_path=rmd_path,
+        rmd_table_path=args.rmd,
         conversion_per_year_nom=None,
         rmds_enabled=not args.ignore_rmds,
         conversions_enabled=not args.ignore_conversions,
@@ -270,7 +274,7 @@ def main() -> int:
         "person":   args.person,
         "income":   args.income,
         "economic": economic_path,
-        "rmd":      rmd_path,
+        "rmd":      args.rmd,
         "assets":   args.assets or "",
     }
 

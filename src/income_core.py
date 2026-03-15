@@ -8,6 +8,7 @@ from typing import Dict, Tuple
 import numpy as np
 
 
+# Default horizon; callers always pass years explicitly. Do not use in new code.
 YEARS = 30
 
 

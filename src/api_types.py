@@ -13,6 +13,8 @@ import numpy as np
 # -----------------------------
 # Global configuration
 # -----------------------------
+# YEARS is a legacy default. All simulation code now receives n_years as a parameter.
+# zeros_years() and zeros_paths_years() below are unused — kept for reference only.
 YEARS: int = 30
 DEFAULT_STEPS_PER_YEAR: int = 4
 DEFAULT_PATHS: int = 2000

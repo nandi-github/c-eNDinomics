@@ -50,7 +50,6 @@ DEFAULT_PROFILE = "default"
 # Files that live at APP_ROOT, not per-profile
 ECONOMIC_GLOBAL_PATH = os.path.join(APP_ROOT, "economicglobal.json")
 TAX_GLOBAL_PATH      = os.path.join(APP_ROOT, "config", "taxes_states_mfj_single.json")
-RMD_GLOBAL_PATH      = os.path.join(APP_ROOT, "config", "rmd.json")
 BENCHMARKS_GLOBAL_PATH = os.path.join(APP_ROOT, "benchmarks.json")
 SYSTEM_SHOCKS_PATH   = os.path.join(APP_ROOT, "system_shocks.json")
 SYSTEM_SHOCK_PRESETS = {"average", "below_average", "bad", "worst"}
@@ -61,7 +60,6 @@ _GLOBAL_ONLY_NAMES = {
     "taxes_states_mfj_single.json",
     "benchmarks.json",
     "assets.json",
-    "rmd.json",          # IRS law — global only, not user-editable
 }
 
 app = FastAPI(title="eNDinomics API", version="1.0.0")
@@ -136,7 +134,7 @@ def _write_run_meta(run_dir: str, profile: str, run_id: str, run_info: Dict[str,
 
 
 def _default_json_names() -> List[str]:
-    # Only per-profile files; global files (taxes, benchmarks, economicglobal, rmd) live in config/
+    # Only per-profile files; global files (taxes, benchmarks, economicglobal) live at APP_ROOT
     return [
         "allocation_yearly.json",
         "withdrawal_schedule.json",
@@ -144,6 +142,7 @@ def _default_json_names() -> List[str]:
         "inflation_yearly.json",
         "person.json",
         "income.json",
+        "rmd.json",
         "economic.json",
     ]
 
@@ -209,6 +208,8 @@ def _default_scaffold(name: str) -> Dict[str, Any]:
             "qualified_div": [],
             "cap_gains": [],
         }
+    if name == "rmd.json":
+        return {"factors": []}
     if name == "economic.json":
         return {"defaults": {}, "overrides": []}
     if name == "benchmarks.json":
@@ -474,7 +475,7 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
     alloc_path = payload.get("alloc_yearly") or P("allocation_yearly.json")
     person_path = payload.get("person") or P("person.json")
     income_path = payload.get("income") or P("income.json")
-    rmd_path = payload.get("rmd") or RMD_GLOBAL_PATH
+    rmd_path = payload.get("rmd") or P("rmd.json")
     economic_path        = payload.get("economic") or P("economic.json")
     economic_global_path = ECONOMIC_GLOBAL_PATH if os.path.isfile(ECONOMIC_GLOBAL_PATH) else None
     # Always resolve assets.json from APP_ROOT (global file, never per-profile)
@@ -489,8 +490,9 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
     shocks_mode_req = payload.get("shocks_mode")
 
     ignore_withdrawals = bool(payload.get("ignore_withdrawals", False))
-    ignore_rmds = bool(payload.get("ignore_rmds", False))
+    ignore_rmds        = bool(payload.get("ignore_rmds",        False))
     ignore_conversions = bool(payload.get("ignore_conversions", False))
+    ignore_taxes       = bool(payload.get("ignore_taxes",       False))
 
     rebalance_threshold = float(payload.get("rebalance_threshold", 0.10))
     rebalance_brokerage_enabled = bool(payload.get("rebalance_brokerage_enabled", False))
@@ -640,12 +642,13 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
 
     # 7) Run simulation
     ignore_withdrawals_flag = bool(ignore_withdrawals)
-    ignore_rmds_flag = bool(ignore_rmds)
+    ignore_rmds_flag        = bool(ignore_rmds)
     ignore_conversions_flag = bool(ignore_conversions)
+    ignore_taxes_flag       = bool(ignore_taxes)
     shocks_mode_raw = (shocks_mode or "").lower()
 
     rmds_enabled = not ignore_rmds_flag
-    
+
     # DEBUG: see what the server thinks the flags are
     print(
         "[DEBUG api] standard_test inputs:",
@@ -660,6 +663,8 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
         ignore_rmds,
         "ignore_conversions:",
         ignore_conversions,
+        "ignore_taxes:",
+        ignore_taxes,
     )
 
     shocks_mode_req_raw = (shocks_mode_req or "").lower()
@@ -873,6 +878,7 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
             conversion_per_year_nom=None,
             rmds_enabled=rmds_enabled,
             conversions_enabled=not ignore_conversions_flag,
+            ignore_taxes=ignore_taxes_flag,
             shocks_events=shocks_events,
             shocks_mode=str(internal_shocks_mode),
             econ_policy=econ_policy,
@@ -925,8 +931,9 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
         "shocks_mode": raw_shocks_mode,
         "flags": {
             "ignore_withdrawals": bool(ignore_withdrawals),
-            "ignore_rmds": bool(ignore_rmds),
+            "ignore_rmds":        bool(ignore_rmds),
             "ignore_conversions": bool(ignore_conversions),
+            "ignore_taxes":       bool(ignore_taxes),
         },
     }
 

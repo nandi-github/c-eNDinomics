@@ -6,6 +6,8 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+# Default horizon for standalone use; all call sites pass years via array shape (_n_years).
+# Do not use this constant in new code — derive n_years from array shape instead.
 YEARS = 30
 
 

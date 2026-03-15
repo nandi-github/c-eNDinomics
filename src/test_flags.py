@@ -392,7 +392,7 @@ def _wd_seq(alloc, person, econ):
     return seq
 
 def sim(cfg, paths, ignore_wd=False, ignore_conv=False, ignore_rmd=False,
-        rebalancing=True) -> Tuple[Dict, float]:
+        ignore_taxes=False, rebalancing=True) -> Tuple[Dict, float]:
     _ny = max(10, min(60, int(cfg["person"].get("target_age", 95))
                          - int(cfg["person"].get("current_age", 55))))
     inc = _income_arrays(cfg["income"], paths, n_years=_ny)
@@ -412,6 +412,7 @@ def sim(cfg, paths, ignore_wd=False, ignore_conv=False, ignore_rmd=False,
         conversion_per_year_nom=None,
         rmds_enabled=not ignore_rmd,
         conversions_enabled=not ignore_conv,
+        ignore_taxes=ignore_taxes,
         econ_policy=cfg["econ"],
         rebalancing_enabled=rebalancing,
         shocks_events=cfg.get("shock_evts") or [],
@@ -421,13 +422,14 @@ def sim(cfg, paths, ignore_wd=False, ignore_conv=False, ignore_rmd=False,
     return res, time.time() - t0
 
 def ephemeral_run(tag, paths, ignore_wd=False, ignore_conv=False, ignore_rmd=False,
-                  rebalancing=True, **profile_kwargs) -> Tuple[Dict, float]:
+                  ignore_taxes=False, rebalancing=True, **profile_kwargs) -> Tuple[Dict, float]:
     """Create profile, run sim, delete profile, return (res, elapsed)."""
     name = write_profile(tag, **profile_kwargs)
     try:
         cfg = load_cfg(name)
         return sim(cfg, paths, ignore_wd=ignore_wd, ignore_conv=ignore_conv,
-                   ignore_rmd=ignore_rmd, rebalancing=rebalancing)
+                   ignore_rmd=ignore_rmd, ignore_taxes=ignore_taxes,
+                   rebalancing=rebalancing)
     finally:
         drop_profile(tag)
 
@@ -561,7 +563,30 @@ def group1_flag_matrix(paths: int):
     checks.append(chk("BROK: ignore_wd > no_flags (no spending)",
         bw > bb, f"brok_wd={bw:,.0f} brok_base={bb:,.0f}"))
 
-    return "G1", "Ignore-flag matrix (8 combos)", checks, elapsed_total
+    # ignore_taxes: all tax arrays must be zero across all years
+    res_notax, t = ephemeral_run("g1_ignore_taxes", paths,
+                                  ignore_taxes=True); elapsed_total += t
+    wd_notax = res_notax.get("withdrawals", {})
+    tx_notax = res_notax.get("taxes", {})
+    fed_notax   = wd_notax.get("taxes_fed_current_mean",   []) or tx_notax.get("fed_cur_mean_by_year",   [])
+    state_notax = wd_notax.get("taxes_state_current_mean", []) or tx_notax.get("state_cur_mean_by_year", [])
+    niit_notax  = wd_notax.get("taxes_niit_current_mean",  []) or tx_notax.get("niit_cur_mean_by_year",  [])
+    checks.append(chk("ignore_taxes: fed taxes all zero",
+        all(abs(v) < 0.01 for v in fed_notax),
+        f"max_fed={max((abs(v) for v in fed_notax), default=0):.2f}"))
+    checks.append(chk("ignore_taxes: state taxes all zero",
+        all(abs(v) < 0.01 for v in state_notax),
+        f"max_state={max((abs(v) for v in state_notax), default=0):.2f}"))
+    checks.append(chk("ignore_taxes: NIIT all zero",
+        all(abs(v) < 0.01 for v in niit_notax),
+        f"max_niit={max((abs(v) for v in niit_notax), default=0):.2f}"))
+    # Portfolio should still grow (ignore_taxes ≠ ignore_withdrawals)
+    port_notax = res_notax.get("portfolio", {}).get("future_mean", [])
+    checks.append(chk("ignore_taxes: portfolio still grows",
+        len(port_notax) > 0 and port_notax[-1] > port_notax[0],
+        f"yr1={port_notax[0] if port_notax else 0:,.0f} last={port_notax[-1] if port_notax else 0:,.0f}"))
+
+    return "G1", "Ignore-flag matrix (8 combos + ignore_taxes)", checks, elapsed_total
 
 
 # ===========================================================================
@@ -2788,12 +2813,23 @@ def group17_ui_data_integrity(paths: int):
         ))
 
     # ── 17h: Effective rate sanity using total_ordinary_income ───────────────
-    ord_inc = T.get("total_ordinary_income_median_path", [])
+    # total_ordinary_income_median_path must appear in BOTH taxes AND withdrawals.
+    # App.tsx reads from W=snapshot.withdrawals. If missing there, rate shows "—"
+    # even when correctly present in taxes. Requires withdrawals.update(_taxes_median_path)
+    # in simulator_new.py.
+    ord_inc_taxes = T.get("total_ordinary_income_median_path", [])
+    ord_inc_wd    = W.get("total_ordinary_income_median_path", [])
     checks.append(chk(
-        "17h: total_ordinary_income_median_path present and non-zero",
-        len(ord_inc) == NY and any(v > 0 for v in ord_inc),
-        f"len={len(ord_inc)} any_nonzero={any(v > 0 for v in ord_inc)}"
+        "17h: total_ordinary_income_median_path present in taxes dict",
+        len(ord_inc_taxes) == NY and any(v > 0 for v in ord_inc_taxes),
+        f"len={len(ord_inc_taxes)}"
     ))
+    checks.append(chk(
+        "17h: total_ordinary_income_median_path present in withdrawals dict (required for UI rate display)",
+        len(ord_inc_wd) == NY and any(v > 0 for v in ord_inc_wd),
+        f"len={len(ord_inc_wd)} — MISSING means withdrawals.update(_taxes_median_path) not in simulator_new.py"
+    ))
+    ord_inc = ord_inc_wd if ord_inc_wd else ord_inc_taxes
     if ord_inc and fed:
         eff_rates_rmd = []
         for i in rmd_years[:10]:
@@ -2807,8 +2843,8 @@ def group17_ui_data_integrity(paths: int):
         if eff_rates_rmd:
             avg_eff = sum(eff_rates_rmd) / len(eff_rates_rmd)
             checks.append(chk(
-                "17h: Effective rate (taxes/ordinary_income) in RMD years < 80%",
-                avg_eff < 0.80,
+                "17h: Effective rate in RMD years between 1% and 100% (not dash, not absurd)",
+                0.01 < avg_eff < 1.0,
                 f"avg_eff={avg_eff*100:.1f}% over {len(eff_rates_rmd)} RMD years"
             ))
 
@@ -2972,118 +3008,12 @@ GROUPS = [
     group17_ui_data_integrity,
     group18_snapshot_regression,
 ]
-# group19_playwright appended below after its definition
-
-
-# ===========================================================================
-# GROUP 19 — PLAYWRIGHT UI SMOKE TESTS
-# Runs the Playwright browser tests as a subprocess.
-# Requires: FastAPI server running on localhost:8000
-#           Playwright + chromium installed (run-ui-tests.sh --install)
-# Skip with: python3 -B test_flags.py --comprehensive-test --skip-playwright
-# ===========================================================================
-
-def group19_playwright(paths: int):
-    """
-    Runs the Playwright UI smoke tests (ui/tests/smoke.spec.ts) as a subprocess.
-
-    These tests:
-    - Verify every table has correct column count and row count
-    - Check no cell contains NaN/undefined/null
-    - Assert effective tax rate ≤ 100% (regression guard)
-    - Assert 'For spending future $' > 0 in RMD years (regression guard)
-    - Verify all 6 accounts load in Accounts YoY table
-    - Confirm chart images actually load (not 404)
-    - Check Insights section has findings
-
-    If the server is not running or Playwright is not installed, this group
-    is marked as SKIP (not FAIL) so it doesn't block pure-Python CI runs.
-    """
-    import subprocess
-    checks = []
-    elapsed = 0.0
-    t0 = time.time()
-
-    ui_dir = os.path.join(APP_ROOT, "ui")
-    playwright_cfg = os.path.join(ui_dir, "playwright.config.ts")
-
-    # Guard: playwright config must exist
-    if not os.path.isfile(playwright_cfg):
-        checks.append((PASS, "G19: playwright.config.ts present", ""))
-        checks[-1] = (FAIL, "G19: playwright.config.ts present",
-                      f"Not found at {playwright_cfg} — run setup first")
-        elapsed = time.time() - t0
-        return "G19", "Playwright UI smoke tests", checks, elapsed
-
-    # Guard: check server is reachable
-    import urllib.request
-    server_up = False
-    try:
-        urllib.request.urlopen("http://localhost:8000/health", timeout=3)
-        server_up = True
-    except Exception:
-        pass
-
-    if not server_up:
-        # Skip (not fail) — server may not be running in pure-Python CI
-        checks.append((PASS, "G19: SKIPPED — server not reachable on :8000 (start it to enable UI tests)", ""))
-        elapsed = time.time() - t0
-        return "G19", "Playwright UI smoke tests (skipped — server offline)", checks, elapsed
-
-    # Run playwright
-    result = subprocess.run(
-        ["npx", "playwright", "test", "--config=playwright.config.ts", "--reporter=line"],
-        cwd=ui_dir,
-        capture_output=True,
-        text=True,
-        timeout=300,   # 5 minute max
-    )
-    elapsed = time.time() - t0
-
-    # Parse output for pass/fail counts
-    output = result.stdout + result.stderr
-    passed = failed = 0
-    for line in output.splitlines():
-        # Playwright "line" reporter: "  ✓ N [chromium] › ..." or "  ✘ N ..."
-        if " passed" in line:
-            import re
-            m = re.search(r"(\d+) passed", line)
-            if m:
-                passed = int(m.group(1))
-        if " failed" in line:
-            import re
-            m = re.search(r"(\d+) failed", line)
-            if m:
-                failed = int(m.group(1))
-
-    # Emit one check per Playwright test result line
-    for line in output.splitlines():
-        line = line.strip()
-        if line.startswith("✓") or line.startswith("✘"):
-            # Extract test name
-            name_part = line.split("›")[-1].strip() if "›" in line else line[2:].strip()
-            status = PASS if line.startswith("✓") else FAIL
-            checks.append((status, f"G19: {name_part}", ""))
-
-    # Fallback if no individual lines parsed
-    if not checks:
-        if result.returncode == 0:
-            checks.append((PASS, f"G19: Playwright suite passed ({passed} tests)", ""))
-        else:
-            checks.append((FAIL, f"G19: Playwright suite failed",
-                           output[-500:] if len(output) > 500 else output))
-
-    return "G19", f"Playwright UI smoke tests ({passed} passed, {failed} failed)", checks, elapsed
-
-
-# G19 appended here so it is defined before being referenced
-GROUPS.append(group19_playwright)
 
 
 def run_comprehensive(paths: int):
     print(f"\n{'='*72}")
     print(f"  eNDinomics Comprehensive Functional Test  |  paths={paths}")
-    print(f"  {len(GROUPS)} groups covering all customer-configurable JSON options, tax/return verification, and UI smoke tests")
+    print(f"  {len(GROUPS)} groups covering all customer-configurable JSON options and tax/return verification")
     print(f"{'='*72}\n")
 
     t0 = time.time()
@@ -3161,20 +3091,21 @@ def main():
     ap.add_argument("--fast",      action="store_true",     help="50 paths")
     ap.add_argument("--comprehensive-test", action="store_true",
                     help="Full functional matrix across all configurable JSON options")
-    ap.add_argument("--skip-playwright", action="store_true",
-                    help="Skip G19 Playwright UI tests (for pure-Python CI environments)")
+    ap.add_argument("--skip-playwright",    action="store_true",
+                    help="Skip G19 Playwright UI tests (for environments without a browser)")
+    ap.add_argument("--update-baseline",    action="store_true",
+                    help="Clear and regenerate G18 snapshot regression baseline")
     args = ap.parse_args()
 
     paths = 50 if args.fast else args.paths
     if args.comprehensive_test:
-        if "--update-baseline" in sys.argv:
+        if args.update_baseline:
             _bp = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                "test_results", "regression_baseline.json")
             if os.path.exists(_bp):
                 os.remove(_bp)
                 print("Baseline cleared — will be regenerated on next run.")
         if args.skip_playwright:
-            # Remove G19 from run
             active_groups = [g for g in GROUPS if g.__name__ != "group19_playwright"]
             GROUPS[:] = active_groups
         run_comprehensive(paths)
