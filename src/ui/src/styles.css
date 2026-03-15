@@ -445,3 +445,51 @@ button:hover:not(:disabled) {
   background-color: #f9fafb;
 }
 
+/* ── Column tooltip (ⓘ hover) ─────────────────────────────────────────── */
+.col-tip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.col-tip .tip-label {
+  white-space: normal;   /* wraps with th cell */
+  display: inline;
+}
+.col-tip .tip-icon {
+  flex-shrink: 0;
+  font-size: 0.75em;
+  opacity: 0.70;          /* brighter */
+  cursor: help;
+  user-select: none;
+  color: #4f7ef7;         /* blue tint so it's clearly clickable */
+}
+.col-tip .tip-box {
+  display: none;
+  position: fixed;        /* fixed avoids overflow:hidden clipping */
+  z-index: 9999;
+  background: #1e2330;
+  color: #e8ecf4;
+  border: 1px solid #4f7ef7;
+  border-radius: 6px;
+  padding: 9px 12px;
+  font-size: 0.80rem;
+  font-weight: 400;
+  line-height: 1.55;
+  width: 240px;
+  white-space: normal;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.40);
+  pointer-events: none;
+  /* position set by JS — see Tip component */
+}
+/* Tooltip visibility controlled by JS onMouseEnter/Leave — no CSS :hover needed */
+
+/* th wraps long headers; tooltip floats via position:fixed so no clipping needed */
+.table th {
+  white-space: normal;
+  min-width: 55px;
+  max-width: 120px;
+  vertical-align: top;
+  line-height: 1.35;
+  word-break: break-word;
+}
