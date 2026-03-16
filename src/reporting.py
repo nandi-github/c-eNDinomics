@@ -137,6 +137,53 @@ def _plot_aggregate_band(
         ax.plot(y, m   / scale, color="blue",   linewidth=2,            label="Mean")
         ax.plot(y, med / scale, color="orange", linewidth=2,            label="Median (typical)")
 
+        # ── Endpoint annotations at final year ─────────────────────────────
+        # Show the terminal value for median, floor, ceiling so the chart is
+        # self-describing without requiring the reader to read the y-axis.
+        if len(y) > 0:
+            x_end = float(y[-1])
+            x_range = float(y[-1] - y[0]) if len(y) > 1 else 1.0
+
+            def _fmt(val: float) -> str:
+                """Format a scaled value as compact string e.g. $24.7M or $1.2B."""
+                if unit_label == "$B":
+                    return f"${val:.1f}B"
+                # For $M: use 1 decimal if < 100, else 0 decimals
+                return f"${val:.1f}M" if val < 100 else f"${val:.0f}M"
+
+            # Median endpoint — orange dot + label above line
+            med_end = float(med[-1]) / scale
+            ax.plot(x_end, med_end, "o", color="orange", markersize=5, zorder=5)
+            ax.annotate(
+                _fmt(med_end),
+                xy=(x_end, med_end),
+                xytext=(x_end - x_range * 0.02, med_end),
+                ha="right", va="bottom",
+                fontsize=8, color="orange", fontweight="bold",
+                bbox=dict(boxstyle="round,pad=0.2", facecolor="white",
+                          edgecolor="orange", alpha=0.8),
+            )
+
+            # Floor endpoint — small label below
+            lo_end = float(lo[-1]) / scale
+            ax.annotate(
+                _fmt(lo_end),
+                xy=(x_end, lo_end),
+                xytext=(x_end - x_range * 0.02, lo_end),
+                ha="right", va="top",
+                fontsize=7, color="#cc6666", alpha=0.85,
+            )
+
+            # Ceiling endpoint — small label above
+            hi_end = float(hi[-1]) / scale
+            ax.annotate(
+                _fmt(hi_end),
+                xy=(x_end, hi_end),
+                xytext=(x_end - x_range * 0.02, hi_end),
+                ha="right", va="bottom",
+                fontsize=7, color="#4a7c4a", alpha=0.85,
+            )
+
         ax.set_title(title)
         ax.set_xlabel("Year")
         ax.set_ylabel(f"{ylabel} ({unit_label})")
