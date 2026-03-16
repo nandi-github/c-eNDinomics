@@ -63,11 +63,69 @@ CLASS_TYPE: Dict[str, str] = {
 }
 
 # Thresholds for insights
-CONCENTRATION_THRESHOLD  = 0.20   # single ticker > 20% of account → flag
-EQUITY_HEAVY_THRESHOLD   = 0.85   # equity > 85% → flag as aggressive
-EQUITY_LIGHT_THRESHOLD   = 0.30   # equity < 30% → flag as conservative
-INTL_LOW_THRESHOLD       = 0.10   # international < 10% of equity → flag
-BOND_NEAR_ZERO_THRESHOLD = 0.05   # bonds < 5% for near-retirement → flag
+# ---------------------------------------------------------------------------
+# Concentration thresholds — instrument-type aware
+# ---------------------------------------------------------------------------
+# Broad market ETFs are inherently diversified (3,700+ holdings for VTI).
+# Flagging them at 20% is misleading. Sector/factor ETFs are concentrated
+# by design and warrant a lower threshold. Individual stocks get the 4% rule.
+#
+# Phase 2 (asset model): add instrument_type to assets.json for a cleaner
+# lookup. For now, classify by known tickers.
+
+# Broad market ETFs — low concentration risk per unit of weight
+BROAD_ETF_TICKERS = {
+    "VTI", "ITOT", "SCHB", "IVV", "SPY", "VOO",   # US total/large market
+    "VXUS", "IXUS", "SCHF",                          # international total
+    "EFA",                                            # developed intl
+    "BND", "AGG", "SCHZ",                            # total bond market
+    "IEF", "TLT", "SHY",                             # treasury duration
+    "SCHP", "TIP",                                    # TIPS
+    "LQD",                                            # investment grade corp
+    "GLD", "IAU",                                     # gold
+    "DBC", "PDBC",                                    # broad commodities
+}
+
+# Sector/factor/thematic ETFs — concentrated by design
+SECTOR_ETF_TICKERS = {
+    "QQQ", "QQQM",                                   # Nasdaq-100 (tech-heavy)
+    "VUG", "SCHG", "IWF",                            # US growth
+    "VTV", "IWD",                                    # US value
+    "XLK", "VGT", "FTEC",                            # technology sector
+    "XLF", "VFH",                                    # financials sector
+    "XLE", "VDE",                                    # energy sector
+    "XLV", "VHT",                                    # health care
+    "XLI", "VIS",                                    # industrials
+    "VNQ", "IYR",                                    # real estate
+    "EEM", "VWO",                                    # emerging markets
+    "ARKK", "ARKW", "ARKG",                          # thematic/speculative
+}
+
+# Per-instrument-type thresholds
+BROAD_ETF_THRESHOLD   = 0.40   # 40% — broad ETF, inherently diversified
+SECTOR_ETF_THRESHOLD  = 0.25   # 25% — sector ETF, concentrated by design
+STOCK_THRESHOLD       = 0.04   # 4%  — individual stock, industry consensus
+DEFAULT_THRESHOLD     = 0.15   # 15% — anything not classified above
+
+# Legacy aggregate thresholds
+EQUITY_HEAVY_THRESHOLD   = 0.85
+EQUITY_LIGHT_THRESHOLD   = 0.30
+INTL_LOW_THRESHOLD       = 0.10
+BOND_NEAR_ZERO_THRESHOLD = 0.05
+
+
+def _concentration_threshold(ticker: str) -> float:
+    """Return the appropriate concentration threshold for a given ticker."""
+    if ticker in BROAD_ETF_TICKERS:
+        return BROAD_ETF_THRESHOLD
+    if ticker in SECTOR_ETF_TICKERS:
+        return SECTOR_ETF_THRESHOLD
+    # Heuristic: tickers with 1-4 uppercase letters and no numbers are likely
+    # individual stocks; longer codes or codes with numbers are likely ETFs.
+    import re
+    if re.match(r'^[A-Z]{1,4}$', ticker):
+        return STOCK_THRESHOLD
+    return DEFAULT_THRESHOLD
 
 
 # ---------------------------------------------------------------------------
@@ -220,9 +278,19 @@ def _aggregate_flags(equity_pct: float,
         flags.append(f"Low international diversification: {intl_equity_pct:.0f}% intl of total")
     if fixed_income_pct < BOND_NEAR_ZERO_THRESHOLD * 100:
         flags.append(f"Near-zero fixed income: {fixed_income_pct:.0f}%")
-    concentrated = [t for t in ticker_weights if t.weight_pct > CONCENTRATION_THRESHOLD * 100]
+    concentrated = [
+        t for t in ticker_weights
+        if t.weight_pct > _concentration_threshold(t.ticker) * 100
+    ]
     for t in concentrated:
-        flags.append(f"Concentrated: {t.ticker} is {t.weight_pct:.0f}% of portfolio")
+        thresh = _concentration_threshold(t.ticker)
+        kind = ("broad ETF" if t.ticker in BROAD_ETF_TICKERS
+                else "sector ETF" if t.ticker in SECTOR_ETF_TICKERS
+                else "stock")
+        flags.append(
+            f"Concentrated: {t.ticker} is {t.weight_pct:.0f}% of portfolio "
+            f"(threshold {thresh*100:.0f}% for {kind})"
+        )
     return flags
 
 
@@ -275,6 +343,12 @@ def compute_portfolio_analysis(
             for cls, w in sorted(class_w.items(), key=lambda x: -x[1])
         ]
 
+        # Concentration: flag any ticker that exceeds its instrument-type threshold
+        concentrated_tickers = [
+            t for t in tickers_sorted
+            if t.weight_pct > _concentration_threshold(t.ticker) * 100
+        ]
+
         account_analyses.append(AccountAnalysis(
             account=acct_name,
             balance_cur=bal,
@@ -285,8 +359,7 @@ def compute_portfolio_analysis(
             type_weights={k: round(v, 2) for k, v in typ.items()},
             top_ticker=top.ticker if top else None,
             top_ticker_pct=round(top.weight_pct, 2) if top else 0.0,
-            is_concentrated=any(t.weight_pct > CONCENTRATION_THRESHOLD * 100
-                                 for t in tickers_sorted),
+            is_concentrated=len(concentrated_tickers) > 0,
         ))
 
         # Accumulate into aggregate — weighted by balance

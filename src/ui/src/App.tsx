@@ -32,6 +32,7 @@ type RunFlags = {
   ignore_withdrawals?: boolean;
   ignore_rmds?: boolean;
   ignore_conversions?: boolean;
+  ignore_taxes?: boolean;
 };
 
 type RunInfo = {
@@ -287,6 +288,7 @@ const App: React.FC = () => {
   const [runIgnoreWithdrawals, setRunIgnoreWithdrawals] = useState(false);
   const [runIgnoreRmds, setRunIgnoreRmds] = useState(false);
   const [runIgnoreConversions, setRunIgnoreConversions] = useState(false);
+  const [runIgnoreTaxes,       setRunIgnoreTaxes]       = useState(false);
 
   const [runs, setRuns] = useState<string[]>([]);
   const [selectedRun, setSelectedRun] = useState<string>("");
@@ -515,6 +517,7 @@ const App: React.FC = () => {
         ignore_withdrawals: runIgnoreWithdrawals,
         ignore_rmds: runIgnoreRmds,
         ignore_conversions: runIgnoreConversions,
+        ignore_taxes:       runIgnoreTaxes,
       });
       if (!res.ok) throw new Error("Run failed");
       setEndingBalances(res.ending_balances ?? null);
@@ -969,6 +972,14 @@ const App: React.FC = () => {
               />
               Ignore conversions
             </label>
+            <label>
+              <input
+                type="checkbox"
+                checked={runIgnoreTaxes}
+                onChange={(e) => setRunIgnoreTaxes(e.target.checked)}
+              />
+              Ignore taxes
+            </label>
           </div>
 
           <div className="run-actions">
@@ -1066,6 +1077,10 @@ const App: React.FC = () => {
                   <div>
                     <strong>Ignore RMDs:</strong>{" "}
                     {snapshot.run_info.flags?.ignore_rmds ? "Yes" : "No"}
+                  </div>
+                  <div>
+                    <strong>Ignore taxes:</strong>{" "}
+                    {snapshot.run_info.flags?.ignore_taxes ? "Yes" : "No"}
                   </div>
                 </div>
               </section>
