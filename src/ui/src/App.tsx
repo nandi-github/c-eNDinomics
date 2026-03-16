@@ -32,7 +32,6 @@ type RunFlags = {
   ignore_withdrawals?: boolean;
   ignore_rmds?: boolean;
   ignore_conversions?: boolean;
-  ignore_taxes?: boolean;
 };
 
 type RunInfo = {
@@ -74,12 +73,11 @@ type SnapshotWithdrawals = {
   taxes_state_current_mean?: number[];
   taxes_niit_current_mean?: number[];
   taxes_excise_current_mean?: number[];
-  // Median-path tax arrays merged from simulator taxes dict
+  // Median-path tax arrays merged from simulator (withdrawals.update(_taxes_median_path))
   taxes_fed_current_median_path?: number[];
   taxes_state_current_median_path?: number[];
   taxes_niit_current_median_path?: number[];
   taxes_excise_current_median_path?: number[];
-  // Full taxable income denominator for effective rate
   total_ordinary_income_median_path?: number[];
   tax_shortfall_current_mean?: number[];
   realized_gains_current_mean?: number[];
@@ -139,8 +137,29 @@ type SnapshotConversions = {
   conversion_cur_mean_by_year?: number[];
 };
 
+// ── Portfolio Analysis types (from portfolio_analysis.py) ─────────────────
+type ClassWeight    = { asset_class: string; geo: string; asset_type: string; weight_pct: number; };
+type TickerWeight   = { ticker: string; asset_class: string; weight_pct: number; };
+type AccountAnalysis = {
+  account: string; balance_cur: number; balance_pct: number;
+  class_weights: ClassWeight[]; ticker_weights: TickerWeight[];
+  geo_weights: Record<string, number>; type_weights: Record<string, number>;
+  top_ticker: string | null; top_ticker_pct: number; is_concentrated: boolean;
+};
+type AggregateAnalysis = {
+  total_balance_cur: number;
+  class_weights: ClassWeight[]; ticker_weights: TickerWeight[];
+  geo_weights: Record<string, number>; type_weights: Record<string, number>;
+  equity_pct: number; fixed_income_pct: number; alternatives_pct: number; cash_pct: number;
+  us_equity_pct: number; intl_equity_pct: number;
+  diversification_score: number; flags: string[];
+};
+type PortfolioAnalysis = {
+  aggregate: AggregateAnalysis; accounts: AccountAnalysis[];
+  n_accounts: number; n_tickers: number;
+};
+
 type Snapshot = {
-  run_info: RunInfo;
   years: number[];
   portfolio: SnapshotPortfolio;
   withdrawals?: SnapshotWithdrawals;
@@ -155,6 +174,7 @@ type Snapshot = {
   person?: Record<string, any>;
   n_years?: number;
   meta?: Record<string, any>;
+  portfolio_analysis?: PortfolioAnalysis;
 };
 
 type EndingBalance = {
@@ -267,7 +287,6 @@ const App: React.FC = () => {
   const [runIgnoreWithdrawals, setRunIgnoreWithdrawals] = useState(false);
   const [runIgnoreRmds, setRunIgnoreRmds] = useState(false);
   const [runIgnoreConversions, setRunIgnoreConversions] = useState(false);
-  const [runIgnoreTaxes,       setRunIgnoreTaxes]       = useState(false);
 
   const [runs, setRuns] = useState<string[]>([]);
   const [selectedRun, setSelectedRun] = useState<string>("");
@@ -293,6 +312,7 @@ const App: React.FC = () => {
 
   const [aggView, setAggView] = useState<"none" | "current" | "future">("none");
   const [showInsights, setShowInsights] = useState(false);
+  const [showPortfolioAnalysis, setShowPortfolioAnalysis] = useState(false);
 
   useEffect(() => {
     apiGet<ProfileList>("/profiles")
@@ -495,7 +515,6 @@ const App: React.FC = () => {
         ignore_withdrawals: runIgnoreWithdrawals,
         ignore_rmds: runIgnoreRmds,
         ignore_conversions: runIgnoreConversions,
-        ignore_taxes:       runIgnoreTaxes,
       });
       if (!res.ok) throw new Error("Run failed");
       setEndingBalances(res.ending_balances ?? null);
@@ -950,14 +969,6 @@ const App: React.FC = () => {
               />
               Ignore conversions
             </label>
-            <label>
-              <input
-                type="checkbox"
-                checked={runIgnoreTaxes}
-                onChange={(e) => setRunIgnoreTaxes(e.target.checked)}
-              />
-              Ignore taxes
-            </label>
           </div>
 
           <div className="run-actions">
@@ -1055,10 +1066,6 @@ const App: React.FC = () => {
                   <div>
                     <strong>Ignore RMDs:</strong>{" "}
                     {snapshot.run_info.flags?.ignore_rmds ? "Yes" : "No"}
-                  </div>
-                  <div>
-                    <strong>Ignore taxes:</strong>{" "}
-                    {snapshot.run_info.flags?.ignore_taxes ? "Yes" : "No"}
                   </div>
                 </div>
               </section>
@@ -1273,7 +1280,129 @@ const App: React.FC = () => {
                 );
               })()}
 
-              
+              {/* ── Portfolio Analysis ──────────────────────────────── */}
+              {(() => {
+                const pa = snapshot.portfolio_analysis;
+                if (!pa) return null;
+                const agg = pa.aggregate;
+
+                const typeColor: Record<string, string> = {
+                  "Equity": "#4a90d9", "Fixed Income": "#5cb85c",
+                  "Alternatives": "#f0ad4e", "Cash": "#9b9b9b",
+                };
+                const geoColor: Record<string, string> = {
+                  "US": "#4a90d9", "International": "#e67e22",
+                  "Global": "#8e44ad", "Other": "#9b9b9b",
+                };
+                const BarRow = ({ label, pct, color }: { label: string; pct: number; color: string }) => (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                    <div style={{ width: 120, fontSize: "0.82em", textAlign: "right", flexShrink: 0 }}>{label}</div>
+                    <div style={{ flex: 1, background: "#eee", borderRadius: 3, height: 14, overflow: "hidden" }}>
+                      <div style={{ width: `${Math.min(pct, 100)}%`, background: color, height: "100%", borderRadius: 3 }} />
+                    </div>
+                    <div style={{ width: 44, fontSize: "0.82em", textAlign: "right", flexShrink: 0 }}>{pct.toFixed(1)}%</div>
+                  </div>
+                );
+
+                return (
+                  <section className="results-section">
+                    <h3
+                      style={{ cursor: "pointer", userSelect: "none" }}
+                      onClick={() => setShowPortfolioAnalysis(v => !v)}
+                    >
+                      <span style={{ fontSize: "0.8em", opacity: 0.6 }}>{showPortfolioAnalysis ? "▼" : "▶"}</span>
+                      {" "}Portfolio Analysis
+                      {!showPortfolioAnalysis && (
+                        <span style={{ fontWeight: 400, fontSize: "0.75em", marginLeft: 8, opacity: 0.6 }}>
+                          click to expand · score {agg.diversification_score}/100 · {pa.n_tickers} tickers
+                        </span>
+                      )}
+                    </h3>
+
+                    {showPortfolioAnalysis && (<>
+                    <p style={{ fontSize: "0.85em", color: "#555", marginBottom: 12 }}>
+                      Target allocation weighted by account balance (current USD median).
+                      {" "}Diversification score: <strong>{agg.diversification_score}/100</strong>
+                      {" "}· {pa.n_tickers} tickers · {pa.n_accounts} accounts.
+                    </p>
+
+                    {agg.flags.length > 0 && (
+                      <div style={{ marginBottom: 16 }}>
+                        {agg.flags.map((f, i) => (
+                          <div key={i} style={{
+                            background: "#fff8e1", border: "1px solid #ffe082",
+                            borderRadius: 4, padding: "5px 10px", marginBottom: 4,
+                            fontSize: "0.83em", color: "#795548",
+                          }}>⚠ {f}</div>
+                        ))}
+                      </div>
+                    )}
+
+                    <div style={{ display: "flex", gap: 32, flexWrap: "wrap", marginBottom: 20 }}>
+                      <div style={{ minWidth: 260, flex: 1 }}>
+                        <div style={{ fontWeight: 600, fontSize: "0.88em", marginBottom: 8 }}>Asset Type</div>
+                        {Object.entries(agg.type_weights).sort((a, b) => b[1] - a[1]).map(([type, pct]) => (
+                          <BarRow key={type} label={type} pct={pct} color={typeColor[type] ?? "#aaa"} />
+                        ))}
+                      </div>
+                      <div style={{ minWidth: 260, flex: 1 }}>
+                        <div style={{ fontWeight: 600, fontSize: "0.88em", marginBottom: 8 }}>Geography</div>
+                        {Object.entries(agg.geo_weights).sort((a, b) => b[1] - a[1]).map(([geo, pct]) => (
+                          <BarRow key={geo} label={geo} pct={pct} color={geoColor[geo] ?? "#aaa"} />
+                        ))}
+                      </div>
+                      <div style={{ minWidth: 200, flex: 1 }}>
+                        <div style={{ fontWeight: 600, fontSize: "0.88em", marginBottom: 8 }}>Top Holdings</div>
+                        <table className="table" style={{ fontSize: "0.83em" }}>
+                          <thead><tr><th>Ticker</th><th>Class</th><th>Weight</th></tr></thead>
+                          <tbody>
+                            {agg.ticker_weights.slice(0, 8).map(t => (
+                              <tr key={t.ticker}>
+                                <td><strong>{t.ticker}</strong></td>
+                                <td style={{ color: "#777", fontSize: "0.9em" }}>{t.asset_class.replace(/_/g, " ")}</td>
+                                <td>{t.weight_pct.toFixed(1)}%</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    <div style={{ fontWeight: 600, fontSize: "0.88em", marginBottom: 8 }}>Per-Account Allocation</div>
+                    <table className="table" style={{ fontSize: "0.83em" }}>
+                      <thead>
+                        <tr>
+                          <th>Account</th>
+                          <th>Balance (cur $)</th>
+                          <th>% of Portfolio</th>
+                          <th>Equity</th>
+                          <th>Fixed Income</th>
+                          <th>Alternatives</th>
+                          <th>Top Ticker</th>
+                          <th>Concentrated</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {pa.accounts.map(acct => (
+                          <tr key={acct.account}>
+                            <td><strong>{acct.account}</strong></td>
+                            <td>{formatUSD(acct.balance_cur)}</td>
+                            <td>{acct.balance_pct.toFixed(1)}%</td>
+                            <td>{(acct.type_weights["Equity"] ?? 0).toFixed(0)}%</td>
+                            <td>{(acct.type_weights["Fixed Income"] ?? 0).toFixed(0)}%</td>
+                            <td>{(acct.type_weights["Alternatives"] ?? 0).toFixed(0)}%</td>
+                            <td>{acct.top_ticker ?? "—"}{acct.top_ticker ? ` (${acct.top_ticker_pct.toFixed(0)}%)` : ""}</td>
+                            <td style={{ color: acct.is_concentrated ? "#c62828" : "#388e3c" }}>
+                              {acct.is_concentrated ? "⚠ Yes" : "✓ No"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    </>)}
+                  </section>
+                );
+              })()}
 
               <section className="results-section">
                 <h3>Aggregate Balances (Charts)</h3>
@@ -1575,15 +1704,14 @@ const App: React.FC = () => {
                       // in RMD years where RMD > planned, spendable = planned (surplus reinvested).
                       const spendable = Math.min(totalCur, planned > 0 ? planned : totalCur);
 
-                      // Spendable (future $): scale by implicit inflation factor from total arrays.
-                      // deflatorRatio = totalFut / totalCur — never produces zero in RMD years.
+                      // Spendable (future $): scale by implicit inflation factor.
+                      // deflatorRatio = totalFut/totalCur — never produces zero in RMD years.
                       const deflatorRatio = totalCur > 0 ? totalFut / totalCur : 1.0;
                       const spendableFut  = spendable * deflatorRatio;
 
-                      // Diff: negative only on genuine portfolio shortfall
+                      // Diff: negative only on genuine shortfall
                       const diff = spendable - planned;
 
-                      // realizedCur/Fut = spendable for display
                       const realizedCur = spendable;
                       const realizedFut = spendableFut;
                       // Reinvested = surplus RMD actually added to brokerage (0 if cash_out policy)
@@ -1668,11 +1796,10 @@ const App: React.FC = () => {
                       const wdE  = W?.realized_current_median_path?.[i] ?? W?.realized_current_mean?.[i] ?? 0;
                       const twE  = W?.total_withdraw_current_median_path?.[i] ?? W?.total_withdraw_current_mean?.[i] ?? (wdE + rmdE);
                       const cvE  = C?.conversion_cur_median_path_by_year?.[i] ?? C?.conversion_cur_mean_by_year?.[i] ?? 0;
-                      // Denominator = total taxable income on the median path.
-                      // simulator_new.py merges total_ordinary_income_median_path into
-                      // snapshot.withdrawals (includes W2 + RMD + conversions + cap gains + divs).
-                      // Old snapshots won't have it → fall back to (twE + cvE).
-                      // Guard: never display > 100% — old snapshots or edge cases show dash.
+                      // Correct denominator = total ordinary income (W2 + RMD + conversions + cap gains + dividends)
+                      // This prevents rates >100% caused by investment income taxed beyond just the withdrawal amount
+                      // Denominator = total taxable income on median path.
+                      // Guard: never display >100% (shows dash for old snapshots or edge cases).
                       const totalOrdIncome = W?.total_ordinary_income_median_path?.[i] ?? 0;
                       const denom = totalOrdIncome > 0
                         ? totalOrdIncome

@@ -563,6 +563,42 @@ test("Insights section present with at least one finding", async ({ page }) => {
   await expect(header).toContainText("finding");
 });
 
+
+// ─── Test 12b: Portfolio Analysis section ─────────────────────────────────────
+
+test("Portfolio Analysis: section present, holdings table, per-account table", async ({ page }) => {
+  await loadResults(page);
+
+  const section = page.locator("section.results-section").filter({
+    has: page.locator("h3", { hasText: "Portfolio Analysis" }),
+  });
+  await expect(section).toBeVisible({ timeout: 10_000 });
+
+  // Section is collapsed by default — click h3 to expand
+  await section.locator("h3").click();
+
+  // Diversification score present
+  await expect(section.locator("strong").first()).toContainText("/100");
+
+  // Top Holdings table — VTI should appear (largest position in Test profile)
+  const holdingsTable = section.locator("table.table").first();
+  const tableText = await holdingsTable.textContent() ?? "";
+  expect(tableText, "VTI appears in Top Holdings").toContain("VTI");
+  const holdingRows = holdingsTable.locator("tbody tr");
+  expect(await holdingRows.count(), "At least 3 tickers in holdings").toBeGreaterThanOrEqual(3);
+
+  // Per-Account table has 6 rows
+  const tables = section.locator("table.table");
+  const perAcctTable = tables.last();
+  const acctRows = perAcctTable.locator("tbody tr");
+  expect(await acctRows.count(), "Per-Account table has 6 accounts").toBe(6);
+
+  // No bad values
+  const sectionText = await section.textContent() ?? "";
+  expect(sectionText).not.toContain("NaN");
+  expect(sectionText).not.toContain("undefined");
+});
+
 // ─── Test 13: Run Parameters displayed correctly ─────────────────────────────
 
 test("Run Parameters show correct profile metadata", async ({ page }) => {
