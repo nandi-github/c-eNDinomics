@@ -614,6 +614,29 @@ test("Run Parameters show correct profile metadata", async ({ page }) => {
   await expect(paramsSection).toContainText("MFJ");
 });
 
+// ─── Test 13b: Run panel has all four ignore checkboxes ───────────────────────
+// Regression guard: checkboxes lost during App.tsx rebuilds won't be caught
+// by Python tests (which test the simulator layer, not the UI).
+
+test("Run panel: all four ignore checkboxes present", async ({ page }) => {
+  await page.goto("/");
+  await page.locator(".tab", { hasText: "Run" }).click();
+  await expect(page.locator("h2", { hasText: "Run Simulation" })).toBeVisible();
+
+  const expectedCheckboxes = [
+    "Ignore withdrawals",
+    "Ignore RMDs",
+    "Ignore conversions",
+    "Ignore taxes",
+  ];
+  for (const label of expectedCheckboxes) {
+    await expect(
+      page.locator("label", { hasText: label }),
+      `"${label}" checkbox must be present in Run panel`
+    ).toBeVisible();
+  }
+});
+
 // ─── Test 14: No NaN/undefined anywhere on the full results page ──────────────
 
 test("No NaN or undefined text anywhere in results page", async ({ page }) => {
