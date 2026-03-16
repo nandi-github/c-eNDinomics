@@ -1,116 +1,114 @@
 #!/usr/bin/env bash
-# filename: run-ui-tests.sh
-#
-# eNDinomics UI Smoke Test Runner
+# run-ui-tests.sh — start API server, run Playwright UI tests, stop server
 #
 # Usage:
-#   ./run-ui-tests.sh              # run all smoke tests
-#   ./run-ui-tests.sh --headed     # run with visible browser (debug)
-#   ./run-ui-tests.sh --install    # install playwright + chromium only
+#   ./run-ui-tests.sh              # run all 14 Playwright tests
+#   ./run-ui-tests.sh --install    # one-time Playwright + Chromium install, then run
+#   ./run-ui-tests.sh --headed     # run with visible browser (debug mode)
 #
-# Prerequisites:
-#   - Python venv set up (build-clean.sh already run)
-#   - Node/npm available
-#
-# What this does:
-#   1. Installs @playwright/test if missing
-#   2. Installs chromium browser if missing
-#   3. Starts FastAPI server on port 8000
-#   4. Runs playwright smoke tests
-#   5. Stops the server when done
-#   6. Prints pass/fail summary
+# Exit code:
+#   0  all tests passed
+#   1  one or more tests failed
+#   2  server failed to start
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 UI_DIR="$SCRIPT_DIR/ui"
-VENV_DIR="$SCRIPT_DIR/venv"
-API_PORT=8000
-API_PID_FILE="$SCRIPT_DIR/.api_test_pid"
+SERVER_PORT=8000
+SERVER_URL="http://localhost:$SERVER_PORT"
+SERVER_PID=""
+PLAYWRIGHT_ARGS=""
+INSTALL=0
 
-HEADED="${1:-}"
+for arg in "$@"; do
+    case "$arg" in
+        --install) INSTALL=1 ;;
+        --headed)  PLAYWRIGHT_ARGS="--headed" ;;
+        --help)
+            echo "Usage: $0 [--install] [--headed]"
+            echo "  --install  Install Playwright + Chromium browser (run once)"
+            echo "  --headed   Run with visible browser window (for debugging)"
+            exit 0 ;;
+    esac
+done
 
-# ── Colours ──────────────────────────────────────────────────────────────────
-GREEN='\033[0;32m'; RED='\033[0;31m'; YELLOW='\033[1;33m'; NC='\033[0m'
-
-echo -e "${YELLOW}== eNDinomics UI Smoke Tests ==${NC}"
-
-# ── 1) Install playwright if needed ──────────────────────────────────────────
-cd "$UI_DIR"
-
-if [[ ! -d node_modules/@playwright ]]; then
-  echo "-- Installing @playwright/test --"
-  npm install --save-dev @playwright/test
+if [[ $INSTALL -eq 1 ]]; then
+    echo "== Installing Playwright and Chromium =="
+    cd "$UI_DIR"
+    npm install
+    npx playwright install chromium
+    echo "== Install complete =="
+    echo ""
 fi
 
-if [[ "$HEADED" == "--install" ]]; then
-  echo "-- Installing Playwright browsers --"
-  npx playwright install chromium
-  echo -e "${GREEN}Playwright installed.${NC}"
-  exit 0
+if ! command -v npx &>/dev/null; then
+    echo "ERROR: npx not found — install Node.js first"
+    exit 2
+fi
+if [[ ! -f "$UI_DIR/playwright.config.ts" ]]; then
+    echo "ERROR: playwright.config.ts not found at $UI_DIR"
+    exit 2
+fi
+if [[ ! -d "$UI_DIR/node_modules/@playwright" ]]; then
+    echo "ERROR: Playwright not installed — run: $0 --install"
+    exit 2
 fi
 
-# Install chromium if not present
-if ! npx playwright install --dry-run chromium 2>/dev/null | grep -q "chromium.*already installed" 2>/dev/null; then
-  echo "-- Installing Chromium browser --"
-  npx playwright install chromium
+server_already_running=0
+if curl -sf "$SERVER_URL/health" &>/dev/null; then
+    echo "== API server already running on :$SERVER_PORT =="
+    server_already_running=1
 fi
 
-# ── 2) Check or start FastAPI server ─────────────────────────────────────────
-SERVER_STARTED=0
+if [[ $server_already_running -eq 0 ]]; then
+    echo "== Starting API server on :$SERVER_PORT =="
+    cd "$SCRIPT_DIR"
+    python -m uvicorn api:app --port "$SERVER_PORT" --log-level warning &
+    SERVER_PID=$!
 
-if curl -s "http://localhost:$API_PORT/health" >/dev/null 2>&1; then
-  echo "-- FastAPI server already running on port $API_PORT --"
-else
-  echo "-- Starting FastAPI server on port $API_PORT --"
-  if [[ -f "$VENV_DIR/bin/activate" ]]; then
-    source "$VENV_DIR/bin/activate"
-  fi
-  cd "$SCRIPT_DIR"
-  python3 -m uvicorn api:app --port $API_PORT --host 127.0.0.1 &
-  echo $! > "$API_PID_FILE"
-  SERVER_STARTED=1
-  # Wait for server to be ready
-  echo "-- Waiting for server to be ready --"
-  for i in $(seq 1 30); do
-    if curl -s "http://localhost:$API_PORT/health" >/dev/null 2>&1; then
-      echo "-- Server ready after ${i}s --"
-      break
+    echo -n "   Waiting for server"
+    for i in $(seq 1 30); do
+        sleep 0.5
+        if curl -sf "$SERVER_URL/health" &>/dev/null; then
+            echo " ready (${i}×0.5s)"
+            break
+        fi
+        echo -n "."
+        if [[ $i -eq 30 ]]; then
+            echo ""
+            echo "ERROR: Server did not start within 15s"
+            kill "$SERVER_PID" 2>/dev/null || true
+            exit 2
+        fi
+    done
+fi
+
+cleanup() {
+    if [[ -n "$SERVER_PID" ]] && [[ $server_already_running -eq 0 ]]; then
+        echo ""
+        echo "== Stopping API server (PID $SERVER_PID) =="
+        kill "$SERVER_PID" 2>/dev/null || true
+        wait "$SERVER_PID" 2>/dev/null || true
     fi
-    sleep 1
-  done
-  if ! curl -s "http://localhost:$API_PORT/health" >/dev/null 2>&1; then
-    echo -e "${RED}ERROR: Server did not start within 30s${NC}"
-    exit 1
-  fi
-fi
+}
+trap cleanup EXIT
 
-# ── 3) Run Playwright tests ───────────────────────────────────────────────────
+echo ""
+echo "== Running Playwright UI tests =="
 cd "$UI_DIR"
-PLAYWRIGHT_ARGS="--config=playwright.config.ts"
-if [[ "$HEADED" == "--headed" ]]; then
-  PLAYWRIGHT_ARGS="$PLAYWRIGHT_ARGS --headed"
-fi
 
 set +e
-npx playwright test $PLAYWRIGHT_ARGS
-TEST_EXIT=$?
+npx playwright test --config=playwright.config.ts $PLAYWRIGHT_ARGS
+PLAYWRIGHT_EXIT=$?
 set -e
 
-# ── 4) Stop server if we started it ──────────────────────────────────────────
-if [[ $SERVER_STARTED -eq 1 && -f "$API_PID_FILE" ]]; then
-  echo "-- Stopping FastAPI server --"
-  kill "$(cat "$API_PID_FILE")" 2>/dev/null || true
-  rm -f "$API_PID_FILE"
-fi
-
-# ── 5) Summary ───────────────────────────────────────────────────────────────
 echo ""
-if [[ $TEST_EXIT -eq 0 ]]; then
-  echo -e "${GREEN}✅ All UI smoke tests passed${NC}"
+if [[ $PLAYWRIGHT_EXIT -eq 0 ]]; then
+    echo "== ✅  All Playwright tests passed =="
 else
-  echo -e "${RED}❌ UI smoke tests failed — see ui/playwright-report/ for details${NC}"
-  echo "   Open report: cd root/src/ui && npx playwright show-report"
+    echo "== ❌  Playwright tests failed (exit $PLAYWRIGHT_EXIT) =="
+    echo "   View report: cd $UI_DIR && npx playwright show-report"
 fi
 
-exit $TEST_EXIT
+exit $PLAYWRIGHT_EXIT
