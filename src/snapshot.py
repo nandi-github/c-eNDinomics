@@ -12,6 +12,51 @@ def _safe_write_json(path: str, obj: Dict[str, Any]) -> None:
         json.dump(obj, f, indent=2)
 
 
+def _build_portfolio_analysis(
+    input_paths: Optional[Dict[str, str]],
+    starting: Dict[str, float],
+    ending_balances: Optional[List[Dict[str, Any]]],
+) -> Optional[Dict[str, Any]]:
+    """
+    Compute portfolio allocation analysis and return as dict for snapshot.
+    Silently returns None if allocation file is missing or analysis fails.
+    """
+    try:
+        from portfolio_analysis import compute_portfolio_analysis
+
+        alloc_path = (input_paths or {}).get("alloc", "")
+        if not alloc_path or not os.path.isfile(alloc_path):
+            return None
+
+        with open(alloc_path, encoding="utf-8") as f:
+            alloc_cfg = json.load(f)
+
+        # Build ending balance dict in current USD from ending_balances list
+        ending_cur: Optional[Dict[str, float]] = None
+        if ending_balances:
+            ending_cur = {}
+            for entry in ending_balances:
+                acct = entry.get("account", "")
+                # prefer median current, fall back to mean current
+                bal = (entry.get("current_median")
+                       or entry.get("current_mean")
+                       or entry.get("ending_balance_current_mean")
+                       or 0.0)
+                if acct and bal:
+                    ending_cur[acct] = float(bal)
+
+        analysis = compute_portfolio_analysis(
+            alloc_cfg=alloc_cfg,
+            starting_balances=starting,
+            ending_balances_cur=ending_cur if ending_cur else None,
+        )
+        return analysis.to_dict()
+
+    except Exception as e:
+        print(f"[WARN] portfolio_analysis skipped: {e}")
+        return None
+
+
 def save_raw_snapshot_accounts(
     out_dir: str,
     res: Dict[str, Any],
@@ -121,6 +166,17 @@ def save_raw_snapshot_accounts(
         snapshot["person"] = dict(res["person"])
     else:
         snapshot["person"] = {}
+
+    # --- Portfolio allocation analysis ---
+    # Computed from allocation_yearly.json weighted by ending balances.
+    # Silently skipped if allocation file unavailable (older runs, CLI use).
+    _pa = _build_portfolio_analysis(
+        input_paths=input_paths,
+        starting=dict(res.get("starting", {})),
+        ending_balances=res.get("ending_balances"),
+    )
+    if _pa is not None:
+        snapshot["portfolio_analysis"] = _pa
 
     # 4) Write snapshot JSON
     out_path = os.path.join(out_dir, "raw_snapshot_accounts.json")

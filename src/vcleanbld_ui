@@ -1,8 +1,6 @@
 #!/usr/bin/env bash
 # vcleanbld_ui — guaranteed full clean rebuild of the eNDinomics UI
-#
-# Always wipes everything and rebuilds from scratch.
-# Slower but zero ambiguity — what you see is what was just built.
+# Always wipes everything and rebuilds from scratch. Zero ambiguity.
 
 set -euo pipefail
 
@@ -28,7 +26,12 @@ for f in "$SRC_DIR/App.tsx" "$SRC_DIR/styles.css" "$SRC_DIR/main.tsx"; do
 done
 echo ""
 
-# ── Full wipe — no stale artifacts anywhere ───────────────────────────────────
+# ── Wipe Python bytecode cache (prevents stale .pyc from shadowing new code) ──
+echo "-- Clearing Python __pycache__ --"
+rm -rf "$SCRIPT_DIR/__pycache__"
+echo "   done"
+
+# ── Full UI wipe — no stale artifacts anywhere ────────────────────────────────
 echo "-- Wiping dist/, node_modules/, package-lock.json --"
 rm -rf "$DIST_DIR"
 rm -rf "$UI_DIR/node_modules"

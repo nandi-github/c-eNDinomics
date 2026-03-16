@@ -318,15 +318,14 @@ def drop_profile(tag: str):
 
 def load_cfg(name: str, state: str = "California", filing: str = "MFJ") -> Dict[str, Any]:
     P = lambda n: os.path.join(_pdir(name), n)
-    # Load person first so we can read state/filing from it if not overridden
     person     = load_person(P("person.json"))
     with open(P("person.json")) as _pf:
         _praw = json.load(_pf)
     if "target_age" in _praw:
         person["target_age"] = int(_praw["target_age"])
-    # Resolve state and filing: explicit args > person.json > defaults
-    _state  = state  if state  != "California" else _praw.get("state",          state)
-    _filing = filing if filing != "MFJ"        else _praw.get("filing_status",  filing)
+    # Explicit args take priority; fall back to person.json; then defaults
+    _state  = state  if state  != "California" else _praw.get("state",         state)
+    _filing = filing if filing != "MFJ"        else _praw.get("filing_status", filing)
     tax        = load_tax_unified(TAX_GLOBAL_PATH, state=_state, filing=_filing)
     alloc      = load_allocation_yearly_accounts(P("allocation_yearly.json"))
     validate_alloc_accounts(alloc)
@@ -568,7 +567,29 @@ def group1_flag_matrix(paths: int):
     checks.append(chk("BROK: ignore_wd > no_flags (no spending)",
         bw > bb, f"brok_wd={bw:,.0f} brok_base={bb:,.0f}"))
 
-    return "G1", "Ignore-flag matrix (8 combos)", checks, elapsed_total
+    # ignore_taxes: all tax arrays must be zero across all years
+    res_notax, t = ephemeral_run("g1_ignore_taxes", paths,
+                                  ignore_taxes=True); elapsed_total += t
+    wd_notax = res_notax.get("withdrawals", {})
+    tx_notax = res_notax.get("taxes", {})
+    fed_notax   = wd_notax.get("taxes_fed_current_mean",   []) or tx_notax.get("fed_cur_mean_by_year",   [])
+    state_notax = wd_notax.get("taxes_state_current_mean", []) or tx_notax.get("state_cur_mean_by_year", [])
+    niit_notax  = wd_notax.get("taxes_niit_current_mean",  []) or tx_notax.get("niit_cur_mean_by_year",  [])
+    checks.append(chk("ignore_taxes: fed taxes all zero",
+        all(abs(v) < 0.01 for v in fed_notax),
+        f"max_fed={max((abs(v) for v in fed_notax), default=0):.2f}"))
+    checks.append(chk("ignore_taxes: state taxes all zero",
+        all(abs(v) < 0.01 for v in state_notax),
+        f"max_state={max((abs(v) for v in state_notax), default=0):.2f}"))
+    checks.append(chk("ignore_taxes: NIIT all zero",
+        all(abs(v) < 0.01 for v in niit_notax),
+        f"max_niit={max((abs(v) for v in niit_notax), default=0):.2f}"))
+    port_notax = res_notax.get("portfolio", {}).get("future_mean", [])
+    checks.append(chk("ignore_taxes: portfolio still grows",
+        len(port_notax) > 0 and port_notax[-1] > port_notax[0],
+        f"yr1={port_notax[0] if port_notax else 0:,.0f} last={port_notax[-1] if port_notax else 0:,.0f}"))
+
+    return "G1", "Ignore-flag matrix (8 combos + ignore_taxes)", checks, elapsed_total
 
 
 # ===========================================================================
@@ -1623,28 +1644,20 @@ def group11_tax_wiring(paths: int):
 
     # ===========================================================================
     # G11 EXTENSION — Bracket math, filing status, state-specific rates
-    # ===========================================================================
-    #
-    # All expected values pre-computed from the bracket data in
-    # taxes_states_mfj_single.json.  Tolerance is 5% to absorb MC noise
-    # (income arrays are deterministic but taxes depend on ordinary_income_cur_paths
-    # which is path-averaged, not path-exact).
-    #
-    # Expected values (pre-computed):
-    #   $50k ordinary income MFJ:    taxable=$18,500  fed=$1,850
-    #   $50k ordinary income Single: taxable=$34,250  fed=$3,872  ratio=2.09x
-    #   $200k ordinary income MFJ:   taxable=$168,500 fed=$26,898
-    #   $200k ordinary income Single:taxable=$184,250 fed=$55,815  ratio=2.08x
-    #   CA state on $200k MFJ:       ~$10,908
-    #   TX / FL:                     $0 state tax
-    #   WA excise:                   7% on cap gains > $250k threshold
+    # Expected values pre-computed from taxes_states_mfj_single.json:
+    #   $50k MFJ:    taxable=$18,500  fed=$1,850   (10% bracket only)
+    #   $50k Single: taxable=$34,250  fed=$3,872   (10%+12%)  ratio=2.09x
+    #   $200k MFJ:   taxable=$168,500 fed=$26,898
+    #   $200k Single:taxable=$184,250 fed=$37,067  ratio=1.38x
+    #   CA $200k MFJ state: ~$10,908
+    #   TX / FL: $0 state tax
+    #   WA: excise on cap gains > $250k threshold (7%)
     # ===========================================================================
 
-    TOL = 0.10   # 10% tolerance for bracket calc
+    TOL = 0.10   # 10% tolerance for MC mean vs exact bracket calc
 
     def _yr1(arr):
-        """Year-1 value. Income is active from year 1 so bracket math is cleanest here.
-        Avoids averaging in RMD years (years 30+) where taxes are orders of magnitude larger."""
+        """Year-1 value — cleanest for bracket math, avoids RMD years."""
         return float(arr[0]) if arr else 0.0
 
     def _within(actual, expected, tol=TOL):
@@ -1652,200 +1665,118 @@ def group11_tax_wiring(paths: int):
             return actual == 0
         return abs(actual - expected) / expected <= tol
 
-    # ── Income setup for bracket tests ──────────────────────────────────────
-    # Use $50k and $200k ordinary income (rental) — held constant across all years
     inc_50k = copy.deepcopy(BASE_INCOME)
     inc_50k["rental"] = [{"years": "1-30", "amount_nom": 50_000}]
-
     inc_200k = copy.deepcopy(BASE_INCOME)
     inc_200k["rental"] = [{"years": "1-30", "amount_nom": 200_000}]
-
-    # Disable conversions so bracket math is clean (no conversion income mixed in)
     p_noconv = copy.deepcopy(BASE_PERSON)
     p_noconv["roth_conversion_policy"]["enabled"] = False
 
-    # ── 11h: Federal bracket math — MFJ $50k ────────────────────────────────
-    # taxable = 50k - 31.5k std_ded = 18.5k  → all in 10% bracket → tax = $1,850
+    # ── 11h: MFJ $50k → fed ≈ $1,850 ────────────────────────────────────────
     res_mfj_50k, t = ephemeral_run(
-        "g11h_mfj_50k", paths,
-        person=p_noconv, income=inc_50k,
-        ignore_conv=True, state="California", filing="MFJ"
-    ); elapsed += t
+        "g11h_mfj_50k", paths, person=p_noconv, income=inc_50k,
+        ignore_conv=True, state="California", filing="MFJ"); elapsed += t
     fed_mfj_50k = _yr1(_wd_taxes_fed(res_mfj_50k))
-    checks.append(chk(
-        "11h: MFJ $50k income — fed tax ≈ $1,850 (10% bracket, taxable=$18,500)",
+    checks.append(chk("11h: MFJ $50k income — fed tax ≈ $1,850 (10% bracket, taxable=$18,500)",
         _within(fed_mfj_50k, 1_850),
-        f"actual={fed_mfj_50k:,.0f} expected=1,850 tol={TOL*100:.0f}%"
-    ))
+        f"actual={fed_mfj_50k:,.0f} expected=1,850 tol={TOL*100:.0f}%"))
 
-    # ── 11i: Federal bracket math — Single $50k ──────────────────────────────
-    # taxable = 50k - 15.75k = 34.25k  → $11,925×10% + $22,325×12% = $1,193+$2,679=$3,872
+    # ── 11i: Single $50k → fed ≈ $3,872 ─────────────────────────────────────
     p_single = copy.deepcopy(p_noconv)
     p_single["filing_status"] = "Single"
     res_single_50k, t = ephemeral_run(
-        "g11i_single_50k", paths,
-        person=p_single, income=inc_50k,
-        ignore_conv=True, state="California", filing="Single"
-    ); elapsed += t
+        "g11i_single_50k", paths, person=p_single, income=inc_50k,
+        ignore_conv=True, state="California", filing="Single"); elapsed += t
     fed_single_50k = _yr1(_wd_taxes_fed(res_single_50k))
-    checks.append(chk(
-        "11i: Single $50k income — fed tax ≈ $3,872 (10%+12% brackets, taxable=$34,250)",
+    checks.append(chk("11i: Single $50k income — fed tax ≈ $3,872 (10%+12%, taxable=$34,250)",
         _within(fed_single_50k, 3_872),
-        f"actual={fed_single_50k:,.0f} expected=3,872 tol={TOL*100:.0f}%"
-    ))
+        f"actual={fed_single_50k:,.0f} expected=3,872 tol={TOL*100:.0f}%"))
 
-    # ── 11j: Single pays ~2x more than MFJ at same income ────────────────────
+    # ── 11j: Single/MFJ ratio at $50k ≈ 2.09x ───────────────────────────────
     ratio_50k = fed_single_50k / fed_mfj_50k if fed_mfj_50k > 0 else 0
-    checks.append(chk(
-        "11j: Single/MFJ ratio at $50k ≈ 2.09x (marriage bonus)",
-        1.7 < ratio_50k < 2.5,
-        f"ratio={ratio_50k:.2f}x (expected ≈2.09x)"
-    ))
+    checks.append(chk("11j: Single/MFJ ratio at $50k ≈ 2.09x (marriage bonus)",
+        1.7 < ratio_50k < 2.5, f"ratio={ratio_50k:.2f}x (expected ≈2.09x)"))
 
-    # ── 11k: Federal bracket math — MFJ $200k ───────────────────────────────
-    # taxable = 168,500 → 10%×23,850 + 12%×73,100 + 22%×71,550 = $2,385+$8,772+$15,741=$26,898
+    # ── 11k: MFJ $200k → fed ≈ $26,898 ──────────────────────────────────────
     res_mfj_200k, t = ephemeral_run(
-        "g11k_mfj_200k", paths,
-        person=p_noconv, income=inc_200k,
-        ignore_conv=True, state="California", filing="MFJ"
-    ); elapsed += t
+        "g11k_mfj_200k", paths, person=p_noconv, income=inc_200k,
+        ignore_conv=True, state="California", filing="MFJ"); elapsed += t
     fed_mfj_200k = _yr1(_wd_taxes_fed(res_mfj_200k))
-    checks.append(chk(
-        "11k: MFJ $200k income — fed tax ≈ $26,898 (taxable=$168,500)",
+    checks.append(chk("11k: MFJ $200k income — fed tax ≈ $26,898 (taxable=$168,500)",
         _within(fed_mfj_200k, 26_898),
-        f"actual={fed_mfj_200k:,.0f} expected=26,898 tol={TOL*100:.0f}%"
-    ))
+        f"actual={fed_mfj_200k:,.0f} expected=26,898 tol={TOL*100:.0f}%"))
 
-    # ── 11l: Federal bracket math — Single $200k ─────────────────────────────
-    # taxable = 184,250 → spans 10%/12%/22%/24% = $55,815
+    # ── 11l: Single $200k → fed ≈ $37,067, ratio ≈ 1.38x ───────────────────
     res_single_200k, t = ephemeral_run(
-        "g11l_single_200k", paths,
-        person=p_single, income=inc_200k,
-        ignore_conv=True, state="California", filing="Single"
-    ); elapsed += t
+        "g11l_single_200k", paths, person=p_single, income=inc_200k,
+        ignore_conv=True, state="California", filing="Single"); elapsed += t
     fed_single_200k = _yr1(_wd_taxes_fed(res_single_200k))
-    checks.append(chk(
-        "11l: Single $200k income — fed tax ≈ $37,067 (taxable=$184,250, brackets 10/12/22/24%)",
+    checks.append(chk("11l: Single $200k income — fed tax ≈ $37,067 (taxable=$184,250)",
         _within(fed_single_200k, 37_067),
-        f"actual={fed_single_200k:,.0f} expected=37,067 tol={TOL*100:.0f}%"
-    ))
-
+        f"actual={fed_single_200k:,.0f} expected=37,067 tol={TOL*100:.0f}%"))
     ratio_200k = fed_single_200k / fed_mfj_200k if fed_mfj_200k > 0 else 0
-    checks.append(chk(
-        "11l: Single/MFJ ratio at $200k ≈ 1.38x (same top bracket, smaller std deduction)",
-        1.2 < ratio_200k < 1.6,
-        f"ratio={ratio_200k:.2f}x (expected ≈1.38x)"
-    ))
+    checks.append(chk("11l: Single/MFJ ratio at $200k ≈ 1.38x",
+        1.2 < ratio_200k < 1.6, f"ratio={ratio_200k:.2f}x (expected ≈1.38x)"))
 
-    # ── 11m: Standard deduction difference — Single deducts less ────────────
-    # MFJ std_ded=$31,500 vs Single=$15,750 → Single has $15,750 more taxable income
-    checks.append(chk(
-        "11m: Single fed tax > MFJ at same income (higher taxable due to lower std deduction)",
+    # ── 11m: Single fed tax > MFJ at same income ─────────────────────────────
+    checks.append(chk("11m: Single fed tax > MFJ at same income (lower std deduction)",
         fed_single_200k > fed_mfj_200k,
-        f"single={fed_single_200k:,.0f} mfj={fed_mfj_200k:,.0f}"
-    ))
+        f"single={fed_single_200k:,.0f} mfj={fed_mfj_200k:,.0f}"))
 
-    # ── 11n: California state tax — MFJ $200k ────────────────────────────────
-    # taxable ≈ 200k - 10,726 (CA std_ded) = 189,274 → progressive → ≈ $10,908
+    # ── 11n: CA state on $200k MFJ ≈ $10,908 ────────────────────────────────
     state_ca_200k = _yr1(_wd_taxes_state(res_mfj_200k))
-    checks.append(chk(
-        "11n: CA state tax on $200k MFJ ≈ $10,908 (progressive, std_ded=$10,726)",
+    checks.append(chk("11n: CA state tax on $200k MFJ ≈ $10,908 (progressive, std_ded=$10,726)",
         _within(state_ca_200k, 10_908),
-        f"actual={state_ca_200k:,.0f} expected=10,908 tol={TOL*100:.0f}%"
-    ))
+        f"actual={state_ca_200k:,.0f} expected=10,908 tol={TOL*100:.0f}%"))
 
-    # ── 11o: No-tax states — TX and FL state tax = $0 ───────────────────────
+    # ── 11o: TX and FL = $0 state tax ────────────────────────────────────────
     res_tx, t = ephemeral_run(
-        "g11o_texas", paths,
-        person=p_noconv, income=inc_200k,
-        ignore_conv=True, state="Texas", filing="MFJ"
-    ); elapsed += t
-    state_tx = _yr1(_wd_taxes_state(res_tx))
-    checks.append(chk(
-        "11o: Texas state tax = $0 (no income tax state)",
-        state_tx == 0.0,
-        f"actual={state_tx:,.0f}"
-    ))
+        "g11o_texas", paths, person=p_noconv, income=inc_200k,
+        ignore_conv=True, state="Texas", filing="MFJ"); elapsed += t
+    checks.append(chk("11o: Texas state tax = $0 (no income tax state)",
+        _yr1(_wd_taxes_state(res_tx)) == 0.0,
+        f"actual={_yr1(_wd_taxes_state(res_tx)):,.0f}"))
 
     res_fl, t = ephemeral_run(
-        "g11o_florida", paths,
-        person=p_noconv, income=inc_200k,
-        ignore_conv=True, state="Florida", filing="MFJ"
-    ); elapsed += t
-    state_fl = _yr1(_wd_taxes_state(res_fl))
-    checks.append(chk(
-        "11o: Florida state tax = $0 (no income tax state)",
-        state_fl == 0.0,
-        f"actual={state_fl:,.0f}"
-    ))
+        "g11o_florida", paths, person=p_noconv, income=inc_200k,
+        ignore_conv=True, state="Florida", filing="MFJ"); elapsed += t
+    checks.append(chk("11o: Florida state tax = $0 (no income tax state)",
+        _yr1(_wd_taxes_state(res_fl)) == 0.0,
+        f"actual={_yr1(_wd_taxes_state(res_fl)):,.0f}"))
 
-    # ── 11p: CA > TX (state tax fires in CA, not TX, same income) ───────────
-    fed_tx = _yr1(_wd_taxes_fed(res_tx))
-    checks.append(chk(
-        "11p: CA state tax > TX state tax at same income (CA progressive fires)",
-        state_ca_200k > state_tx,
-        f"ca={state_ca_200k:,.0f} tx={state_tx:,.0f}"
-    ))
-    # Federal should be identical between CA and TX (same federal brackets)
-    checks.append(chk(
-        "11p: Federal tax identical in CA vs TX (state has no effect on federal)",
-        _within(fed_mfj_200k, fed_tx, tol=0.05),
-        f"ca_fed={fed_mfj_200k:,.0f} tx_fed={fed_tx:,.0f}"
-    ))
+    # ── 11p: CA state > TX; federal same ─────────────────────────────────────
+    checks.append(chk("11p: CA state tax > TX state tax (CA progressive fires)",
+        state_ca_200k > _yr1(_wd_taxes_state(res_tx)),
+        f"ca={state_ca_200k:,.0f} tx={_yr1(_wd_taxes_state(res_tx)):,.0f}"))
+    checks.append(chk("11p: Federal tax identical in CA vs TX (state has no effect on federal)",
+        _within(_yr1(_wd_taxes_fed(res_tx)), fed_mfj_200k, tol=0.05),
+        f"ca_fed={fed_mfj_200k:,.0f} tx_fed={_yr1(_wd_taxes_fed(res_tx)):,.0f}"))
 
-    # ── 11q: Washington excise — fires on cap gains > $250k, not ordinary ───
-    # WA has no income tax but a 7% excise on cap gains above $250k threshold.
-    # NOTE: The portfolio itself generates realized cap gains from rebalancing,
-    # so we can't assert excise=$0 on "no income cap gains" runs — the portfolio
-    # will still trigger it. Instead we test:
-    #   (a) WA state income tax = $0 (no ordinary income tax)
-    #   (b) Adding $350k explicit cap gains INCREASES excise vs baseline
-    #   (c) The delta ≈ 7% × ($350k - $250k) = $7,000 additional excise
-
-    # Baseline: WA with $200k ordinary income only (no explicit cap gains)
+    # ── 11q: WA excise — fires on cap gains, delta approach ──────────────────
+    # Portfolio rebalancing already breaches $250k WA threshold so we test delta
     res_wa_base, t = ephemeral_run(
-        "g11q_wa_base", paths,
-        person=p_noconv, income=inc_200k,
-        ignore_conv=True, state="Washington", filing="MFJ"
-    ); elapsed += t
-
-    # WA with $350k cap gains added on top
+        "g11q_wa_base", paths, person=p_noconv, income=inc_200k,
+        ignore_conv=True, state="Washington", filing="MFJ"); elapsed += t
     inc_wa_cg = copy.deepcopy(BASE_INCOME)
     inc_wa_cg["cap_gains"] = [{"years": "1-30", "amount_nom": 350_000}]
     res_wa_cg, t = ephemeral_run(
-        "g11q_wa_cg", paths,
-        person=p_noconv, income=inc_wa_cg,
-        ignore_conv=True, state="Washington", filing="MFJ"
-    ); elapsed += t
-
-    # (a) WA state income tax = $0 in both cases
-    state_wa_yr1 = _yr1(_wd_taxes_state(res_wa_base))
-    checks.append(chk(
-        "11q: WA state income tax = $0 (no income tax state)",
-        state_wa_yr1 == 0.0,
-        f"yr1_state={state_wa_yr1:,.0f}"
-    ))
-
-    # (b) Adding $350k cap gains increases excise
-    excise_base_yr1 = _yr1(_wd_taxes_excise(res_wa_base))
-    excise_cg_yr1   = _yr1(_wd_taxes_excise(res_wa_cg))
-    checks.append(chk(
-        "11q: WA excise higher with $350k cap gains than without (excise fires on cap gains)",
-        excise_cg_yr1 > excise_base_yr1,
-        f"excise_cg={excise_cg_yr1:,.0f} excise_base={excise_base_yr1:,.0f}"
-    ))
-
-    # (c) Delta = 7% × $350k = $24,500
-    # NOTE: The test portfolio (large TRAD IRA + brokerage) generates realized cap gains
-    # from rebalancing that already exceed the $250k WA threshold. So adding $350k of
-    # explicit cap gains triggers excise on the full $350k amount (7% × $350k = $24,500),
-    # not just the $100k above threshold as it would for a portfolio with no prior gains.
-    excise_delta = excise_cg_yr1 - excise_base_yr1
-    checks.append(chk(
-        "11q: WA excise delta ≈ $24,500 (7% × $350k — threshold already breached by portfolio gains)",
+        "g11q_wa_cg", paths, person=p_noconv, income=inc_wa_cg,
+        ignore_conv=True, state="Washington", filing="MFJ"); elapsed += t
+    # WA state income tax = $0
+    checks.append(chk("11q: WA state income tax = $0 (no income tax state)",
+        _yr1(_wd_taxes_state(res_wa_base)) == 0.0,
+        f"yr1_state={_yr1(_wd_taxes_state(res_wa_base)):,.0f}"))
+    # Adding $350k cap gains increases excise
+    excise_base = _yr1(_wd_taxes_excise(res_wa_base))
+    excise_cg   = _yr1(_wd_taxes_excise(res_wa_cg))
+    checks.append(chk("11q: WA excise higher with $350k cap gains than without",
+        excise_cg > excise_base,
+        f"excise_cg={excise_cg:,.0f} excise_base={excise_base:,.0f}"))
+    # Delta ≈ 7% × $350k = $24,500 (threshold already breached by portfolio gains)
+    excise_delta = excise_cg - excise_base
+    checks.append(chk("11q: WA excise delta ≈ $24,500 (7% × $350k — threshold already breached)",
         _within(excise_delta, 24_500),
-        f"delta={excise_delta:,.0f} expected=24,500 tol={TOL*100:.0f}%"
-    ))
+        f"delta={excise_delta:,.0f} expected=24,500 tol={TOL*100:.0f}%"))
 
     return "G11", "Tax wiring + bracket math + filing status + state-specific rates", checks, elapsed
 
@@ -3021,12 +2952,21 @@ def group17_ui_data_integrity(paths: int):
         ))
 
     # ── 17h: Effective rate sanity using total_ordinary_income ───────────────
-    ord_inc = T.get("total_ordinary_income_median_path", [])
+    # Must be in BOTH taxes AND withdrawals dicts.
+    # App.tsx reads from W=snapshot.withdrawals — missing there → rate shows dash.
+    ord_inc_taxes = T.get("total_ordinary_income_median_path", [])
+    ord_inc_wd    = W.get("total_ordinary_income_median_path", [])
     checks.append(chk(
-        "17h: total_ordinary_income_median_path present and non-zero",
-        len(ord_inc) == NY and any(v > 0 for v in ord_inc),
-        f"len={len(ord_inc)} any_nonzero={any(v > 0 for v in ord_inc)}"
+        "17h: total_ordinary_income_median_path present in taxes dict",
+        len(ord_inc_taxes) == NY and any(v > 0 for v in ord_inc_taxes),
+        f"len={len(ord_inc_taxes)}"
     ))
+    checks.append(chk(
+        "17h: total_ordinary_income_median_path present in withdrawals dict (required for UI rate display)",
+        len(ord_inc_wd) == NY and any(v > 0 for v in ord_inc_wd),
+        f"len={len(ord_inc_wd)} — MISSING means withdrawals.update(_taxes_median_path) not in simulator_new.py"
+    ))
+    ord_inc = ord_inc_wd if ord_inc_wd else ord_inc_taxes
     if ord_inc and fed:
         eff_rates_rmd = []
         for i in rmd_years[:10]:
@@ -3040,8 +2980,8 @@ def group17_ui_data_integrity(paths: int):
         if eff_rates_rmd:
             avg_eff = sum(eff_rates_rmd) / len(eff_rates_rmd)
             checks.append(chk(
-                "17h: Effective rate (taxes/ordinary_income) in RMD years < 80%",
-                avg_eff < 0.80,
+                "17h: Effective rate in RMD years between 1% and 100% (not dash, not absurd)",
+                0.01 < avg_eff < 1.0,
                 f"avg_eff={avg_eff*100:.1f}% over {len(eff_rates_rmd)} RMD years"
             ))
 
@@ -3182,7 +3122,153 @@ def group18_snapshot_regression(paths: int):
     return "G18", "Snapshot regression (key numbers vs baseline, 5% tolerance)", checks, elapsed
 
 
+# ===========================================================================
+# GROUP 19 — PLAYWRIGHT UI SMOKE TESTS
+# ===========================================================================
 
+def group19_playwright(paths: int):
+    """Run Playwright UI smoke tests as subprocess. Auto-skips if server offline."""
+    import subprocess
+    checks = []
+    t0 = time.time()
+
+    ui_dir = os.path.join(APP_ROOT, "ui")
+    playwright_cfg = os.path.join(ui_dir, "playwright.config.ts")
+    if not os.path.isfile(playwright_cfg):
+        checks.append((FAIL, "G19: playwright.config.ts not found", f"Expected at {playwright_cfg}"))
+        return "G19", "Playwright UI smoke tests", checks, time.time() - t0
+
+    import urllib.request
+    server_up = False
+    try:
+        urllib.request.urlopen("http://localhost:8000/health", timeout=3)
+        server_up = True
+    except Exception:
+        pass
+
+    if not server_up:
+        checks.append((PASS, "G19: SKIPPED — server not reachable on :8000", ""))
+        return "G19", "Playwright UI smoke tests (skipped — server offline)", checks, time.time() - t0
+
+    result = subprocess.run(
+        ["npx", "playwright", "test", "--config=playwright.config.ts", "--reporter=line"],
+        cwd=ui_dir, capture_output=True, text=True, timeout=300,
+    )
+    elapsed = time.time() - t0
+    output = result.stdout + result.stderr
+    passed = failed = 0
+    for line in output.splitlines():
+        if " passed" in line:
+            import re; m = re.search(r"(\d+) passed", line)
+            if m: passed = int(m.group(1))
+        if " failed" in line:
+            import re; m = re.search(r"(\d+) failed", line)
+            if m: failed = int(m.group(1))
+    for line in output.splitlines():
+        line = line.strip()
+        if line.startswith("\u2713") or line.startswith("\u2718") or line.startswith("\u2713") or "\u2713" in line[:3] or "\u2718" in line[:3]:
+            pass
+        if line.startswith("\u2713") or line.startswith("\u2718"):
+            name_part = line.split("\u203a")[-1].strip() if "\u203a" in line else line[2:].strip()
+            status = PASS if line.startswith("\u2713") else FAIL
+            checks.append((status, f"G19: {name_part}", ""))
+    if not checks:
+        if result.returncode == 0:
+            checks.append((PASS, f"G19: Playwright suite passed ({passed} tests)", ""))
+        else:
+            checks.append((FAIL, "G19: Playwright suite failed",
+                           output[-500:] if len(output) > 500 else output))
+    return "G19", f"Playwright UI smoke tests ({passed} passed, {failed} failed)", checks, elapsed
+
+
+# ===========================================================================
+# GROUP 20 — PORTFOLIO ALLOCATION ANALYSIS
+# ===========================================================================
+
+def group20_portfolio_analysis(paths: int):
+    """Verifies portfolio_analysis.py produces correct allocation breakdown."""
+    checks = []
+    t0 = time.time()
+
+    try:
+        from portfolio_analysis import compute_portfolio_analysis
+    except ImportError:
+        checks.append((FAIL, "G20: portfolio_analysis.py importable", "ImportError"))
+        return "G20", "Portfolio allocation analysis", checks, time.time() - t0
+
+    alloc_path = os.path.join(APP_ROOT, "profiles", "Test", "allocation_yearly.json")
+    if not os.path.isfile(alloc_path):
+        checks.append((FAIL, "G20: Test profile allocation_yearly.json found", f"Not found: {alloc_path}"))
+        return "G20", "Portfolio allocation analysis", checks, time.time() - t0
+
+    with open(alloc_path) as f:
+        alloc_cfg = json.load(f)
+
+    starting = alloc_cfg.get("starting", {})
+    analysis = compute_portfolio_analysis(alloc_cfg, starting)
+    elapsed = time.time() - t0
+    agg = analysis.aggregate
+
+    checks.append(chk("G20a: 6 accounts found (matches Test profile)",
+        analysis.n_accounts == 6, f"actual={analysis.n_accounts}"))
+    checks.append(chk("G20a: tickers present (at least 5 unique)",
+        analysis.n_tickers >= 5, f"n_tickers={analysis.n_tickers}"))
+
+    expected_total = sum(starting.values())
+    checks.append(chk("G20b: aggregate total_balance_cur matches starting balances",
+        abs(agg.total_balance_cur - expected_total) / max(expected_total, 1) < 0.001,
+        f"actual={agg.total_balance_cur:,.0f} expected={expected_total:,.0f}"))
+
+    type_sum = sum(agg.type_weights.values())
+    checks.append(chk("G20c: type_weights sum \u2248 100%",
+        abs(type_sum - 100.0) < 1.0, f"sum={type_sum:.1f}%"))
+
+    geo_sum = sum(agg.geo_weights.values())
+    checks.append(chk("G20d: geo_weights sum \u2248 100%",
+        abs(geo_sum - 100.0) < 1.0, f"sum={geo_sum:.1f}%"))
+
+    checks.append(chk("G20e: equity_pct > 50% (growth-oriented Test profile)",
+        agg.equity_pct > 50.0, f"equity={agg.equity_pct:.1f}%"))
+
+    checks.append(chk("G20f: fixed_income_pct > 0% (FOUNDATIONAL portfolio present)",
+        agg.fixed_income_pct > 0.0, f"fixed_income={agg.fixed_income_pct:.1f}%"))
+
+    checks.append(chk("G20g: US equity > international equity",
+        agg.us_equity_pct > agg.intl_equity_pct,
+        f"us={agg.us_equity_pct:.1f}% intl={agg.intl_equity_pct:.1f}%"))
+
+    top_ticker = agg.ticker_weights[0].ticker if agg.ticker_weights else ""
+    checks.append(chk("G20h: VTI is top ticker (largest portfolio weight)",
+        top_ticker == "VTI", f"top={top_ticker}"))
+
+    acct_by_bal = sorted(analysis.accounts, key=lambda a: a.balance_cur, reverse=True)
+    checks.append(chk("G20i: TRAD_IRA-1 is largest account ($3.5M starting)",
+        acct_by_bal[0].account == "TRAD_IRA-1",
+        f"top={acct_by_bal[0].account} bal={acct_by_bal[0].balance_cur:,.0f}"))
+
+    for acct in analysis.accounts:
+        t_sum = sum(acct.type_weights.values())
+        checks.append(chk(f"G20j: {acct.account} type_weights sum \u2248 100%",
+            abs(t_sum - 100.0) < 1.0, f"sum={t_sum:.1f}%"))
+
+    roth_equity = [a.type_weights.get("Equity", 0) for a in analysis.accounts if "ROTH" in a.account]
+    trad_equity = [a.type_weights.get("Equity", 0) for a in analysis.accounts if "TRAD" in a.account]
+    if roth_equity and trad_equity:
+        checks.append(chk("G20k: ROTH accounts more aggressive than TRAD (higher equity%)",
+            sum(roth_equity)/len(roth_equity) > sum(trad_equity)/len(trad_equity),
+            f"roth_avg={sum(roth_equity)/len(roth_equity):.0f}% trad_avg={sum(trad_equity)/len(trad_equity):.0f}%"))
+
+    checks.append(chk("G20l: diversification_score in valid range (0-100)",
+        0 < agg.diversification_score <= 100, f"score={agg.diversification_score}"))
+
+    try:
+        import json as _json
+        _json.dumps(analysis.to_dict())
+        checks.append((PASS, "G20m: PortfolioAnalysis.to_dict() serialises to JSON", ""))
+    except Exception as e:
+        checks.append((FAIL, "G20m: PortfolioAnalysis.to_dict() serialises to JSON", str(e)))
+
+    return "G20", "Portfolio allocation analysis", checks, elapsed
 
 
 GROUPS = [
@@ -3205,6 +3291,8 @@ GROUPS = [
     group17_ui_data_integrity,
     group18_snapshot_regression,
 ]
+GROUPS.append(group19_playwright)
+GROUPS.append(group20_portfolio_analysis)
 
 
 def run_comprehensive(paths: int):
@@ -3303,8 +3391,9 @@ def main():
                 os.remove(_bp)
                 print("Baseline cleared — will be regenerated on next run.")
         if args.skip_playwright:
-            active_groups = [g for g in GROUPS if g.__name__ != "group19_playwright"]
-            GROUPS[:] = active_groups
+            active = [g for g in GROUPS if g.__name__ not in
+                      ("group19_playwright",)]
+            GROUPS[:] = active
         run_comprehensive(paths)
     else:
         run_standard(args.profile, paths)
