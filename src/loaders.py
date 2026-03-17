@@ -525,6 +525,9 @@ def load_person(path: str) -> Dict[str, Any]:
     if "target_age" in data:
         person_cfg["target_age"] = int(_safe_num(data.get("target_age", 95), 95))
 
+    # simulation_mode: automatic | investment | retirement | balanced
+    person_cfg["simulation_mode"] = data.get("simulation_mode", "automatic")
+
     return person_cfg
 
 

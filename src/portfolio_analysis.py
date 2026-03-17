@@ -176,6 +176,11 @@ class AggregateAnalysis:
     intl_equity_pct:    float                # Intl equity as % of total portfolio
     diversification_score: float             # 0-100 (higher = more diversified)
     flags:              List[str]            # human-readable insight flags
+    # ── Layer 5: look-through ─────────────────────────────────────────────
+    true_stock_exposure: List[TickerWeight]  # actual stocks after ETF look-through
+    sector_weights:      Dict[str, float]    # GICS sector breakdown via look-through
+    holdings_as_of:      Optional[str]       # freshness date of holdings data
+    look_through_coverage_pct: float         # % of portfolio covered by look-through
 
 
 @dataclass
@@ -264,6 +269,111 @@ def _diversification_score(ticker_weights: Dict[str, tuple],
     return round(ticker_score + geo_score + type_score, 1)
 
 
+def _compute_look_through(
+    ticker_weights: Dict[str, float],   # {ticker: weight_pct_of_portfolio}
+    assets_cfg: Dict[str, Any],         # full assets dict from assets.json
+    top_n: int = 20,
+) -> tuple:
+    """
+    Compute true stock-level exposure and sector breakdown by looking through ETFs.
+
+    For each ETF ticker in ticker_weights:
+      true_stock_exposure[stock] += etf_portfolio_weight * stock_weight_in_etf
+
+    Returns:
+      (true_stock_exposure, sector_weights, holdings_as_of, coverage_pct)
+    """
+    true_exposure: Dict[str, float] = {}    # {stock_ticker: true_pct_of_portfolio}
+    sector_exposure: Dict[str, float] = {}  # {sector: pct_of_portfolio}
+    holdings_dates: List[str] = []
+    covered_weight = 0.0
+    total_weight = sum(ticker_weights.values())
+
+    for etf_ticker, etf_portfolio_pct in ticker_weights.items():
+        asset_data = assets_cfg.get(etf_ticker.upper(), {})
+        top_holdings = asset_data.get("top_holdings", [])
+
+        if not top_holdings:
+            # No look-through data — skip (individual stock or no cache)
+            continue
+
+        covered_weight += etf_portfolio_pct
+        as_of = asset_data.get("holdings_as_of", "")
+        if as_of:
+            holdings_dates.append(as_of)
+
+        # holdings weights are % of ETF — scale by ETF's portfolio weight
+        for holding in top_holdings:
+            stock     = holding.get("ticker", "").upper()
+            h_weight  = float(holding.get("weight_pct", 0)) / 100.0  # ETF-relative
+            sector    = holding.get("sector", "Unknown") or "Unknown"
+
+            if not stock or h_weight <= 0:
+                continue
+
+            # True portfolio exposure = ETF weight × stock weight within ETF
+            true_pct = (etf_portfolio_pct / 100.0) * h_weight * 100.0
+
+            true_exposure[stock] = true_exposure.get(stock, 0.0) + true_pct
+            sector_exposure[sector] = sector_exposure.get(sector, 0.0) + true_pct
+
+    # Sort by exposure descending
+    sorted_stocks = sorted(true_exposure.items(), key=lambda x: -x[1])
+    true_stock_weights = [
+        TickerWeight(ticker=t, asset_class="look_through", weight_pct=round(w, 4))
+        for t, w in sorted_stocks[:top_n]
+    ]
+
+    # Normalise sector weights to sum to 100 (only covered portion)
+    sector_weights_pct = {
+        k: round(v, 2) for k, v in
+        sorted(sector_exposure.items(), key=lambda x: -x[1])
+    }
+
+    coverage_pct = round((covered_weight / total_weight * 100) if total_weight > 0 else 0, 1)
+    holdings_as_of = max(holdings_dates) if holdings_dates else None
+
+    # Look-through overlap flags
+    # Find stocks appearing via multiple ETFs (phantom diversification)
+    return true_stock_weights, sector_weights_pct, holdings_as_of, coverage_pct
+
+
+def _look_through_flags(
+    true_stock_weights: List[TickerWeight],
+    ticker_weights: Dict[str, float],
+    coverage_pct: float,
+) -> List[str]:
+    """Generate flags from look-through analysis."""
+    flags = []
+
+    if coverage_pct < 50:
+        flags.append(
+            f"Look-through coverage {coverage_pct:.0f}% — "
+            f"holdings data missing for some ETFs"
+        )
+        return flags
+
+    # Flag stocks with > 5% true exposure (real concentration)
+    for tw in true_stock_weights[:10]:
+        if tw.weight_pct > 5.0:
+            flags.append(
+                f"True exposure: {tw.ticker} is {tw.weight_pct:.1f}% of portfolio "
+                f"via ETF look-through (threshold 5%)"
+            )
+
+    # Flag top-2 combined exposure > 10%
+    if len(true_stock_weights) >= 2:
+        top2 = true_stock_weights[0].weight_pct + true_stock_weights[1].weight_pct
+        if top2 > 10.0:
+            flags.append(
+                f"Top 2 stocks ({true_stock_weights[0].ticker} + "
+                f"{true_stock_weights[1].ticker}) = {top2:.1f}% of portfolio "
+                f"via look-through — concentrated in market leaders"
+            )
+
+    return flags
+
+
 def _aggregate_flags(equity_pct: float,
                      intl_equity_pct: float,
                      fixed_income_pct: float,
@@ -298,14 +408,17 @@ def compute_portfolio_analysis(
     alloc_cfg: Dict[str, Any],
     starting_balances: Dict[str, float],
     ending_balances_cur: Optional[Dict[str, float]] = None,
+    assets_cfg: Optional[Dict[str, Any]] = None,   # assets.json["assets"] for look-through
 ) -> PortfolioAnalysis:
     """
-    Compute full portfolio analysis.
+    Compute full portfolio analysis including ETF look-through (Layer 5).
 
     Args:
-        alloc_cfg:            dict from allocation_yearly.json (global_allocation section)
+        alloc_cfg:            dict from allocation_yearly.json
         starting_balances:    {account_name: balance_in_current_usd}
         ending_balances_cur:  optional {account_name: balance} for current-$ ending weights
+        assets_cfg:           optional assets.json["assets"] dict for ETF look-through.
+                              If None, look-through fields will be empty.
     """
     global_alloc = alloc_cfg.get("global_allocation", alloc_cfg)
 
@@ -398,6 +511,28 @@ def compute_portfolio_analysis(
     flags     = _aggregate_flags(equity_pct, intl_equity_pct, fixed_income_pct,
                                   agg_tickers_sorted)
 
+    # ── Layer 5: ETF look-through ─────────────────────────────────────────
+    # Build {ticker: portfolio_weight_pct} for look-through input
+    ticker_portfolio_weights = {
+        t: (w / total_balance * 100.0)
+        for t, (w_pct, _cls) in agg_ticker_weights.items()
+        for w in [w_pct / 100.0 * total_balance]
+    }
+    # Simpler: just use the weight_pct directly from agg_tickers_sorted
+    ticker_pct_map = {tw.ticker: tw.weight_pct for tw in agg_tickers_sorted}
+
+    if assets_cfg:
+        true_stocks, sector_wts, holdings_as_of, coverage_pct = _compute_look_through(
+            ticker_pct_map, assets_cfg
+        )
+        look_through_flags = _look_through_flags(true_stocks, ticker_pct_map, coverage_pct)
+        flags = flags + look_through_flags
+    else:
+        true_stocks    = []
+        sector_wts     = {}
+        holdings_as_of = None
+        coverage_pct   = 0.0
+
     aggregate = AggregateAnalysis(
         total_balance_cur=round(total_balance, 2),
         class_weights=agg_class_list,
@@ -412,6 +547,10 @@ def compute_portfolio_analysis(
         intl_equity_pct=intl_equity_pct,
         diversification_score=div_score,
         flags=flags,
+        true_stock_exposure=true_stocks,
+        sector_weights=sector_wts,
+        holdings_as_of=holdings_as_of,
+        look_through_coverage_pct=coverage_pct,
     )
 
     unique_tickers = len(agg_ticker_weights)

@@ -3268,7 +3268,60 @@ def group20_portfolio_analysis(paths: int):
     except Exception as e:
         checks.append((FAIL, "G20m: PortfolioAnalysis.to_dict() serialises to JSON", str(e)))
 
-    return "G20", "Portfolio allocation analysis", checks, elapsed
+    # ── G20n: Look-through (requires assets.json with top_holdings) ───────
+    # Load assets.json and re-run with look-through enabled
+    assets_path = os.path.join(APP_ROOT, "config", "assets.json")
+    if os.path.isfile(assets_path):
+        with open(assets_path) as f:
+            assets_data = json.load(f).get("assets", {})
+
+        # Check if any tickers have top_holdings populated
+        etfs_with_holdings = [t for t, d in assets_data.items()
+                               if d.get("top_holdings")]
+        if etfs_with_holdings:
+            analysis_lt = compute_portfolio_analysis(
+                alloc_cfg, starting,
+                assets_cfg=assets_data,
+            )
+            agg_lt = analysis_lt.aggregate
+
+            checks.append(chk(
+                f"G20n: look-through populated ({len(etfs_with_holdings)} ETFs with holdings)",
+                agg_lt.look_through_coverage_pct > 0,
+                f"coverage={agg_lt.look_through_coverage_pct:.1f}%"
+            ))
+            checks.append(chk(
+                "G20n: true_stock_exposure is non-empty list",
+                len(agg_lt.true_stock_exposure) > 0,
+                f"n_stocks={len(agg_lt.true_stock_exposure)}"
+            ))
+            checks.append(chk(
+                "G20n: sector_weights is non-empty dict",
+                len(agg_lt.sector_weights) > 0,
+                f"n_sectors={len(agg_lt.sector_weights)}"
+            ))
+            # Top stock should have meaningful exposure
+            if agg_lt.true_stock_exposure:
+                top = agg_lt.true_stock_exposure[0]
+                checks.append(chk(
+                    f"G20n: top look-through stock has > 0.1% exposure",
+                    top.weight_pct > 0.1,
+                    f"top={top.ticker} {top.weight_pct:.2f}%"
+                ))
+            # holdings_as_of should be a date string
+            checks.append(chk(
+                "G20n: holdings_as_of is populated",
+                bool(agg_lt.holdings_as_of),
+                f"as_of={agg_lt.holdings_as_of}"
+            ))
+        else:
+            checks.append((PASS,
+                "G20n: SKIPPED — no ETFs with top_holdings in assets.json "
+                "(run ./refresh_model.sh to populate)", ""))
+    else:
+        checks.append((PASS, "G20n: SKIPPED — assets.json not found", ""))
+
+    return "G20", "Portfolio allocation analysis + look-through", checks, elapsed
 
 
 GROUPS = [

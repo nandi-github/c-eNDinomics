@@ -31,6 +31,16 @@ def _build_portfolio_analysis(
         with open(alloc_path, encoding="utf-8") as f:
             alloc_cfg = json.load(f)
 
+        # Load assets.json for ETF look-through (Layer 5)
+        assets_data: Optional[Dict] = None
+        try:
+            assets_path = (input_paths or {}).get("assets", "")
+            if assets_path and os.path.isfile(assets_path):
+                with open(assets_path, encoding="utf-8") as f:
+                    assets_data = json.load(f).get("assets", {})
+        except Exception:
+            pass   # look-through optional — degrades gracefully
+
         # Build ending balance dict in current USD from ending_balances list
         ending_cur: Optional[Dict[str, float]] = None
         if ending_balances:
@@ -49,6 +59,7 @@ def _build_portfolio_analysis(
             alloc_cfg=alloc_cfg,
             starting_balances=starting,
             ending_balances_cur=ending_cur if ending_cur else None,
+            assets_cfg=assets_data,
         )
         return analysis.to_dict()
 

@@ -618,7 +618,7 @@ test("Run Parameters show correct profile metadata", async ({ page }) => {
 // Regression guard: checkboxes lost during App.tsx rebuilds won't be caught
 // by Python tests (which test the simulator layer, not the UI).
 
-test("Run panel: all four ignore checkboxes present", async ({ page }) => {
+test("Run panel: all four ignore checkboxes + simulation mode selector present", async ({ page }) => {
   await page.goto("/");
   await page.locator(".tab", { hasText: "Run" }).click();
   await expect(page.locator("h2", { hasText: "Run Simulation" })).toBeVisible();
@@ -633,6 +633,15 @@ test("Run panel: all four ignore checkboxes present", async ({ page }) => {
     await expect(
       page.locator("label", { hasText: label }),
       `"${label}" checkbox must be present in Run panel`
+    ).toBeVisible();
+  }
+
+  // Simulation mode selector — all four modes present
+  const expectedModes = ["Automatic", "Retirement-first", "Balanced", "Investment-first"];
+  for (const mode of expectedModes) {
+    await expect(
+      page.locator("label", { hasText: mode }),
+      `"${mode}" simulation mode must be present`
     ).toBeVisible();
   }
 });

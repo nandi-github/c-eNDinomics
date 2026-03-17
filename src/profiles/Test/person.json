@@ -82,6 +82,10 @@
     "state": "Resident state for state income tax bracket selection. Must match a state name exactly as keyed in src/config/taxes_states_mfj_single.json (e.g. 'California', 'New York', 'Texas'). Drives which state brackets are loaded by load_tax_unified(). Can be overridden at runtime via the Run panel without changing this file.",
     "rmd_table": "Which IRS RMD table to use. Options: 'uniform_lifetime' (default \u2014 applies to all account owners), 'joint_survivor' (use only if your spouse is your sole IRA beneficiary AND is more than 10 years younger \u2014 produces lower RMDs). The system file src/config/rmd.json contains the Uniform Lifetime Table. Joint Survivor table must be added to src/config/ before selecting this option.",
     "runtime_overrides_note": "Fields 'state', 'filing_status', and 'rmd_table' can be overridden at runtime from the Run panel without editing this file. Runtime overrides are ephemeral \u2014 they apply to that run only and are recorded in the run's result metadata so you always know which parameters produced which results.",
-    "target_age": "Final simulation age (inclusive). n_years = target_age - current_age. Clamped to 10-60 year range. Replaces assumed_death_age for simulation length control."
-  }
+    "target_age": "Final simulation age (inclusive). n_years = target_age - current_age. Clamped to 10-60 year range. Replaces assumed_death_age for simulation length control.",
+    "simulation_mode": "Controls the objective function and dashboard. Options: 'automatic' (default \u2014 glide path shifts from investment-heavy to retirement-heavy as you approach retirement_age), 'investment' (growth maximizing, retirement as constraint), 'retirement' (survival probability maximizing), 'balanced' (equal weight on both objectives). In automatic mode the blend recomputes on every run based on current_age vs retirement_age.",
+    "retirement_age": "Target retirement age used by automatic simulation_mode to compute the investment/retirement objective blend. Also used for Roth conversion window planning and RMD gap analysis."
+  },
+  "simulation_mode": "automatic",
+  "retirement_age": 65
 }

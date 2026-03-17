@@ -33,6 +33,7 @@ type RunFlags = {
   ignore_rmds?: boolean;
   ignore_conversions?: boolean;
   ignore_taxes?: boolean;
+  simulation_mode?: string;
 };
 
 type RunInfo = {
@@ -154,6 +155,11 @@ type AggregateAnalysis = {
   equity_pct: number; fixed_income_pct: number; alternatives_pct: number; cash_pct: number;
   us_equity_pct: number; intl_equity_pct: number;
   diversification_score: number; flags: string[];
+  // Layer 5: look-through
+  true_stock_exposure: TickerWeight[];
+  sector_weights: Record<string, number>;
+  holdings_as_of: string | null;
+  look_through_coverage_pct: number;
 };
 type PortfolioAnalysis = {
   aggregate: AggregateAnalysis; accounts: AccountAnalysis[];
@@ -289,6 +295,7 @@ const App: React.FC = () => {
   const [runIgnoreRmds, setRunIgnoreRmds] = useState(false);
   const [runIgnoreConversions, setRunIgnoreConversions] = useState(false);
   const [runIgnoreTaxes,       setRunIgnoreTaxes]       = useState(false);
+  const [runSimulationMode,    setRunSimulationMode]    = useState<string>("automatic");
 
   const [runs, setRuns] = useState<string[]>([]);
   const [selectedRun, setSelectedRun] = useState<string>("");
@@ -518,6 +525,7 @@ const App: React.FC = () => {
         ignore_rmds: runIgnoreRmds,
         ignore_conversions: runIgnoreConversions,
         ignore_taxes:       runIgnoreTaxes,
+        simulation_mode:    runSimulationMode,
       });
       if (!res.ok) throw new Error("Run failed");
       setEndingBalances(res.ending_balances ?? null);
@@ -982,6 +990,42 @@ const App: React.FC = () => {
             </label>
           </div>
 
+          <div className="field" style={{ marginTop: 12, marginBottom: 4 }}>
+            <label style={{ fontWeight: 600, fontSize: "0.88em" }}>Simulation Mode</label>
+            <div style={{ display: "flex", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+              {(["automatic", "retirement", "balanced", "investment"] as const).map(mode => (
+                <label key={mode} style={{
+                  display: "flex", alignItems: "center", gap: 4,
+                  padding: "4px 10px",
+                  borderRadius: 4,
+                  border: `1px solid ${runSimulationMode === mode ? "#2e75b6" : "#ccc"}`,
+                  background: runSimulationMode === mode ? "#e8f0fb" : "white",
+                  cursor: "pointer", fontSize: "0.85em",
+                  fontWeight: runSimulationMode === mode ? 600 : 400,
+                }}>
+                  <input
+                    type="radio"
+                    name="simulation_mode"
+                    value={mode}
+                    checked={runSimulationMode === mode}
+                    onChange={() => setRunSimulationMode(mode)}
+                    style={{ display: "none" }}
+                  />
+                  {mode === "automatic" ? "🔄 Automatic" :
+                   mode === "retirement" ? "🛡 Retirement-first" :
+                   mode === "balanced"   ? "⚖ Balanced" :
+                                          "📈 Investment-first"}
+                </label>
+              ))}
+            </div>
+            <div style={{ fontSize: "0.78em", color: "#666", marginTop: 4 }}>
+              {runSimulationMode === "automatic"   && "Glide path — shifts from growth to preservation as retirement approaches"}
+              {runSimulationMode === "retirement"  && "Maximize survival probability — spending floor, RMD optimization, sequence risk"}
+              {runSimulationMode === "investment"  && "Maximize risk-adjusted return — growth focus, retirement as constraint"}
+              {runSimulationMode === "balanced"    && "Equal weight on both — shows growth potential and retirement tradeoffs"}
+            </div>
+          </div>
+
           <div className="run-actions">
             <button
               onClick={runSimulation}
@@ -1082,6 +1126,12 @@ const App: React.FC = () => {
                     <strong>Ignore taxes:</strong>{" "}
                     {snapshot.run_info.flags?.ignore_taxes ? "Yes" : "No"}
                   </div>
+                  {snapshot.run_info.flags?.simulation_mode && (
+                  <div>
+                    <strong>Simulation mode:</strong>{" "}
+                    {snapshot.run_info.flags.simulation_mode}
+                  </div>
+                  )}
                 </div>
               </section>
 
@@ -1382,6 +1432,66 @@ const App: React.FC = () => {
                         </table>
                       </div>
                     </div>
+
+                    {/* ── Look-Through: True Stock Exposure ─────────────── */}
+                    {agg.true_stock_exposure && agg.true_stock_exposure.length > 0 && (
+                      <div style={{ marginBottom: 20 }}>
+                        <div style={{ fontWeight: 600, fontSize: "0.88em", marginBottom: 4 }}>
+                          True Stock Exposure (ETF Look-Through)
+                          {agg.holdings_as_of && (
+                            <span style={{ fontWeight: 400, fontSize: "0.85em", marginLeft: 8, color: "#888" }}>
+                              data as of {agg.holdings_as_of} · {agg.look_through_coverage_pct.toFixed(0)}% of portfolio covered
+                            </span>
+                          )}
+                        </div>
+                        <p style={{ fontSize: "0.8em", color: "#666", marginBottom: 8 }}>
+                          Actual stock concentration across all ETFs combined.
+                          Holding VTI + QQQ together may mean 10%+ in the same top stocks.
+                        </p>
+                        <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
+                          {/* True stock table */}
+                          <div style={{ flex: 1, minWidth: 200 }}>
+                            <table className="table" style={{ fontSize: "0.83em" }}>
+                              <thead><tr><th>Stock</th><th>True Exposure</th></tr></thead>
+                              <tbody>
+                                {agg.true_stock_exposure.slice(0, 10).map(t => (
+                                  <tr key={t.ticker}>
+                                    <td><strong>{t.ticker}</strong></td>
+                                    <td>
+                                      <span style={{
+                                        color: t.weight_pct > 5 ? "#c62828" :
+                                               t.weight_pct > 3 ? "#e65100" : "inherit",
+                                        fontWeight: t.weight_pct > 5 ? 600 : 400,
+                                      }}>
+                                        {t.weight_pct.toFixed(2)}%
+                                      </span>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                          {/* Sector breakdown */}
+                          {Object.keys(agg.sector_weights).length > 0 && (
+                            <div style={{ flex: 1, minWidth: 240 }}>
+                              <div style={{ fontWeight: 600, fontSize: "0.85em", marginBottom: 6 }}>Sector Breakdown</div>
+                              {Object.entries(agg.sector_weights)
+                                .sort((a, b) => b[1] - a[1])
+                                .slice(0, 8)
+                                .map(([sector, pct]) => (
+                                  <div key={sector} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3 }}>
+                                    <div style={{ width: 140, fontSize: "0.78em", textAlign: "right", flexShrink: 0 }}>{sector}</div>
+                                    <div style={{ flex: 1, background: "#eee", borderRadius: 3, height: 12, overflow: "hidden" }}>
+                                      <div style={{ width: `${Math.min(pct * 3, 100)}%`, background: "#5b8dd9", height: "100%", borderRadius: 3 }} />
+                                    </div>
+                                    <div style={{ width: 40, fontSize: "0.78em", textAlign: "right", flexShrink: 0 }}>{pct.toFixed(1)}%</div>
+                                  </div>
+                                ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
 
                     <div style={{ fontWeight: 600, fontSize: "0.88em", marginBottom: 8 }}>Per-Account Allocation</div>
                     <table className="table" style={{ fontSize: "0.83em" }}>
