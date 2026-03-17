@@ -1,0 +1,29 @@
+{
+  "_description": "CAPE (Shiller P/E) configuration for valuation-adjusted return estimates",
+  "_updated": "2026-03-17",
+  "_source": "manual — update monthly from https://multpl.com/shiller-pe or FRED CAPE",
+  
+  "cape_current": 35.0,
+  "cape_historical_mean": 17.0,
+  "cape_historical_median": 15.8,
+
+  "adjustment_config": {
+    "near_horizon_years": 10,
+    "blend_weights_by_horizon": {
+      "0_to_5yr":   {"historical": 0.20, "cape_implied": 0.55, "prior": 0.25},
+      "5_to_15yr":  {"historical": 0.40, "cape_implied": 0.35, "prior": 0.25},
+      "15_to_49yr": {"historical": 0.65, "cape_implied": 0.15, "prior": 0.20}
+    },
+    "inflation_assumption": 0.035,
+    "cape_applies_to_classes": ["US_STOCKS"],
+    "cape_partial_applies_to": ["INTL_STOCKS"],
+    "cape_partial_weight": 0.40
+  },
+
+  "readme": {
+    "cape_current": "Update monthly. Source: https://multpl.com/shiller-pe or FRED series CAPE",
+    "cape_historical_mean": "Long-run average ~17. Used as reversion target.",
+    "adjustment_logic": "Near-term mu dampened toward 1/CAPE real return. Long-term reverts to historical. See asset_calibration.py _cape_adjusted_mu() for full formula.",
+    "auto_update": "refresh_model.sh fetches from FRED when network available and updates this file."
+  }
+}

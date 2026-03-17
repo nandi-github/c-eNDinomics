@@ -46,8 +46,115 @@ _CACHE_DIR    = os.path.join(_REPO_ROOT, "market_data", "cache", "store")
 _ASSETS_IN    = os.path.join(_HERE, "config", "assets.json")    # current production model
 _CANDIDATE_DIR = os.path.join(_REPO_ROOT, "asset-model", "candidate")
 _CANDIDATE_OUT = os.path.join(_CANDIDATE_DIR, "assets.json")
+_CAPE_CONFIG  = os.path.join(_REPO_ROOT, "asset-model", "cape_config.json")
 
 sys.path.insert(0, _REPO_ROOT)
+
+# ---------------------------------------------------------------------------
+# CAPE valuation adjustment
+# ---------------------------------------------------------------------------
+
+def _load_cape_config() -> dict:
+    """Load cape_config.json. Returns defaults if file not found."""
+    defaults = {
+        "cape_current": 17.0,           # historical mean — no adjustment
+        "cape_historical_mean": 17.0,
+        "inflation_assumption": 0.035,
+        "adjustment_config": {
+            "blend_weights_by_horizon": {
+                "0_to_5yr":   {"historical": 0.20, "cape_implied": 0.55, "prior": 0.25},
+                "5_to_15yr":  {"historical": 0.40, "cape_implied": 0.35, "prior": 0.25},
+                "15_to_49yr": {"historical": 0.65, "cape_implied": 0.15, "prior": 0.20},
+            },
+            "cape_applies_to_classes": ["US_STOCKS"],
+            "cape_partial_applies_to": ["INTL_STOCKS"],
+            "cape_partial_weight": 0.40,
+        },
+    }
+    try:
+        if os.path.isfile(_CAPE_CONFIG):
+            with open(_CAPE_CONFIG) as f:
+                cfg = json.load(f)
+            # Merge with defaults for any missing keys
+            defaults.update({k: v for k, v in cfg.items() if not k.startswith("_")})
+            adj = cfg.get("adjustment_config", {})
+            if adj:
+                defaults["adjustment_config"].update(adj)
+    except Exception:
+        pass
+    return defaults
+
+
+def _cape_adjusted_mu(
+    raw_mu: float,
+    asset_class: str,
+    prior_mu: float,
+    cape_cfg: dict,
+) -> float:
+    """
+    Apply CAPE valuation adjustment to raw historical mu.
+
+    Logic:
+      - CAPE-implied 10yr real return = 1/CAPE  (Shiller's formula)
+      - Blend historical mu with CAPE-implied over near horizon
+      - Long horizon reverts to historical (CAPE signal fades)
+      - Only applies to equity asset classes
+
+    Returns adjusted mu (still a single number — the simulation's
+    GBM draws the actual year-by-year variation around this center).
+    """
+    adj_cfg     = cape_cfg.get("adjustment_config", {})
+    applies_to  = adj_cfg.get("cape_applies_to_classes", ["US_STOCKS"])
+    partial_to  = adj_cfg.get("cape_partial_applies_to", ["INTL_STOCKS"])
+    partial_wt  = float(adj_cfg.get("cape_partial_weight", 0.40))
+
+    cape        = float(cape_cfg.get("cape_current", 17.0))
+    cape_mean   = float(cape_cfg.get("cape_historical_mean", 17.0))
+    inflation   = float(cape_cfg.get("inflation_assumption", 0.035))
+
+    # Only adjust equity classes
+    if asset_class not in applies_to and asset_class not in partial_to:
+        return raw_mu
+
+    # CAPE-implied forward return (Shiller earnings yield + inflation)
+    cape_implied_real    = 1.0 / cape                        # ~2.9% at CAPE=35
+    cape_implied_nominal = cape_implied_real + inflation      # ~6.4% at CAPE=35
+
+    # Blend weights by horizon — use the medium-term (5-15yr) as representative
+    # for the single mu value (simulation handles intra-year variance via sigma)
+    bw = adj_cfg.get("blend_weights_by_horizon", {})
+    w  = bw.get("5_to_15yr", {"historical": 0.40, "cape_implied": 0.35, "prior": 0.25})
+
+    w_hist  = float(w.get("historical",  0.40))
+    w_cape  = float(w.get("cape_implied", 0.35))
+    w_prior = float(w.get("prior",        0.25))
+
+    # Normalise weights
+    total = w_hist + w_cape + w_prior
+    w_hist  /= total
+    w_cape  /= total
+    w_prior /= total
+
+    adjusted = w_hist * raw_mu + w_cape * cape_implied_nominal + w_prior * prior_mu
+
+    # Partial application for international stocks
+    if asset_class in partial_to:
+        adjusted = partial_wt * adjusted + (1 - partial_wt) * raw_mu
+
+    return round(adjusted, 6)
+
+
+def _cape_summary_line(cape_cfg: dict) -> str:
+    """Human-readable CAPE adjustment summary for calibration output."""
+    cape    = float(cape_cfg.get("cape_current", 17.0))
+    mean    = float(cape_cfg.get("cape_historical_mean", 17.0))
+    infl    = float(cape_cfg.get("inflation_assumption", 0.035))
+    implied = round(1.0 / cape + infl, 4) if cape > 0 else 0
+    signal  = "expensive" if cape > mean * 1.2 else \
+              "cheap" if cape < mean * 0.8 else "fair"
+    return (f"CAPE={cape:.1f} (mean={mean:.1f}, {signal}) → "
+            f"implied 10yr nominal={implied:.1%}  "
+            f"[source: {cape_cfg.get('_source', 'cape_config.json')}]")
 
 # ---------------------------------------------------------------------------
 # Multi-window blend weights
@@ -351,6 +458,10 @@ def run_calibration(
     tickers = sorted(prior_assets.keys())
     print(f"Calibrating {len(tickers)} tickers: {tickers}\n")
 
+    # Load CAPE config for valuation adjustment
+    cape_cfg = _load_cape_config()
+    print(f"  Valuation: {_cape_summary_line(cape_cfg)}\n")
+
     new_assets: Dict = {}
     price_map: Dict[str, List[float]] = {}
 
@@ -385,11 +496,17 @@ def run_calibration(
             windows, weights, prior_weight,
         )
 
+        # Apply CAPE valuation adjustment to equity mu
+        raw_mu = mu
+        mu = _cape_adjusted_mu(mu, asset_class, prior_mu, cape_cfg)
+        cape_delta = mu - raw_mu
+
         delta_mu    = mu    - prior_mu
         delta_sigma = sigma - prior_sigma
+        cape_note   = f"  cape_adj={cape_delta:+.4f}" if abs(cape_delta) > 0.001 else ""
         print(f"  {ticker:6s}  mu={mu:.4f} ({delta_mu:+.4f})  "
               f"sigma={sigma:.4f} ({delta_sigma:+.4f})  "
-              f"yield={yield_est:.4f}  bars={len(closes)}")
+              f"yield={yield_est:.4f}  bars={len(closes)}{cape_note}")
 
         new_assets[ticker] = {
             "class":         asset_class,
@@ -403,11 +520,14 @@ def run_calibration(
             },
             "_provenance": prior_cfg.get("_provenance", {}),
             "_calibration": {
-                "method":       "multi_window_blend",
+                "method":       "multi_window_blend+cape",
                 "windows_yr":   windows,
                 "weights":      weights,
                 "prior_weight": prior_weight,
                 "bars_used":    len(closes),
+                "raw_mu":       round(raw_mu, 6),
+                "cape_adj":     round(cape_delta, 6),
+                "cape_current": cape_cfg.get("cape_current", 17.0),
                 "as_of":        datetime.date.today().isoformat(),
                 "provider":     prices.provider,
             },

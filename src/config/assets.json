@@ -1,13 +1,13 @@
 {
-  "model_version": "1.1.0",
+  "model_version": "1.3.0",
   "schema_version": "2.0",
-  "released_at": "2026-03-16",
-  "valid_from": "2026-03-16",
-  "valid_until": "2026-04-15",
+  "released_at": "2026-03-17",
+  "valid_from": "2026-03-17",
+  "valid_until": "2026-04-16",
   "status": "production",
   "training": {
     "method": "multi_window_blend",
-    "data_through": "2026-03-16",
+    "data_through": "2026-03-17",
     "windows_used": [
       5,
       10,
@@ -21,13 +21,13 @@
     "prior_weight": 0.2,
     "event_signals_included": false,
     "auto_refresh_enabled": false,
-    "notes": "Calibrated from market_data cache. Multi-window blend: [(5, 0.15), (10, 0.35), (20, 0.3)] + prior\u00d70.2. Promoted from 1.0.0."
+    "notes": "Calibrated from market_data cache. Multi-window blend: [(5, 0.15), (10, 0.35), (20, 0.3)] + prior\u00d70.2. Promoted from 1.2.0."
   },
   "assets": {
     "AAPL": {
       "class": "US_STOCKS",
-      "mu_annual": 0.216332,
-      "sigma_annual": 0.286871,
+      "mu_annual": 0.151333,
+      "sigma_annual": 0.29572,
       "expense_ratio": 0.0,
       "tracking_error": 0.03,
       "dist": {
@@ -38,7 +38,7 @@
         "basis": "single stock; higher idiosyncratic risk (tracking_error reflects stock-specific vol above class)"
       },
       "_calibration": {
-        "method": "multi_window_blend",
+        "method": "multi_window_blend+cape",
         "windows_yr": [
           5,
           10,
@@ -51,7 +51,10 @@
         ],
         "prior_weight": 0.2,
         "bars_used": 5030,
-        "as_of": "2026-03-16",
+        "raw_mu": 0.22,
+        "cape_adj": -0.068667,
+        "cape_current": 35.0,
+        "as_of": "2026-03-17",
         "provider": "yfinance"
       },
       "sector": "Technology",
@@ -61,8 +64,8 @@
     },
     "AMZN": {
       "class": "US_STOCKS",
-      "mu_annual": 0.182605,
-      "sigma_annual": 0.338688,
+      "mu_annual": 0.138325,
+      "sigma_annual": 0.347974,
       "expense_ratio": 0.0,
       "tracking_error": 0.03,
       "dist": {
@@ -73,7 +76,7 @@
         "basis": "single stock; no dividend, higher growth/risk"
       },
       "_calibration": {
-        "method": "multi_window_blend",
+        "method": "multi_window_blend+cape",
         "windows_yr": [
           5,
           10,
@@ -86,7 +89,10 @@
         ],
         "prior_weight": 0.2,
         "bars_used": 5030,
-        "as_of": "2026-03-16",
+        "raw_mu": 0.196868,
+        "cape_adj": -0.058543,
+        "cape_current": 35.0,
+        "as_of": "2026-03-17",
         "provider": "yfinance"
       },
       "sector": "Consumer Cyclical",
@@ -96,8 +102,8 @@
     },
     "BND": {
       "class": "INT_TREAS",
-      "mu_annual": 0.020043,
-      "sigma_annual": 0.057909,
+      "mu_annual": 0.020053,
+      "sigma_annual": 0.055008,
       "expense_ratio": 0.0003,
       "tracking_error": 0.0,
       "dist": {
@@ -108,7 +114,7 @@
         "basis": "total bond market; investment grade blend, lowest sigma in class"
       },
       "_calibration": {
-        "method": "multi_window_blend",
+        "method": "multi_window_blend+cape",
         "windows_yr": [
           5,
           10,
@@ -121,7 +127,10 @@
         ],
         "prior_weight": 0.2,
         "bars_used": 4763,
-        "as_of": "2026-03-16",
+        "raw_mu": 0.020053,
+        "cape_adj": 0.0,
+        "cape_current": 35.0,
+        "as_of": "2026-03-17",
         "provider": "yfinance"
       },
       "sector": "Vanguard",
@@ -256,8 +265,8 @@
     },
     "DBC": {
       "class": "COMMOD",
-      "mu_annual": 0.067386,
-      "sigma_annual": 0.18846,
+      "mu_annual": 0.076839,
+      "sigma_annual": 0.18569,
       "expense_ratio": 0.0085,
       "tracking_error": 0.02,
       "dist": {
@@ -268,7 +277,7 @@
         "basis": "broad commodities basket; inflation hedge, high vol, no income; roll yield drag included in mu"
       },
       "_calibration": {
-        "method": "multi_window_blend",
+        "method": "multi_window_blend+cape",
         "windows_yr": [
           5,
           10,
@@ -281,7 +290,10 @@
         ],
         "prior_weight": 0.2,
         "bars_used": 5030,
-        "as_of": "2026-03-16",
+        "raw_mu": 0.076839,
+        "cape_adj": 0.0,
+        "cape_current": 35.0,
+        "as_of": "2026-03-17",
         "provider": "yfinance"
       },
       "sector": "Invesco",
@@ -291,8 +303,8 @@
     },
     "EEM": {
       "class": "INTL_STOCKS",
-      "mu_annual": 0.060347,
-      "sigma_annual": 0.229911,
+      "mu_annual": 0.060979,
+      "sigma_annual": 0.22749,
       "expense_ratio": 0.0068,
       "tracking_error": 0.02,
       "dist": {
@@ -303,7 +315,7 @@
         "basis": "emerging markets; higher growth potential but higher sigma and political risk"
       },
       "_calibration": {
-        "method": "multi_window_blend",
+        "method": "multi_window_blend+cape",
         "windows_yr": [
           5,
           10,
@@ -316,7 +328,10 @@
         ],
         "prior_weight": 0.2,
         "bars_used": 5030,
-        "as_of": "2026-03-16",
+        "raw_mu": 0.060518,
+        "cape_adj": 0.000461,
+        "cape_current": 35.0,
+        "as_of": "2026-03-17",
         "provider": "yfinance"
       },
       "sector": "iShares",
@@ -451,8 +466,8 @@
     },
     "EFA": {
       "class": "INTL_STOCKS",
-      "mu_annual": 0.068896,
-      "sigma_annual": 0.182779,
+      "mu_annual": 0.070988,
+      "sigma_annual": 0.185846,
       "expense_ratio": 0.0032,
       "tracking_error": 0.01,
       "dist": {
@@ -463,7 +478,7 @@
         "basis": "developed markets ex-US; slightly lower mu than VXUS (ex-EM)"
       },
       "_calibration": {
-        "method": "multi_window_blend",
+        "method": "multi_window_blend+cape",
         "windows_yr": [
           5,
           10,
@@ -476,7 +491,10 @@
         ],
         "prior_weight": 0.2,
         "bars_used": 5030,
-        "as_of": "2026-03-16",
+        "raw_mu": 0.07241,
+        "cape_adj": -0.001422,
+        "cape_current": 35.0,
+        "as_of": "2026-03-17",
         "provider": "yfinance"
       },
       "sector": "iShares",
@@ -611,8 +629,8 @@
     },
     "GLD": {
       "class": "GOLD",
-      "mu_annual": 0.124812,
-      "sigma_annual": 0.165558,
+      "mu_annual": 0.147567,
+      "sigma_annual": 0.169292,
       "expense_ratio": 0.004,
       "tracking_error": 0.01,
       "dist": {
@@ -623,7 +641,7 @@
         "basis": "gold bullion; long-run real return ~0-1%; ~3% nominal with inflation; portfolio hedge, no income"
       },
       "_calibration": {
-        "method": "multi_window_blend",
+        "method": "multi_window_blend+cape",
         "windows_yr": [
           5,
           10,
@@ -636,7 +654,10 @@
         ],
         "prior_weight": 0.2,
         "bars_used": 5030,
-        "as_of": "2026-03-16",
+        "raw_mu": 0.147567,
+        "cape_adj": 0.0,
+        "cape_current": 35.0,
+        "as_of": "2026-03-17",
         "provider": "yfinance"
       },
       "sector": "State Street Investment Management",
@@ -646,8 +667,8 @@
     },
     "IAU": {
       "class": "GOLD",
-      "mu_annual": 0.126024,
-      "sigma_annual": 0.16531,
+      "mu_annual": 0.14907,
+      "sigma_annual": 0.168985,
       "expense_ratio": 0.0025,
       "tracking_error": 0.01,
       "dist": {
@@ -658,7 +679,7 @@
         "basis": "same as GLD, lower ER"
       },
       "_calibration": {
-        "method": "multi_window_blend",
+        "method": "multi_window_blend+cape",
         "windows_yr": [
           5,
           10,
@@ -671,7 +692,10 @@
         ],
         "prior_weight": 0.2,
         "bars_used": 5030,
-        "as_of": "2026-03-16",
+        "raw_mu": 0.14907,
+        "cape_adj": 0.0,
+        "cape_current": 35.0,
+        "as_of": "2026-03-17",
         "provider": "yfinance"
       },
       "sector": "iShares",
@@ -681,8 +705,8 @@
     },
     "IEF": {
       "class": "INT_TREAS",
-      "mu_annual": 0.015667,
-      "sigma_annual": 0.071234,
+      "mu_annual": 0.015107,
+      "sigma_annual": 0.069131,
       "expense_ratio": 0.00015,
       "tracking_error": 0.0,
       "dist": {
@@ -693,7 +717,7 @@
         "basis": "7-10yr Treasury; lower duration = lower sigma vs TLT"
       },
       "_calibration": {
-        "method": "multi_window_blend",
+        "method": "multi_window_blend+cape",
         "windows_yr": [
           5,
           10,
@@ -706,7 +730,10 @@
         ],
         "prior_weight": 0.2,
         "bars_used": 5030,
-        "as_of": "2026-03-16",
+        "raw_mu": 0.015107,
+        "cape_adj": 0.0,
+        "cape_current": 35.0,
+        "as_of": "2026-03-17",
         "provider": "yfinance"
       },
       "sector": "iShares",
@@ -805,8 +832,8 @@
     },
     "LQD": {
       "class": "INT_TREAS",
-      "mu_annual": 0.027262,
-      "sigma_annual": 0.089243,
+      "mu_annual": 0.028525,
+      "sigma_annual": 0.086662,
       "expense_ratio": 0.0014,
       "tracking_error": 0.01,
       "dist": {
@@ -817,7 +844,7 @@
         "basis": "investment grade corporate; +20bp spread over Treasuries, slightly higher sigma"
       },
       "_calibration": {
-        "method": "multi_window_blend",
+        "method": "multi_window_blend+cape",
         "windows_yr": [
           5,
           10,
@@ -830,7 +857,10 @@
         ],
         "prior_weight": 0.2,
         "bars_used": 5030,
-        "as_of": "2026-03-16",
+        "raw_mu": 0.028525,
+        "cape_adj": 0.0,
+        "cape_current": 35.0,
+        "as_of": "2026-03-17",
         "provider": "yfinance"
       },
       "sector": "iShares",
@@ -965,8 +995,8 @@
     },
     "MSFT": {
       "class": "US_STOCKS",
-      "mu_annual": 0.166742,
-      "sigma_annual": 0.262056,
+      "mu_annual": 0.128796,
+      "sigma_annual": 0.26975,
       "expense_ratio": 0.0,
       "tracking_error": 0.02,
       "dist": {
@@ -977,7 +1007,7 @@
         "basis": "single stock; large cap quality, slightly lower sigma than AAPL"
       },
       "_calibration": {
-        "method": "multi_window_blend",
+        "method": "multi_window_blend+cape",
         "windows_yr": [
           5,
           10,
@@ -990,7 +1020,10 @@
         ],
         "prior_weight": 0.2,
         "bars_used": 5030,
-        "as_of": "2026-03-16",
+        "raw_mu": 0.179984,
+        "cape_adj": -0.051188,
+        "cape_current": 35.0,
+        "as_of": "2026-03-17",
         "provider": "yfinance"
       },
       "sector": "Technology",
@@ -1000,8 +1033,8 @@
     },
     "NVDA": {
       "class": "US_STOCKS",
-      "mu_annual": 0.22,
-      "sigma_annual": 0.467522,
+      "mu_annual": 0.151563,
+      "sigma_annual": 0.495727,
       "expense_ratio": 0.0,
       "tracking_error": 0.04,
       "dist": {
@@ -1012,7 +1045,7 @@
         "basis": "single stock; AI/semiconductor cycle exposure; highest sigma in class"
       },
       "_calibration": {
-        "method": "multi_window_blend",
+        "method": "multi_window_blend+cape",
         "windows_yr": [
           5,
           10,
@@ -1025,7 +1058,10 @@
         ],
         "prior_weight": 0.2,
         "bars_used": 5030,
-        "as_of": "2026-03-16",
+        "raw_mu": 0.22,
+        "cape_adj": -0.068437,
+        "cape_current": 35.0,
+        "as_of": "2026-03-17",
         "provider": "yfinance"
       },
       "sector": "Technology",
@@ -1035,8 +1071,8 @@
     },
     "PDBC": {
       "class": "COMMOD",
-      "mu_annual": 0.070574,
-      "sigma_annual": 0.182305,
+      "mu_annual": 0.080792,
+      "sigma_annual": 0.180458,
       "expense_ratio": 0.0059,
       "tracking_error": 0.02,
       "dist": {
@@ -1047,7 +1083,7 @@
         "basis": "optimized roll commodities; similar to DBC, lower ER, slightly lower sigma from roll optimization"
       },
       "_calibration": {
-        "method": "multi_window_blend",
+        "method": "multi_window_blend+cape",
         "windows_yr": [
           5,
           10,
@@ -1060,7 +1096,10 @@
         ],
         "prior_weight": 0.2,
         "bars_used": 2852,
-        "as_of": "2026-03-16",
+        "raw_mu": 0.080792,
+        "cape_adj": 0.0,
+        "cape_current": 35.0,
+        "as_of": "2026-03-17",
         "provider": "yfinance"
       },
       "sector": "Invesco",
@@ -1070,8 +1109,8 @@
     },
     "QQQ": {
       "class": "US_STOCKS",
-      "mu_annual": 0.151402,
-      "sigma_annual": 0.221161,
+      "mu_annual": 0.118646,
+      "sigma_annual": 0.22144,
       "expense_ratio": 0.002,
       "tracking_error": 0.02,
       "dist": {
@@ -1082,7 +1121,7 @@
         "basis": "Nasdaq-100 tech tilt; +1% mu vs broad market, +3% sigma for concentration risk"
       },
       "_calibration": {
-        "method": "multi_window_blend",
+        "method": "multi_window_blend+cape",
         "windows_yr": [
           5,
           10,
@@ -1095,7 +1134,10 @@
         ],
         "prior_weight": 0.2,
         "bars_used": 5030,
-        "as_of": "2026-03-16",
+        "raw_mu": 0.161756,
+        "cape_adj": -0.04311,
+        "cape_current": 35.0,
+        "as_of": "2026-03-17",
         "provider": "yfinance"
       },
       "sector": "Invesco",
@@ -1230,8 +1272,8 @@
     },
     "SCHP": {
       "class": "TIPS",
-      "mu_annual": 0.024512,
-      "sigma_annual": 0.057601,
+      "mu_annual": 0.026075,
+      "sigma_annual": 0.057026,
       "expense_ratio": 0.0003,
       "tracking_error": 0.0,
       "dist": {
@@ -1242,7 +1284,7 @@
         "basis": "Schwab TIPS ETF; near-identical to TIP, slightly lower ER"
       },
       "_calibration": {
-        "method": "multi_window_blend",
+        "method": "multi_window_blend+cape",
         "windows_yr": [
           5,
           10,
@@ -1255,7 +1297,10 @@
         ],
         "prior_weight": 0.2,
         "bars_used": 3925,
-        "as_of": "2026-03-16",
+        "raw_mu": 0.026075,
+        "cape_adj": 0.0,
+        "cape_current": 35.0,
+        "as_of": "2026-03-17",
         "provider": "yfinance"
       },
       "sector": "Schwab ETFs",
@@ -1265,8 +1310,8 @@
     },
     "SPY": {
       "class": "US_STOCKS",
-      "mu_annual": 0.114784,
-      "sigma_annual": 0.178292,
+      "mu_annual": 0.096241,
+      "sigma_annual": 0.182682,
       "expense_ratio": 0.0009,
       "tracking_error": 0.01,
       "dist": {
@@ -1277,7 +1322,7 @@
         "basis": "broad US market long-run; 6.5% real+inflation consistent with CRSP 1926-2024 ~10% minus ~3.5% inflation premium for planning"
       },
       "_calibration": {
-        "method": "multi_window_blend",
+        "method": "multi_window_blend+cape",
         "windows_yr": [
           5,
           10,
@@ -1290,7 +1335,10 @@
         ],
         "prior_weight": 0.2,
         "bars_used": 5030,
-        "as_of": "2026-03-16",
+        "raw_mu": 0.121952,
+        "cape_adj": -0.025711,
+        "cape_current": 35.0,
+        "as_of": "2026-03-17",
         "provider": "yfinance"
       },
       "sector": "State Street Investment Management",
@@ -1425,8 +1473,8 @@
     },
     "TIP": {
       "class": "TIPS",
-      "mu_annual": 0.025727,
-      "sigma_annual": 0.060187,
+      "mu_annual": 0.027581,
+      "sigma_annual": 0.060231,
       "expense_ratio": 0.00019,
       "tracking_error": 0.0,
       "dist": {
@@ -1437,7 +1485,7 @@
         "basis": "TIPS; real yield + inflation adjustment; low sigma, inflation hedge"
       },
       "_calibration": {
-        "method": "multi_window_blend",
+        "method": "multi_window_blend+cape",
         "windows_yr": [
           5,
           10,
@@ -1450,7 +1498,10 @@
         ],
         "prior_weight": 0.2,
         "bars_used": 5030,
-        "as_of": "2026-03-16",
+        "raw_mu": 0.027581,
+        "cape_adj": 0.0,
+        "cape_current": 35.0,
+        "as_of": "2026-03-17",
         "provider": "yfinance"
       },
       "sector": "iShares",
@@ -1585,8 +1636,8 @@
     },
     "TLT": {
       "class": "LONG_TREAS",
-      "mu_annual": -0.000302,
-      "sigma_annual": 0.144727,
+      "mu_annual": -0.005175,
+      "sigma_annual": 0.150662,
       "expense_ratio": 0.00015,
       "tracking_error": 0.0,
       "dist": {
@@ -1597,7 +1648,7 @@
         "basis": "20yr Treasury; mu reflects current yield minus duration risk premium; interest income, not qualified dividends"
       },
       "_calibration": {
-        "method": "multi_window_blend",
+        "method": "multi_window_blend+cape",
         "windows_yr": [
           5,
           10,
@@ -1610,7 +1661,10 @@
         ],
         "prior_weight": 0.2,
         "bars_used": 5030,
-        "as_of": "2026-03-16",
+        "raw_mu": -0.005175,
+        "cape_adj": 0.0,
+        "cape_current": 35.0,
+        "as_of": "2026-03-17",
         "provider": "yfinance"
       },
       "sector": "iShares",
@@ -1745,8 +1799,8 @@
     },
     "VTI": {
       "class": "US_STOCKS",
-      "mu_annual": 0.111044,
-      "sigma_annual": 0.18081,
+      "mu_annual": 0.093845,
+      "sigma_annual": 0.185804,
       "expense_ratio": 0.0003,
       "tracking_error": 0.01,
       "dist": {
@@ -1757,7 +1811,7 @@
         "basis": "same as SPY; total market, slightly lower ER"
       },
       "_calibration": {
-        "method": "multi_window_blend",
+        "method": "multi_window_blend+cape",
         "windows_yr": [
           5,
           10,
@@ -1770,7 +1824,10 @@
         ],
         "prior_weight": 0.2,
         "bars_used": 5030,
-        "as_of": "2026-03-16",
+        "raw_mu": 0.117667,
+        "cape_adj": -0.023822,
+        "cape_current": 35.0,
+        "as_of": "2026-03-17",
         "provider": "yfinance"
       },
       "sector": "Vanguard",
@@ -1905,8 +1962,8 @@
     },
     "VTV": {
       "class": "US_STOCKS",
-      "mu_annual": 0.098333,
-      "sigma_annual": 0.171313,
+      "mu_annual": 0.08623,
+      "sigma_annual": 0.171628,
       "expense_ratio": 0.0004,
       "tracking_error": 0.01,
       "dist": {
@@ -1917,7 +1974,7 @@
         "basis": "US value; slightly lower mu than growth, higher yield"
       },
       "_calibration": {
-        "method": "multi_window_blend",
+        "method": "multi_window_blend+cape",
         "windows_yr": [
           5,
           10,
@@ -1930,7 +1987,10 @@
         ],
         "prior_weight": 0.2,
         "bars_used": 5030,
-        "as_of": "2026-03-16",
+        "raw_mu": 0.104179,
+        "cape_adj": -0.017949,
+        "cape_current": 35.0,
+        "as_of": "2026-03-17",
         "provider": "yfinance"
       },
       "sector": "Vanguard",
@@ -2065,8 +2125,8 @@
     },
     "VUG": {
       "class": "US_STOCKS",
-      "mu_annual": 0.129874,
-      "sigma_annual": 0.212063,
+      "mu_annual": 0.105168,
+      "sigma_annual": 0.212559,
       "expense_ratio": 0.0004,
       "tracking_error": 0.02,
       "dist": {
@@ -2077,7 +2137,7 @@
         "basis": "US growth; between broad market and QQQ"
       },
       "_calibration": {
-        "method": "multi_window_blend",
+        "method": "multi_window_blend+cape",
         "windows_yr": [
           5,
           10,
@@ -2090,7 +2150,10 @@
         ],
         "prior_weight": 0.2,
         "bars_used": 5030,
-        "as_of": "2026-03-16",
+        "raw_mu": 0.137734,
+        "cape_adj": -0.032566,
+        "cape_current": 35.0,
+        "as_of": "2026-03-17",
         "provider": "yfinance"
       },
       "sector": "Vanguard",
@@ -2225,8 +2288,8 @@
     },
     "VXUS": {
       "class": "INTL_STOCKS",
-      "mu_annual": 0.072243,
-      "sigma_annual": 0.172346,
+      "mu_annual": 0.074004,
+      "sigma_annual": 0.170509,
       "expense_ratio": 0.0007,
       "tracking_error": 0.01,
       "dist": {
@@ -2237,7 +2300,7 @@
         "basis": "total intl; lower mu reflects valuation/FX/political risk discount vs US"
       },
       "_calibration": {
-        "method": "multi_window_blend",
+        "method": "multi_window_blend+cape",
         "windows_yr": [
           5,
           10,
@@ -2250,7 +2313,10 @@
         ],
         "prior_weight": 0.2,
         "bars_used": 3803,
-        "as_of": "2026-03-16",
+        "raw_mu": 0.075973,
+        "cape_adj": -0.001969,
+        "cape_current": 35.0,
+        "as_of": "2026-03-17",
         "provider": "yfinance"
       },
       "sector": "Vanguard",
@@ -2385,8 +2451,8 @@
     },
     "XLE": {
       "class": "US_STOCKS",
-      "mu_annual": 0.103013,
-      "sigma_annual": 0.279978,
+      "mu_annual": 0.089229,
+      "sigma_annual": 0.291972,
       "expense_ratio": 0.0013,
       "tracking_error": 0.02,
       "dist": {
@@ -2397,7 +2463,7 @@
         "basis": "energy sector; commodity-linked, lower qualified ratio (MLPs)"
       },
       "_calibration": {
-        "method": "multi_window_blend",
+        "method": "multi_window_blend+cape",
         "windows_yr": [
           5,
           10,
@@ -2410,7 +2476,10 @@
         ],
         "prior_weight": 0.2,
         "bars_used": 5030,
-        "as_of": "2026-03-16",
+        "raw_mu": 0.109543,
+        "cape_adj": -0.020314,
+        "cape_current": 35.0,
+        "as_of": "2026-03-17",
         "provider": "yfinance"
       },
       "sector": "State Street Investment Management",
@@ -2545,8 +2614,8 @@
     },
     "XLF": {
       "class": "US_STOCKS",
-      "mu_annual": 0.085444,
-      "sigma_annual": 0.233273,
+      "mu_annual": 0.07797,
+      "sigma_annual": 0.243658,
       "expense_ratio": 0.0013,
       "tracking_error": 0.01,
       "dist": {
@@ -2557,7 +2626,7 @@
         "basis": "financials sector; cyclical, higher sigma"
       },
       "_calibration": {
-        "method": "multi_window_blend",
+        "method": "multi_window_blend+cape",
         "windows_yr": [
           5,
           10,
@@ -2570,7 +2639,10 @@
         ],
         "prior_weight": 0.2,
         "bars_used": 5030,
-        "as_of": "2026-03-16",
+        "raw_mu": 0.089409,
+        "cape_adj": -0.011439,
+        "cape_current": 35.0,
+        "as_of": "2026-03-17",
         "provider": "yfinance"
       },
       "sector": "State Street Investment Management",
@@ -2705,8 +2777,8 @@
     },
     "XLK": {
       "class": "US_STOCKS",
-      "mu_annual": 0.161951,
-      "sigma_annual": 0.234277,
+      "mu_annual": 0.125407,
+      "sigma_annual": 0.237704,
       "expense_ratio": 0.0013,
       "tracking_error": 0.02,
       "dist": {
@@ -2717,7 +2789,7 @@
         "basis": "tech sector; similar to QQQ"
       },
       "_calibration": {
-        "method": "multi_window_blend",
+        "method": "multi_window_blend+cape",
         "windows_yr": [
           5,
           10,
@@ -2730,7 +2802,10 @@
         ],
         "prior_weight": 0.2,
         "bars_used": 5030,
-        "as_of": "2026-03-16",
+        "raw_mu": 0.173846,
+        "cape_adj": -0.048439,
+        "cape_current": 35.0,
+        "as_of": "2026-03-17",
         "provider": "yfinance"
       },
       "sector": "State Street Investment Management",
@@ -2868,8 +2943,8 @@
     "US_STOCKS": {
       "class": "US_STOCKS",
       "_fallback": true,
-      "mu_annual": 0.145127,
-      "sigma_annual": 0.255525,
+      "mu_annual": 0.113563,
+      "sigma_annual": 0.263051,
       "expense_ratio": 0.001,
       "tracking_error": 0.01,
       "dist": {
@@ -2880,8 +2955,8 @@
     "INT_TREAS": {
       "class": "INT_TREAS",
       "_fallback": true,
-      "mu_annual": 0.020991,
-      "sigma_annual": 0.072795,
+      "mu_annual": 0.021228,
+      "sigma_annual": 0.070267,
       "expense_ratio": 0.001,
       "tracking_error": 0.01,
       "dist": {
@@ -2892,8 +2967,8 @@
     "COMMOD": {
       "class": "COMMOD",
       "_fallback": true,
-      "mu_annual": 0.06898,
-      "sigma_annual": 0.185383,
+      "mu_annual": 0.078816,
+      "sigma_annual": 0.183074,
       "expense_ratio": 0.001,
       "tracking_error": 0.01,
       "dist": {
@@ -2904,8 +2979,8 @@
     "INTL_STOCKS": {
       "class": "INTL_STOCKS",
       "_fallback": true,
-      "mu_annual": 0.067162,
-      "sigma_annual": 0.195012,
+      "mu_annual": 0.068657,
+      "sigma_annual": 0.194615,
       "expense_ratio": 0.001,
       "tracking_error": 0.01,
       "dist": {
@@ -2916,8 +2991,8 @@
     "GOLD": {
       "class": "GOLD",
       "_fallback": true,
-      "mu_annual": 0.125418,
-      "sigma_annual": 0.165434,
+      "mu_annual": 0.148319,
+      "sigma_annual": 0.169138,
       "expense_ratio": 0.001,
       "tracking_error": 0.01,
       "dist": {
@@ -2928,8 +3003,8 @@
     "TIPS": {
       "class": "TIPS",
       "_fallback": true,
-      "mu_annual": 0.025119,
-      "sigma_annual": 0.058894,
+      "mu_annual": 0.026828,
+      "sigma_annual": 0.058629,
       "expense_ratio": 0.001,
       "tracking_error": 0.01,
       "dist": {
@@ -2940,8 +3015,8 @@
     "LONG_TREAS": {
       "class": "LONG_TREAS",
       "_fallback": true,
-      "mu_annual": -0.000302,
-      "sigma_annual": 0.144727,
+      "mu_annual": -0.005175,
+      "sigma_annual": 0.150662,
       "expense_ratio": 0.001,
       "tracking_error": 0.01,
       "dist": {
@@ -3672,5 +3747,5 @@
     "auto_refresh_enabled": "false \u2014 asset model is managed manually or via asset_calibration.py pipeline. Do not run refresh_assets.py against this file.",
     "correlations": "Class-level empirical long-run correlation matrix. Conservative estimates \u2014 lower than peak-crisis correlations. Used by Monte Carlo to generate correlated return paths across asset classes."
   },
-  "promoted_at": "2026-03-16T23:01:43.494131"
+  "promoted_at": "2026-03-17T13:20:28.234445"
 }

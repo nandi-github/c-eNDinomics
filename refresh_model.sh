@@ -106,6 +106,69 @@ else
     log "Step 1 SKIPPED (--no-fetch or --validate-only)"
 fi
 
+# ── STEP 1b: Fetch CAPE from FRED (non-blocking) ─────────────────────────────
+if [[ "$VALIDATE_ONLY" == "false" && "$DRY_RUN" == "false" ]]; then
+    log_section "Step 1b — CAPE Valuation Fetch"
+    python3 - << 'PYEOF'
+import urllib.request, json, os, datetime
+
+CAPE_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                            "asset-model", "cape_config.json")
+
+def fetch_cape():
+    # FRED CAPE series (Shiller P/E)
+    url = "https://fred.stlouisfed.org/graph/fredgraph.json?id=CAPE"
+    try:
+        with urllib.request.urlopen(url, timeout=15) as r:
+            data = json.loads(r.read())
+            obs = [o for o in data.get("observations", []) if o.get("value") != "."]
+            if obs:
+                latest = obs[-1]
+                return float(latest["value"]), latest["date"]
+    except Exception:
+        pass
+    # Fallback: try multpl API alternative
+    try:
+        url2 = "https://fred.stlouisfed.org/graph/fredgraph.json?id=SHILLER_CAPE_RATIO_MONTH"
+        with urllib.request.urlopen(url2, timeout=15) as r:
+            data = json.loads(r.read())
+            obs = [o for o in data.get("observations", []) if o.get("value") != "."]
+            if obs:
+                latest = obs[-1]
+                return float(latest["value"]), latest["date"]
+    except Exception:
+        pass
+    return None, None
+
+cape_val, cape_date = fetch_cape()
+
+if cape_val:
+    # Load existing config
+    try:
+        with open(CAPE_CONFIG) as f:
+            cfg = json.load(f)
+    except Exception:
+        cfg = {}
+
+    cfg["cape_current"] = round(cape_val, 1)
+    cfg["_updated"]     = datetime.date.today().isoformat()
+    cfg["_source"]      = f"FRED auto-fetch — data as of {cape_date}"
+
+    with open(CAPE_CONFIG, "w") as f:
+        json.dump(cfg, f, indent=2)
+
+    print(f"  CAPE updated: {cape_val:.1f} (as of {cape_date})")
+else:
+    print("  CAPE fetch failed — using existing cape_config.json value")
+    try:
+        with open(CAPE_CONFIG) as f:
+            cfg = json.load(f)
+        print(f"  Current stored CAPE: {cfg.get('cape_current', 'unknown')}")
+    except Exception:
+        print("  cape_config.json not found — calibration will use historical mean (17.0)")
+PYEOF
+fi
+
 if [[ "$DRY_RUN" == "true" ]]; then
     log_section "DRY RUN complete — no calibration or promotion"
     exit 0
