@@ -65,43 +65,6 @@ _GLOBAL_ONLY_NAMES = {
 app = FastAPI(title="eNDinomics API", version="1.0.0")
 
 
-# ---------------------------------------------------------------------------
-# Startup: non-blocking market data staleness check
-# ---------------------------------------------------------------------------
-
-def _check_market_data_staleness():
-    """
-    Check market data cache age at startup and warn if stale.
-    Non-blocking — never delays server startup or hits the network.
-    Run: python -m market_data.scheduler.weekly_job  to refresh.
-    """
-    try:
-        _cache_dir = os.path.join(os.path.dirname(__file__), "..", "market_data", "cache", "store")
-        _cache_dir = os.path.abspath(_cache_dir)
-        if not os.path.isdir(_cache_dir):
-            print("[api] market_data cache not found — run weekly_job.py to initialise.")
-            return
-        from market_data.cache.cache import MarketDataCache
-        _cache = MarketDataCache(_cache_dir)
-        _status = _cache.status()
-        if not _status:
-            print("[api] market_data cache is empty — run: python -m market_data.scheduler.weekly_job")
-            return
-        _stale = [r for r in _status if not r["fresh"]]
-        _fresh = len(_status) - len(_stale)
-        if _stale:
-            print(f"[api] market_data: {_fresh} fresh, {len(_stale)} stale entries.")
-            print(f"[api] Stale: {[r['key'] for r in _stale]}")
-            print(f"[api] Run: python -m market_data.scheduler.weekly_job  to refresh.")
-        else:
-            print(f"[api] market_data cache OK — {_fresh} entries, all fresh.")
-    except Exception as _e:
-        print(f"[api] market_data staleness check skipped: {_e}")
-
-
-_check_market_data_staleness()
-
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -117,7 +80,46 @@ if os.path.isdir(ASSETS_DIR):
 
 @app.get("/health")
 def health() -> Dict[str, Any]:
-    return {"status": "ok"}
+    """
+    Returns server health + market data freshness.
+    UI shows a warning banner if market data is stale.
+    """
+    result: Dict[str, Any] = {"status": "ok"}
+    try:
+        _cache_dir = os.path.join(os.path.dirname(__file__), "..", "market_data", "cache", "store")
+        _cache_dir = os.path.abspath(_cache_dir)
+        from market_data.cache.cache import MarketDataCache
+        _cache = MarketDataCache(_cache_dir)
+        _status = _cache.status()
+
+        stale  = [r for r in _status if not r["fresh"]]
+        fresh  = [r for r in _status if r["fresh"]]
+
+        # Most recent fetch timestamp across all entries
+        import time as _time
+        last_refresh = None
+        if _status:
+            newest_age = min(r["age_days"] for r in _status)
+            last_refresh_ts = _time.time() - newest_age * 86400
+            import datetime as _dt
+            last_refresh = _dt.datetime.fromtimestamp(last_refresh_ts).strftime("%Y-%m-%d %H:%M")
+
+        result["market_data"] = {
+            "last_refresh":  last_refresh,
+            "fresh_entries": len(fresh),
+            "stale_entries": len(stale),
+            "stale_keys":    [r["key"] for r in stale],
+            "is_stale":      len(stale) > 0,
+            "refresh_cmd":   "./refresh_model.sh",
+        }
+    except Exception as _e:
+        result["market_data"] = {
+            "last_refresh":  None,
+            "is_stale":      True,
+            "error":         str(_e),
+            "refresh_cmd":   "./refresh_model.sh",
+        }
+    return result
 
 
 @app.get("/")
