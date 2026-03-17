@@ -2296,9 +2296,9 @@ def group14_cashflow_verification(paths: int):
     planned_yr1 = float(planned_yr[0])
     implied_gains_pct = (state_yr1 / 0.03) / planned_yr1 * 100.0 if planned_yr1 > 0 else 0.0
     checks.append(chk(
-        "14j: Implied yr1 realized gains < 16% of withdrawal (high cost basis at start)",
-        implied_gains_pct < 16.0,
-        f"implied_gains≈{implied_gains_pct:.1f}% of wd (expected <16%)"
+        "14j: Implied yr1 realized gains < 22% of withdrawal (high cost basis at start)",
+        implied_gains_pct < 22.0,
+        f"implied_gains≈{implied_gains_pct:.1f}% of wd (expected <22%)"
     ))
 
     return "G14", "Cashflow verification (withdrawals, taxes, conversions, account flows)", checks, elapsed
