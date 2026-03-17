@@ -302,6 +302,21 @@ def _compute_look_through(
         if as_of:
             holdings_dates.append(as_of)
 
+        # Determine if this is an equity ETF — only do equity look-through
+        # Bond/commodity ETFs produce treasury/futures holdings which pollute stock analysis
+        instrument_type = asset_data.get("instrument_type", "")
+        asset_class     = asset_data.get("class", "")
+        is_equity_etf   = (
+            instrument_type in ("broad_etf", "sector_etf") and
+            asset_class in ("US_STOCKS", "INTL_STOCKS")
+        )
+        if not is_equity_etf:
+            continue   # skip bond/commodity look-through for equity analysis
+
+        # Skip patterns that indicate non-equity holdings (bond ISINs, cash, futures)
+        _NON_EQUITY = {"CASH", "USD", "CASH_USD", "-", ""}
+        _ISIN_PREFIX = ("US912", "US9128", "US91282")  # treasury ISINs
+
         # holdings weights are % of ETF — scale by ETF's portfolio weight
         for holding in top_holdings:
             stock     = holding.get("ticker", "").upper()
@@ -309,6 +324,17 @@ def _compute_look_through(
             sector    = holding.get("sector", "Unknown") or "Unknown"
 
             if not stock or h_weight <= 0:
+                continue
+
+            # Filter out non-equity holdings from look-through
+            if stock in _NON_EQUITY:
+                continue
+            # Filter treasury ISINs (US912...) — these are bond positions not stocks
+            if any(stock.startswith(pfx) for pfx in _ISIN_PREFIX):
+                continue
+            # Filter anything longer than 6 chars that's not a recognisable ticker
+            # (ISINs are 12 chars, CUSIPs are 9 chars — real stock tickers are ≤5)
+            if len(stock) > 6 and not stock.isalpha():
                 continue
 
             # True portfolio exposure = ETF weight × stock weight within ETF
