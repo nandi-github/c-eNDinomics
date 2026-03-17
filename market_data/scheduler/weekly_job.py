@@ -39,7 +39,9 @@ from market_data.cache.cache import MarketDataCache
 from market_data.fetchers.holdings_fetcher import HoldingsFetcher
 from market_data.fetchers.price_fetcher import PriceFetcher
 from market_data.providers.base import ProviderError
-from market_data.providers.etf_dot_com_provider import ETFDotComProvider
+from market_data.providers.etf_dot_com_provider import (
+    ETFDotComProvider, YFinanceFundsDataProvider,
+)
 from market_data.providers.yfinance_provider import (
     YFinanceHoldingsProvider, YFinancePriceProvider, YFinanceSectorProvider,
 )
@@ -130,7 +132,11 @@ def run_weekly_job(
 
     # ── Build fetchers ──────────────────────────────────────────────────────
     holdings_fetcher = HoldingsFetcher(
-        providers=[ETFDotComProvider(), YFinanceHoldingsProvider()],
+        providers=[
+            ETFDotComProvider(),
+            YFinanceFundsDataProvider(),
+            YFinanceHoldingsProvider(),
+        ],
         cache=cache,
         default_max_age_days=HOLDINGS_MAX_AGE,
     )

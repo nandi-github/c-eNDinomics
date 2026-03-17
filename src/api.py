@@ -65,6 +65,43 @@ _GLOBAL_ONLY_NAMES = {
 app = FastAPI(title="eNDinomics API", version="1.0.0")
 
 
+# ---------------------------------------------------------------------------
+# Startup: non-blocking market data staleness check
+# ---------------------------------------------------------------------------
+
+def _check_market_data_staleness():
+    """
+    Check market data cache age at startup and warn if stale.
+    Non-blocking — never delays server startup or hits the network.
+    Run: python -m market_data.scheduler.weekly_job  to refresh.
+    """
+    try:
+        _cache_dir = os.path.join(os.path.dirname(__file__), "..", "market_data", "cache", "store")
+        _cache_dir = os.path.abspath(_cache_dir)
+        if not os.path.isdir(_cache_dir):
+            print("[api] market_data cache not found — run weekly_job.py to initialise.")
+            return
+        from market_data.cache.cache import MarketDataCache
+        _cache = MarketDataCache(_cache_dir)
+        _status = _cache.status()
+        if not _status:
+            print("[api] market_data cache is empty — run: python -m market_data.scheduler.weekly_job")
+            return
+        _stale = [r for r in _status if not r["fresh"]]
+        _fresh = len(_status) - len(_stale)
+        if _stale:
+            print(f"[api] market_data: {_fresh} fresh, {len(_stale)} stale entries.")
+            print(f"[api] Stale: {[r['key'] for r in _stale]}")
+            print(f"[api] Run: python -m market_data.scheduler.weekly_job  to refresh.")
+        else:
+            print(f"[api] market_data cache OK — {_fresh} entries, all fresh.")
+    except Exception as _e:
+        print(f"[api] market_data staleness check skipped: {_e}")
+
+
+_check_market_data_staleness()
+
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -490,9 +527,8 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
     shocks_mode_req = payload.get("shocks_mode")
 
     ignore_withdrawals = bool(payload.get("ignore_withdrawals", False))
-    ignore_rmds        = bool(payload.get("ignore_rmds",        False))
+    ignore_rmds = bool(payload.get("ignore_rmds", False))
     ignore_conversions = bool(payload.get("ignore_conversions", False))
-    ignore_taxes       = bool(payload.get("ignore_taxes",       False))
 
     rebalance_threshold = float(payload.get("rebalance_threshold", 0.10))
     rebalance_brokerage_enabled = bool(payload.get("rebalance_brokerage_enabled", False))
@@ -642,13 +678,12 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
 
     # 7) Run simulation
     ignore_withdrawals_flag = bool(ignore_withdrawals)
-    ignore_rmds_flag        = bool(ignore_rmds)
+    ignore_rmds_flag = bool(ignore_rmds)
     ignore_conversions_flag = bool(ignore_conversions)
-    ignore_taxes_flag       = bool(ignore_taxes)
     shocks_mode_raw = (shocks_mode or "").lower()
 
     rmds_enabled = not ignore_rmds_flag
-
+    
     # DEBUG: see what the server thinks the flags are
     print(
         "[DEBUG api] standard_test inputs:",
@@ -663,8 +698,6 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
         ignore_rmds,
         "ignore_conversions:",
         ignore_conversions,
-        "ignore_taxes:",
-        ignore_taxes,
     )
 
     shocks_mode_req_raw = (shocks_mode_req or "").lower()
@@ -878,7 +911,6 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
             conversion_per_year_nom=None,
             rmds_enabled=rmds_enabled,
             conversions_enabled=not ignore_conversions_flag,
-            ignore_taxes=ignore_taxes_flag,
             shocks_events=shocks_events,
             shocks_mode=str(internal_shocks_mode),
             econ_policy=econ_policy,
@@ -931,9 +963,8 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
         "shocks_mode": raw_shocks_mode,
         "flags": {
             "ignore_withdrawals": bool(ignore_withdrawals),
-            "ignore_rmds":        bool(ignore_rmds),
+            "ignore_rmds": bool(ignore_rmds),
             "ignore_conversions": bool(ignore_conversions),
-            "ignore_taxes":       bool(ignore_taxes),
         },
     }
 

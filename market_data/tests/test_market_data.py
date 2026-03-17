@@ -296,7 +296,7 @@ class TestHoldingsFetcher(unittest.TestCase):
 class TestETFDotComParser(unittest.TestCase):
 
     def test_parse_standard_csv(self):
-        from market_data.providers.etf_dot_com_provider import ETFDotComProvider
+        from market_data.providers.etf_dot_com_provider import _parse_csv_holdings
 
         csv_content = """Ticker,Name,Weight (%),Sector
 AAPL,Apple Inc.,7.25,Information Technology
@@ -305,38 +305,35 @@ AMZN,Amazon.com Inc.,3.45,Consumer Discretionary
 NVDA,NVIDIA Corp.,5.12,Information Technology
 GOOGL,Alphabet Inc.,4.33,Communication Services
 """
-        provider = ETFDotComProvider()
-        holdings = provider._parse_csv(csv_content, "QQQ")
+        holdings = _parse_csv_holdings(csv_content)
         self.assertEqual(len(holdings), 5)
-        # Should be sorted by weight descending
+        # Sorted by weight descending
         self.assertEqual(holdings[0].ticker, "AAPL")
         self.assertAlmostEqual(holdings[0].weight_pct, 7.25)
         self.assertEqual(holdings[0].sector, "Information Technology")
 
     def test_parse_with_header_offset(self):
-        from market_data.providers.etf_dot_com_provider import ETFDotComProvider
+        from market_data.providers.etf_dot_com_provider import _parse_csv_holdings
 
         csv_content = """ETF Holdings Report
 Generated: 2026-03-16
 
-Ticker,Name,Weight (%),Sector
-VTI,Vanguard Total Stock Market,100.00,Diversified
+Ticker,Name,Weight (%)
+VTI_HOLD,Vanguard Total Stock Market,100.00
 """
-        provider = ETFDotComProvider()
-        holdings = provider._parse_csv(csv_content, "VTI")
+        holdings = _parse_csv_holdings(csv_content)
         self.assertEqual(len(holdings), 1)
-        self.assertEqual(holdings[0].ticker, "VTI")
+        self.assertEqual(holdings[0].ticker, "VTI_HOLD")
 
     def test_skips_zero_weight_rows(self):
-        from market_data.providers.etf_dot_com_provider import ETFDotComProvider
+        from market_data.providers.etf_dot_com_provider import _parse_csv_holdings
 
         csv_content = """Ticker,Name,Weight (%)
 AAPL,Apple,5.0
 CASH,Cash,0.0
 MSFT,Microsoft,3.5
 """
-        provider = ETFDotComProvider()
-        holdings = provider._parse_csv(csv_content, "TEST")
+        holdings = _parse_csv_holdings(csv_content)
         self.assertEqual(len(holdings), 2)
         tickers = [h.ticker for h in holdings]
         self.assertNotIn("CASH", tickers)
