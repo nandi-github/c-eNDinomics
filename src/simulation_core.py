@@ -159,15 +159,19 @@ def simulate_balances(
                     class_w[cls] = class_w.get(cls, 0.0) + w_pf * float(w)
 
                 # Holdings within classes (tickers)
+                # Correct weight = portfolio_weight × class_weight × ticker_pct_within_class
                 hp = pf_def.get("holdings_pct", {}) or {}
+                classes_in_pf = pf_def.get("classes", {}) or {}
                 for cls, items in hp.items():
                     if not isinstance(items, list):
                         continue
+                    # Class weight within this portfolio (already normalized 0-1)
+                    cls_w = float(classes_in_pf.get(cls, 0.0))
                     for it in items:
                         ticker = str(it.get("ticker", "")).strip()
                         pct = float(it.get("pct", 0.0))
                         if ticker and pct > 0.0 and ticker in assets_cfg:
-                            asset_w[ticker] = asset_w.get(ticker, 0.0) + w_pf * (
+                            asset_w[ticker] = asset_w.get(ticker, 0.0) + w_pf * cls_w * (
                                 pct / 100.0
                             )
 

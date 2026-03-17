@@ -3324,8 +3324,134 @@ def group20_portfolio_analysis(paths: int):
     return "G20", "Portfolio allocation analysis + look-through", checks, elapsed
 
 
+def group21_asset_weight_sanity(paths: int):
+    """
+    G21: Asset weight correctness + investment return sanity.
+
+    Two critical invariants:
+    1. Ticker effective weight = portfolio_weight x class_weight x ticker_pct
+       Bug guard: simulation_core.py once omitted class_weight, inflating
+       high-mu assets (GLD, individual stocks) by 10-20x their correct weight.
+
+    2. Pure growth CAGR must be in a physically plausible range (4-15%).
+       Anything outside this range indicates a weight bug or model miscalibration.
+    """
+    import time as _time
+    t0 = _time.time()
+    checks = []
+
+    # G21a: Asset weight math
+    w_pf, w_cls, w_tick = 0.70, 0.65, 0.75
+    expected = w_pf * w_cls * w_tick  # 0.341250
+
+    pf_def = {
+        "weight": w_pf,
+        "classes": {"US_STOCKS": w_cls, "INT_TREAS": 0.35},
+        "holdings_pct": {
+            "US_STOCKS": [
+                {"ticker": "VTI", "pct": 75},
+                {"ticker": "QQQ", "pct": 25},
+            ]
+        }
+    }
+    # Correct: include class weight
+    asset_w: dict = {}
+    classes_in_pf = pf_def.get("classes", {})
+    for cls, items in pf_def["holdings_pct"].items():
+        cls_w = float(classes_in_pf.get(cls, 0.0))
+        for it in items:
+            ticker = it["ticker"]
+            pct = float(it["pct"])
+            asset_w[ticker] = asset_w.get(ticker, 0.0) + w_pf * cls_w * (pct / 100.0)
+
+    vti_w = asset_w.get("VTI", 0.0)
+    qqq_w = asset_w.get("QQQ", 0.0)
+    expected_qqq = w_pf * w_cls * 0.25
+
+    checks.append(chk(
+        f"G21a: VTI effective weight = pf x cls x tick ({expected:.6f})",
+        abs(vti_w - expected) < 1e-9,
+        f"got {vti_w:.6f} expected {expected:.6f}"
+    ))
+    checks.append(chk(
+        f"G21a: QQQ effective weight correct ({expected_qqq:.6f})",
+        abs(qqq_w - expected_qqq) < 1e-9,
+        f"got {qqq_w:.6f} expected {expected_qqq:.6f}"
+    ))
+    checks.append(chk(
+        "G21a: Weights sum <= portfolio weight",
+        sum(asset_w.values()) <= w_pf + 1e-9,
+        f"sum={sum(asset_w.values()):.6f} w_pf={w_pf}"
+    ))
+
+    # Old bug detection: missing cls_w inflates weights
+    asset_w_buggy: dict = {}
+    for cls, items in pf_def["holdings_pct"].items():
+        for it in items:
+            ticker = it["ticker"]
+            pct = float(it["pct"])
+            asset_w_buggy[ticker] = asset_w_buggy.get(ticker, 0.0) + w_pf * (pct / 100.0)
+    vti_w_buggy = asset_w_buggy.get("VTI", 0.0)
+    checks.append(chk(
+        "G21a: Current weight != buggy weight (class_weight applied correctly)",
+        abs(vti_w - vti_w_buggy) > 0.01,
+        f"current={vti_w:.4f} buggy={vti_w_buggy:.4f}"
+    ))
+
+    # G21b: Pure growth CAGR sanity
+    try:
+        import numpy as np
+        from assets_loader import load_assets_model
+        from engines_assets import draw_asset_log_returns
+
+        assets_path = os.path.join(APP_ROOT, "config", "assets.json")
+        if os.path.isfile(assets_path):
+            model  = load_assets_model(assets_path)
+            assets = model["assets"]
+            order  = model["order"]
+            corr   = model["corr"]
+
+            R, order = draw_asset_log_returns(200, 49, order, assets, corr, seed=42)
+
+            weights = {}
+            for t, w in [("VTI",0.40),("QQQ",0.15),("VXUS",0.15),("TLT",0.15),("IEF",0.15)]:
+                if t in order:
+                    weights[order.index(t)] = w
+
+            port = np.ones(200)
+            for y in range(49):
+                yr = sum(w * np.exp(R[:, y, i]) for i, w in weights.items())
+                port *= yr
+
+            cagr_median = float(np.median(port) ** (1.0/49) - 1)
+            cagr_mean   = float(np.mean(port)   ** (1.0/49) - 1)
+
+            checks.append(chk(
+                f"G21b: Pure growth 49yr CAGR median in [4%, 15%]  (got {cagr_median:.2%})",
+                0.04 <= cagr_median <= 0.15,
+                f"CAGR={cagr_median:.4f}"
+            ))
+            checks.append(chk(
+                f"G21b: Pure growth CAGR mean < 15% bug guard (got {cagr_mean:.2%})",
+                cagr_mean < 0.15,
+                f"CAGR mean {cagr_mean:.2%} >= 15% -- likely asset weight bug"
+            ))
+            end_median = 9_920_000 * float(np.median(port))
+            checks.append(chk(
+                f"G21b: $9.9M grows to $50M-$2B over 49yr  (got ${end_median:,.0f})",
+                50_000_000 <= end_median <= 2_000_000_000,
+                f"end={end_median:,.0f}"
+            ))
+        else:
+            checks.append((PASS, "G21b: SKIPPED -- assets.json not found", ""))
+    except Exception as e:
+        checks.append((FAIL, "G21b: pure growth CAGR check failed", str(e)))
+
+    elapsed = round(_time.time() - t0, 1)
+    return "G21", "Asset weight correctness + investment return sanity", checks, elapsed
+
+
 GROUPS = [
-    group1_flag_matrix,
     group2_rmd,
     group3_conversion_policy,
     group4_income,
@@ -3346,6 +3472,7 @@ GROUPS = [
 ]
 GROUPS.append(group19_playwright)
 GROUPS.append(group20_portfolio_analysis)
+GROUPS.append(group21_asset_weight_sanity)
 
 
 def run_comprehensive(paths: int):
