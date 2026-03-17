@@ -1,336 +1,618 @@
 {
-  "model_version": "1.0.0",
+  "model_version": "1.1.0",
   "schema_version": "2.0",
-  "released_at": "2026-03-07",
-  "valid_from": "2026-03-07",
-  "valid_until": null,
+  "released_at": "2026-03-16",
+  "valid_from": "2026-03-16",
+  "valid_until": "2026-04-15",
+  "status": "production",
   "training": {
-    "method": "hand_calibrated_v1",
-    "data_through": "2026-03-07",
-    "sources": [
-      "Vanguard 10-year capital market assumptions 2025",
-      "BlackRock Investment Institute 2025 long-term estimates",
-      "CRSP 1926-2024 long-run equity returns",
-      "Federal Reserve 2% long-run inflation target"
+    "method": "multi_window_blend",
+    "data_through": "2026-03-16",
+    "windows_used": [
+      5,
+      10,
+      20
     ],
-    "windows_used": null,
+    "weights": [
+      0.15,
+      0.35,
+      0.3
+    ],
+    "prior_weight": 0.2,
     "event_signals_included": false,
     "auto_refresh_enabled": false,
-    "notes": "v1.0 hand-calibrated baseline. Replace with asset_calibration.py output when asset-model pipeline is ready."
-  },
-  "readme": {
-    "purpose": "Asset model artifact — mu, sigma, correlation, and distribution parameters for Monte Carlo simulation. System file in src/config/, shared by all profiles. v1.0 hand-calibrated baseline; will be superseded by asset_calibration.py pipeline output.",
-    "do_not_edit_note": "These parameters drive all portfolio return simulations. Changes here affect every profile. Use asset_calibration.py to update from new market data rather than editing manually.",
-    "mu_annual": "Conservative long-run REAL return estimate (net of inflation). NOT raw historical nominal return and NOT recent-window return. Sources: Vanguard/BlackRock 10yr CMAs, CRSP long-run data. Example: 0.065 = 6.5% real annual return. The simulator adds the inflation rate from inflation_yearly.json on top to get nominal returns.",
-    "sigma_annual": "Annualized return volatility (standard deviation). Long-run estimate — not a recent-window figure. Drives the spread of Monte Carlo paths.",
-    "expense_ratio": "Annual fund expense ratio subtracted from returns every year. E.g. 0.0009 = 0.09% (9 basis points). Already reflected in net-of-fee mu.",
-    "tracking_error": "Additional per-year return noise above the asset class model. 0.0 for broad index funds. 0.03-0.04 for single stocks or active funds.",
-    "dist_yield_annual": "Annual distribution yield (dividends + interest). Drives taxable income in BROKERAGE accounts each year. Distributions from TRAD and Roth accounts are NOT taxed annually — they are tax-deferred or tax-free respectively.",
-    "dist_qualified_ratio": "Fraction of annual distributions taxed at LTCG rates (0/15/20%) rather than ordinary income rates. E.g. 0.9 = 90% qualified dividends. 0.0 for Treasury interest (always ordinary income). Only relevant for BROKERAGE accounts.",
-    "tax_note": "Distributions from BROKERAGE accounts generate taxable income each year: (yield × balance × qualified_ratio) taxed at LTCG rates, remainder at ordinary rates. TRAD IRA distributions are taxed at ordinary rates only when withdrawn. Roth IRA distributions are always tax-free.",
-    "_provenance": "Audit trail per ticker — basis for parameter choices. Ignored by simulator. Keep updated when changing parameters.",
-    "auto_refresh_enabled": "false — asset model is managed manually or via asset_calibration.py pipeline. Do not run refresh_assets.py against this file.",
-    "correlations": "Class-level empirical long-run correlation matrix. Conservative estimates — lower than peak-crisis correlations. Used by Monte Carlo to generate correlated return paths across asset classes."
+    "notes": "Calibrated from market_data cache. Multi-window blend: [(5, 0.15), (10, 0.35), (20, 0.3)] + prior\u00d70.2. Promoted from 1.0.0."
   },
   "assets": {
-    "SPY": {
-      "class": "US_STOCKS",
-      "mu_annual": 0.065,
-      "sigma_annual": 0.16,
-      "expense_ratio": 0.0009,
-      "tracking_error": 0.01,
-      "dist": {
-        "yield_annual": 0.018,
-        "qualified_ratio": 0.9
-      },
-      "_provenance": {
-        "basis": "broad US market long-run; 6.5% real+inflation consistent with CRSP 1926-2024 ~10% minus ~3.5% inflation premium for planning"
-      }
-    },
-    "VTI": {
-      "class": "US_STOCKS",
-      "mu_annual": 0.065,
-      "sigma_annual": 0.16,
-      "expense_ratio": 0.0003,
-      "tracking_error": 0.01,
-      "dist": {
-        "yield_annual": 0.017,
-        "qualified_ratio": 0.9
-      },
-      "_provenance": {
-        "basis": "same as SPY; total market, slightly lower ER"
-      }
-    },
-    "QQQ": {
-      "class": "US_STOCKS",
-      "mu_annual": 0.075,
-      "sigma_annual": 0.22,
-      "expense_ratio": 0.002,
-      "tracking_error": 0.02,
-      "dist": {
-        "yield_annual": 0.009,
-        "qualified_ratio": 0.9
-      },
-      "_provenance": {
-        "basis": "Nasdaq-100 tech tilt; +1% mu vs broad market, +3% sigma for concentration risk"
-      }
-    },
-    "VUG": {
-      "class": "US_STOCKS",
-      "mu_annual": 0.072,
-      "sigma_annual": 0.21,
-      "expense_ratio": 0.0004,
-      "tracking_error": 0.02,
-      "dist": {
-        "yield_annual": 0.01,
-        "qualified_ratio": 0.9
-      },
-      "_provenance": {
-        "basis": "US growth; between broad market and QQQ"
-      }
-    },
-    "VTV": {
-      "class": "US_STOCKS",
-      "mu_annual": 0.06,
-      "sigma_annual": 0.17,
-      "expense_ratio": 0.0004,
-      "tracking_error": 0.01,
-      "dist": {
-        "yield_annual": 0.023,
-        "qualified_ratio": 0.9
-      },
-      "_provenance": {
-        "basis": "US value; slightly lower mu than growth, higher yield"
-      }
-    },
-    "XLK": {
-      "class": "US_STOCKS",
-      "mu_annual": 0.075,
-      "sigma_annual": 0.22,
-      "expense_ratio": 0.0013,
-      "tracking_error": 0.02,
-      "dist": {
-        "yield_annual": 0.008,
-        "qualified_ratio": 0.9
-      },
-      "_provenance": {
-        "basis": "tech sector; similar to QQQ"
-      }
-    },
-    "XLF": {
-      "class": "US_STOCKS",
-      "mu_annual": 0.06,
-      "sigma_annual": 0.19,
-      "expense_ratio": 0.0013,
-      "tracking_error": 0.01,
-      "dist": {
-        "yield_annual": 0.025,
-        "qualified_ratio": 0.9
-      },
-      "_provenance": {
-        "basis": "financials sector; cyclical, higher sigma"
-      }
-    },
-    "XLE": {
-      "class": "US_STOCKS",
-      "mu_annual": 0.06,
-      "sigma_annual": 0.23,
-      "expense_ratio": 0.0013,
-      "tracking_error": 0.02,
-      "dist": {
-        "yield_annual": 0.035,
-        "qualified_ratio": 0.7
-      },
-      "_provenance": {
-        "basis": "energy sector; commodity-linked, lower qualified ratio (MLPs)"
-      }
-    },
     "AAPL": {
       "class": "US_STOCKS",
-      "mu_annual": 0.075,
-      "sigma_annual": 0.25,
+      "mu_annual": 0.216332,
+      "sigma_annual": 0.286871,
       "expense_ratio": 0.0,
       "tracking_error": 0.03,
       "dist": {
-        "yield_annual": 0.006,
+        "yield_annual": 0.004158,
         "qualified_ratio": 0.9
       },
       "_provenance": {
         "basis": "single stock; higher idiosyncratic risk (tracking_error reflects stock-specific vol above class)"
-      }
-    },
-    "MSFT": {
-      "class": "US_STOCKS",
-      "mu_annual": 0.072,
-      "sigma_annual": 0.23,
-      "expense_ratio": 0.0,
-      "tracking_error": 0.02,
-      "dist": {
-        "yield_annual": 0.009,
-        "qualified_ratio": 0.9
       },
-      "_provenance": {
-        "basis": "single stock; large cap quality, slightly lower sigma than AAPL"
-      }
+      "_calibration": {
+        "method": "multi_window_blend",
+        "windows_yr": [
+          5,
+          10,
+          20
+        ],
+        "weights": [
+          0.15,
+          0.35,
+          0.3
+        ],
+        "prior_weight": 0.2,
+        "bars_used": 5030,
+        "as_of": "2026-03-16",
+        "provider": "yfinance"
+      },
+      "sector": "Technology",
+      "instrument_type": "stock",
+      "sector_provider": "yfinance",
+      "sector_as_of": "2026-03-16"
     },
     "AMZN": {
       "class": "US_STOCKS",
-      "mu_annual": 0.078,
-      "sigma_annual": 0.3,
+      "mu_annual": 0.182605,
+      "sigma_annual": 0.338688,
       "expense_ratio": 0.0,
       "tracking_error": 0.03,
       "dist": {
         "yield_annual": 0.0,
-        "qualified_ratio": 0.0
-      },
-      "_provenance": {
-        "basis": "single stock; no dividend, higher growth/risk"
-      }
-    },
-    "NVDA": {
-      "class": "US_STOCKS",
-      "mu_annual": 0.085,
-      "sigma_annual": 0.35,
-      "expense_ratio": 0.0,
-      "tracking_error": 0.04,
-      "dist": {
-        "yield_annual": 0.002,
         "qualified_ratio": 0.9
       },
       "_provenance": {
-        "basis": "single stock; AI/semiconductor cycle exposure; highest sigma in class"
-      }
-    },
-    "VXUS": {
-      "class": "INTL_STOCKS",
-      "mu_annual": 0.055,
-      "sigma_annual": 0.18,
-      "expense_ratio": 0.0007,
-      "tracking_error": 0.01,
-      "dist": {
-        "yield_annual": 0.025,
-        "qualified_ratio": 0.8
+        "basis": "single stock; no dividend, higher growth/risk"
       },
-      "_provenance": {
-        "basis": "total intl; lower mu reflects valuation/FX/political risk discount vs US"
-      }
-    },
-    "EFA": {
-      "class": "INTL_STOCKS",
-      "mu_annual": 0.053,
-      "sigma_annual": 0.17,
-      "expense_ratio": 0.0032,
-      "tracking_error": 0.01,
-      "dist": {
-        "yield_annual": 0.026,
-        "qualified_ratio": 0.8
+      "_calibration": {
+        "method": "multi_window_blend",
+        "windows_yr": [
+          5,
+          10,
+          20
+        ],
+        "weights": [
+          0.15,
+          0.35,
+          0.3
+        ],
+        "prior_weight": 0.2,
+        "bars_used": 5030,
+        "as_of": "2026-03-16",
+        "provider": "yfinance"
       },
-      "_provenance": {
-        "basis": "developed markets ex-US; slightly lower mu than VXUS (ex-EM)"
-      }
-    },
-    "EEM": {
-      "class": "INTL_STOCKS",
-      "mu_annual": 0.06,
-      "sigma_annual": 0.24,
-      "expense_ratio": 0.0068,
-      "tracking_error": 0.02,
-      "dist": {
-        "yield_annual": 0.022,
-        "qualified_ratio": 0.75
-      },
-      "_provenance": {
-        "basis": "emerging markets; higher growth potential but higher sigma and political risk"
-      }
-    },
-    "TLT": {
-      "class": "LONG_TREAS",
-      "mu_annual": 0.02,
-      "sigma_annual": 0.12,
-      "expense_ratio": 0.00015,
-      "tracking_error": 0.0,
-      "dist": {
-        "yield_annual": 0.03,
-        "qualified_ratio": 0.0
-      },
-      "_provenance": {
-        "basis": "20yr Treasury; mu reflects current yield minus duration risk premium; interest income, not qualified dividends"
-      }
-    },
-    "IEF": {
-      "class": "INT_TREAS",
-      "mu_annual": 0.018,
-      "sigma_annual": 0.08,
-      "expense_ratio": 0.00015,
-      "tracking_error": 0.0,
-      "dist": {
-        "yield_annual": 0.028,
-        "qualified_ratio": 0.0
-      },
-      "_provenance": {
-        "basis": "7-10yr Treasury; lower duration = lower sigma vs TLT"
-      }
+      "sector": "Consumer Cyclical",
+      "instrument_type": "stock",
+      "sector_provider": "yfinance",
+      "sector_as_of": "2026-03-16"
     },
     "BND": {
       "class": "INT_TREAS",
-      "mu_annual": 0.02,
-      "sigma_annual": 0.07,
+      "mu_annual": 0.020043,
+      "sigma_annual": 0.057909,
       "expense_ratio": 0.0003,
       "tracking_error": 0.0,
       "dist": {
-        "yield_annual": 0.028,
+        "yield_annual": 0.039103,
         "qualified_ratio": 0.0
       },
       "_provenance": {
         "basis": "total bond market; investment grade blend, lowest sigma in class"
-      }
+      },
+      "_calibration": {
+        "method": "multi_window_blend",
+        "windows_yr": [
+          5,
+          10,
+          20
+        ],
+        "weights": [
+          0.15,
+          0.35,
+          0.3
+        ],
+        "prior_weight": 0.2,
+        "bars_used": 4763,
+        "as_of": "2026-03-16",
+        "provider": "yfinance"
+      },
+      "sector": "Vanguard",
+      "instrument_type": "broad_etf",
+      "sector_provider": "yfinance",
+      "sector_as_of": "2026-03-16",
+      "top_holdings": [
+        {
+          "ticker": "TNOTE",
+          "name": "United States Treasury Note/Bond",
+          "sector": "",
+          "weight_pct": 0.52
+        },
+        {
+          "ticker": "TNOTE",
+          "name": "United States Treasury Note/Bond",
+          "sector": "",
+          "weight_pct": 0.39
+        },
+        {
+          "ticker": "TNOTE",
+          "name": "United States Treasury Note/Bond",
+          "sector": "",
+          "weight_pct": 0.38
+        },
+        {
+          "ticker": "TNOTE",
+          "name": "United States Treasury Note/Bond",
+          "sector": "",
+          "weight_pct": 0.36
+        },
+        {
+          "ticker": "TNOTE",
+          "name": "United States Treasury Note/Bond",
+          "sector": "",
+          "weight_pct": 0.35
+        },
+        {
+          "ticker": "TNOTE",
+          "name": "United States Treasury Note/Bond",
+          "sector": "",
+          "weight_pct": 0.35
+        },
+        {
+          "ticker": "TNOTE",
+          "name": "United States Treasury Note/Bond",
+          "sector": "",
+          "weight_pct": 0.34
+        },
+        {
+          "ticker": "TNOTE",
+          "name": "United States Treasury Note/Bond",
+          "sector": "",
+          "weight_pct": 0.34
+        },
+        {
+          "ticker": "TNOTE",
+          "name": "United States Treasury Note/Bond",
+          "sector": "",
+          "weight_pct": 0.33
+        },
+        {
+          "ticker": "TNOTE",
+          "name": "United States Treasury Note/Bond",
+          "sector": "",
+          "weight_pct": 0.33
+        },
+        {
+          "ticker": "TNOTE",
+          "name": "United States Treasury Note/Bond",
+          "sector": "",
+          "weight_pct": 0.32
+        },
+        {
+          "ticker": "TNOTE",
+          "name": "United States Treasury Note/Bond",
+          "sector": "",
+          "weight_pct": 0.32
+        },
+        {
+          "ticker": "TNOTE",
+          "name": "United States Treasury Note/Bond",
+          "sector": "",
+          "weight_pct": 0.32
+        },
+        {
+          "ticker": "TNOTE",
+          "name": "United States Treasury Note/Bond",
+          "sector": "",
+          "weight_pct": 0.31
+        },
+        {
+          "ticker": "TNOTE",
+          "name": "United States Treasury Note/Bond",
+          "sector": "",
+          "weight_pct": 0.31
+        },
+        {
+          "ticker": "TNOTE",
+          "name": "United States Treasury Note/Bond",
+          "sector": "",
+          "weight_pct": 0.27
+        },
+        {
+          "ticker": "TNOTE",
+          "name": "United States Treasury Note/Bond",
+          "sector": "",
+          "weight_pct": 0.27
+        },
+        {
+          "ticker": "TNOTE",
+          "name": "United States Treasury Note/Bond",
+          "sector": "",
+          "weight_pct": 0.27
+        },
+        {
+          "ticker": "TNOTE",
+          "name": "United States Treasury Note/Bond",
+          "sector": "",
+          "weight_pct": 0.25
+        },
+        {
+          "ticker": "TNOTE",
+          "name": "United States Treasury Note/Bond",
+          "sector": "",
+          "weight_pct": 0.22
+        }
+      ],
+      "holdings_as_of": "2026-03-16",
+      "holdings_provider": "etf_dot_com",
+      "n_holdings_total": 1299
     },
-    "LQD": {
-      "class": "INT_TREAS",
-      "mu_annual": 0.022,
-      "sigma_annual": 0.1,
-      "expense_ratio": 0.0014,
+    "DBC": {
+      "class": "COMMOD",
+      "mu_annual": 0.067386,
+      "sigma_annual": 0.18846,
+      "expense_ratio": 0.0085,
+      "tracking_error": 0.02,
+      "dist": {
+        "yield_annual": 0.025914,
+        "qualified_ratio": 0.0
+      },
+      "_provenance": {
+        "basis": "broad commodities basket; inflation hedge, high vol, no income; roll yield drag included in mu"
+      },
+      "_calibration": {
+        "method": "multi_window_blend",
+        "windows_yr": [
+          5,
+          10,
+          20
+        ],
+        "weights": [
+          0.15,
+          0.35,
+          0.3
+        ],
+        "prior_weight": 0.2,
+        "bars_used": 5030,
+        "as_of": "2026-03-16",
+        "provider": "yfinance"
+      },
+      "sector": "Invesco",
+      "instrument_type": "broad_etf",
+      "sector_provider": "yfinance",
+      "sector_as_of": "2026-03-16"
+    },
+    "EEM": {
+      "class": "INTL_STOCKS",
+      "mu_annual": 0.060347,
+      "sigma_annual": 0.229911,
+      "expense_ratio": 0.0068,
+      "tracking_error": 0.02,
+      "dist": {
+        "yield_annual": 0.021391,
+        "qualified_ratio": 0.8
+      },
+      "_provenance": {
+        "basis": "emerging markets; higher growth potential but higher sigma and political risk"
+      },
+      "_calibration": {
+        "method": "multi_window_blend",
+        "windows_yr": [
+          5,
+          10,
+          20
+        ],
+        "weights": [
+          0.15,
+          0.35,
+          0.3
+        ],
+        "prior_weight": 0.2,
+        "bars_used": 5030,
+        "as_of": "2026-03-16",
+        "provider": "yfinance"
+      },
+      "sector": "iShares",
+      "instrument_type": "sector_etf",
+      "sector_provider": "yfinance",
+      "sector_as_of": "2026-03-16",
+      "top_holdings": [
+        {
+          "ticker": "2330",
+          "name": "TAIWAN SEMICONDUCTOR MANUFACTURING",
+          "sector": "Information Technology",
+          "weight_pct": 13.35
+        },
+        {
+          "ticker": "005930",
+          "name": "SAMSUNG ELECTRONICS LTD",
+          "sector": "Information Technology",
+          "weight_pct": 5.41
+        },
+        {
+          "ticker": "700",
+          "name": "TENCENT HOLDINGS LTD",
+          "sector": "Communication",
+          "weight_pct": 4.16
+        },
+        {
+          "ticker": "000660",
+          "name": "SK HYNIX INC",
+          "sector": "Information Technology",
+          "weight_pct": 3.09
+        },
+        {
+          "ticker": "9988",
+          "name": "ALIBABA GROUP HOLDING LTD",
+          "sector": "Consumer Discretionary",
+          "weight_pct": 2.71
+        },
+        {
+          "ticker": "HDFCBANK",
+          "name": "HDFC BANK LTD",
+          "sector": "Financials",
+          "weight_pct": 0.94
+        },
+        {
+          "ticker": "939",
+          "name": "CHINA CONSTRUCTION BANK CORP H",
+          "sector": "Financials",
+          "weight_pct": 0.91
+        },
+        {
+          "ticker": "RELIANCE",
+          "name": "RELIANCE INDUSTRIES LTD",
+          "sector": "Energy",
+          "weight_pct": 0.85
+        },
+        {
+          "ticker": "2317",
+          "name": "HON HAI PRECISION INDUSTRY LTD",
+          "sector": "Information Technology",
+          "weight_pct": 0.79
+        },
+        {
+          "ticker": "2308",
+          "name": "DELTA ELECTRONICS INC",
+          "sector": "Information Technology",
+          "weight_pct": 0.78
+        },
+        {
+          "ticker": "2454",
+          "name": "MEDIATEK INC",
+          "sector": "Information Technology",
+          "weight_pct": 0.76
+        },
+        {
+          "ticker": "1810",
+          "name": "XIAOMI CORP",
+          "sector": "Information Technology",
+          "weight_pct": 0.68
+        },
+        {
+          "ticker": "005935",
+          "name": "SAMSUNG ELECTRONICS NON VOTING PRE",
+          "sector": "Information Technology",
+          "weight_pct": 0.68
+        },
+        {
+          "ticker": "PDD",
+          "name": "PDD HOLDINGS ADS INC",
+          "sector": "Consumer Discretionary",
+          "weight_pct": 0.68
+        },
+        {
+          "ticker": "ICICIBANK",
+          "name": "ICICI BANK LTD",
+          "sector": "Financials",
+          "weight_pct": 0.63
+        },
+        {
+          "ticker": "VALE3",
+          "name": "CIA VALE DO RIO DOCE SH",
+          "sector": "Materials",
+          "weight_pct": 0.5
+        },
+        {
+          "ticker": "2318",
+          "name": "PING AN INSURANCE (GROUP) CO OF CH",
+          "sector": "Financials",
+          "weight_pct": 0.5
+        },
+        {
+          "ticker": "1120",
+          "name": "AL RAJHI BANK",
+          "sector": "Financials",
+          "weight_pct": 0.5
+        },
+        {
+          "ticker": "1398",
+          "name": "INDUSTRIAL AND COMMERCIAL BANK OF",
+          "sector": "Financials",
+          "weight_pct": 0.49
+        },
+        {
+          "ticker": "BHARTIARTL",
+          "name": "BHARTI AIRTEL LTD",
+          "sector": "Communication",
+          "weight_pct": 0.47
+        }
+      ],
+      "holdings_as_of": "2026-03-16",
+      "holdings_provider": "etf_dot_com",
+      "n_holdings_total": 1066
+    },
+    "EFA": {
+      "class": "INTL_STOCKS",
+      "mu_annual": 0.068896,
+      "sigma_annual": 0.182779,
+      "expense_ratio": 0.0032,
       "tracking_error": 0.01,
       "dist": {
-        "yield_annual": 0.032,
-        "qualified_ratio": 0.0
+        "yield_annual": 0.033718,
+        "qualified_ratio": 0.8
       },
       "_provenance": {
-        "basis": "investment grade corporate; +20bp spread over Treasuries, slightly higher sigma"
-      }
-    },
-    "TIP": {
-      "class": "TIPS",
-      "mu_annual": 0.018,
-      "sigma_annual": 0.06,
-      "expense_ratio": 0.00019,
-      "tracking_error": 0.0,
-      "dist": {
-        "yield_annual": 0.024,
-        "qualified_ratio": 0.0
+        "basis": "developed markets ex-US; slightly lower mu than VXUS (ex-EM)"
       },
-      "_provenance": {
-        "basis": "TIPS; real yield + inflation adjustment; low sigma, inflation hedge"
-      }
-    },
-    "SCHP": {
-      "class": "TIPS",
-      "mu_annual": 0.018,
-      "sigma_annual": 0.06,
-      "expense_ratio": 0.0003,
-      "tracking_error": 0.0,
-      "dist": {
-        "yield_annual": 0.023,
-        "qualified_ratio": 0.0
+      "_calibration": {
+        "method": "multi_window_blend",
+        "windows_yr": [
+          5,
+          10,
+          20
+        ],
+        "weights": [
+          0.15,
+          0.35,
+          0.3
+        ],
+        "prior_weight": 0.2,
+        "bars_used": 5030,
+        "as_of": "2026-03-16",
+        "provider": "yfinance"
       },
-      "_provenance": {
-        "basis": "Schwab TIPS ETF; near-identical to TIP, slightly lower ER"
-      }
+      "sector": "iShares",
+      "instrument_type": "broad_etf",
+      "sector_provider": "yfinance",
+      "sector_as_of": "2026-03-16",
+      "top_holdings": [
+        {
+          "ticker": "ASML",
+          "name": "ASML HOLDING NV",
+          "sector": "Information Technology",
+          "weight_pct": 2.54
+        },
+        {
+          "ticker": "AZN",
+          "name": "ASTRAZENECA PLC",
+          "sector": "Health Care",
+          "weight_pct": 1.43
+        },
+        {
+          "ticker": "NOVN",
+          "name": "NOVARTIS AG",
+          "sector": "Health Care",
+          "weight_pct": 1.42
+        },
+        {
+          "ticker": "ROG",
+          "name": "ROCHE HOLDING PAR AG",
+          "sector": "Health Care",
+          "weight_pct": 1.38
+        },
+        {
+          "ticker": "HSBA",
+          "name": "HSBC HOLDINGS PLC",
+          "sector": "Financials",
+          "weight_pct": 1.3
+        },
+        {
+          "ticker": "NESN",
+          "name": "NESTLE LTD",
+          "sector": "Consumer Staples",
+          "weight_pct": 1.28
+        },
+        {
+          "ticker": "SHEL",
+          "name": "SHELL PLC",
+          "sector": "Energy",
+          "weight_pct": 1.23
+        },
+        {
+          "ticker": "CBA",
+          "name": "COMMONWEALTH BANK OF AUSTRALIA",
+          "sector": "Financials",
+          "weight_pct": 0.99
+        },
+        {
+          "ticker": "7203",
+          "name": "TOYOTA MOTOR CORP",
+          "sector": "Consumer Discretionary",
+          "weight_pct": 0.97
+        },
+        {
+          "ticker": "SAP",
+          "name": "SAP",
+          "sector": "Information Technology",
+          "weight_pct": 0.97
+        },
+        {
+          "ticker": "SIE",
+          "name": "SIEMENS N AG",
+          "sector": "Industrials",
+          "weight_pct": 0.93
+        },
+        {
+          "ticker": "8306",
+          "name": "MITSUBISHI UFJ FINANCIAL GROUP INC",
+          "sector": "Financials",
+          "weight_pct": 0.91
+        },
+        {
+          "ticker": "BHP",
+          "name": "BHP GROUP LTD",
+          "sector": "Materials",
+          "weight_pct": 0.86
+        },
+        {
+          "ticker": "TTE",
+          "name": "TOTALENERGIES",
+          "sector": "Energy",
+          "weight_pct": 0.8
+        },
+        {
+          "ticker": "SAN",
+          "name": "BANCO SANTANDER SA",
+          "sector": "Financials",
+          "weight_pct": 0.78
+        },
+        {
+          "ticker": "SU",
+          "name": "SCHNEIDER ELECTRIC",
+          "sector": "Industrials",
+          "weight_pct": 0.76
+        },
+        {
+          "ticker": "ALV",
+          "name": "ALLIANZ",
+          "sector": "Financials",
+          "weight_pct": 0.75
+        },
+        {
+          "ticker": "IBE",
+          "name": "IBERDROLA SA",
+          "sector": "Utilities",
+          "weight_pct": 0.71
+        },
+        {
+          "ticker": "DTE",
+          "name": "DEUTSCHE TELEKOM N AG",
+          "sector": "Communication",
+          "weight_pct": 0.68
+        },
+        {
+          "ticker": "ULVR",
+          "name": "UNILEVER PLC",
+          "sector": "Consumer Staples",
+          "weight_pct": 0.68
+        }
+      ],
+      "holdings_as_of": "2026-03-16",
+      "holdings_provider": "etf_dot_com",
+      "n_holdings_total": 701
     },
     "GLD": {
       "class": "GOLD",
-      "mu_annual": 0.03,
-      "sigma_annual": 0.15,
+      "mu_annual": 0.124812,
+      "sigma_annual": 0.165558,
       "expense_ratio": 0.004,
       "tracking_error": 0.01,
       "dist": {
@@ -339,12 +621,33 @@
       },
       "_provenance": {
         "basis": "gold bullion; long-run real return ~0-1%; ~3% nominal with inflation; portfolio hedge, no income"
-      }
+      },
+      "_calibration": {
+        "method": "multi_window_blend",
+        "windows_yr": [
+          5,
+          10,
+          20
+        ],
+        "weights": [
+          0.15,
+          0.35,
+          0.3
+        ],
+        "prior_weight": 0.2,
+        "bars_used": 5030,
+        "as_of": "2026-03-16",
+        "provider": "yfinance"
+      },
+      "sector": "State Street Investment Management",
+      "instrument_type": "broad_etf",
+      "sector_provider": "yfinance",
+      "sector_as_of": "2026-03-16"
     },
     "IAU": {
       "class": "GOLD",
-      "mu_annual": 0.03,
-      "sigma_annual": 0.15,
+      "mu_annual": 0.126024,
+      "sigma_annual": 0.16531,
       "expense_ratio": 0.0025,
       "tracking_error": 0.01,
       "dist": {
@@ -353,743 +656,3021 @@
       },
       "_provenance": {
         "basis": "same as GLD, lower ER"
-      }
+      },
+      "_calibration": {
+        "method": "multi_window_blend",
+        "windows_yr": [
+          5,
+          10,
+          20
+        ],
+        "weights": [
+          0.15,
+          0.35,
+          0.3
+        ],
+        "prior_weight": 0.2,
+        "bars_used": 5030,
+        "as_of": "2026-03-16",
+        "provider": "yfinance"
+      },
+      "sector": "iShares",
+      "instrument_type": "broad_etf",
+      "sector_provider": "yfinance",
+      "sector_as_of": "2026-03-16"
     },
-    "DBC": {
-      "class": "COMMOD",
-      "mu_annual": 0.028,
-      "sigma_annual": 0.2,
-      "expense_ratio": 0.0085,
-      "tracking_error": 0.02,
+    "IEF": {
+      "class": "INT_TREAS",
+      "mu_annual": 0.015667,
+      "sigma_annual": 0.071234,
+      "expense_ratio": 0.00015,
+      "tracking_error": 0.0,
       "dist": {
-        "yield_annual": 0.0,
+        "yield_annual": 0.038153,
         "qualified_ratio": 0.0
       },
       "_provenance": {
-        "basis": "broad commodities basket; inflation hedge, high vol, no income; roll yield drag included in mu"
-      }
+        "basis": "7-10yr Treasury; lower duration = lower sigma vs TLT"
+      },
+      "_calibration": {
+        "method": "multi_window_blend",
+        "windows_yr": [
+          5,
+          10,
+          20
+        ],
+        "weights": [
+          0.15,
+          0.35,
+          0.3
+        ],
+        "prior_weight": 0.2,
+        "bars_used": 5030,
+        "as_of": "2026-03-16",
+        "provider": "yfinance"
+      },
+      "sector": "iShares",
+      "instrument_type": "broad_etf",
+      "sector_provider": "yfinance",
+      "sector_as_of": "2026-03-16",
+      "top_holdings": [
+        {
+          "ticker": "US91282CKQ32",
+          "name": "TREASURY NOTE",
+          "sector": "Treasuries",
+          "weight_pct": 8.98
+        },
+        {
+          "ticker": "US91282CJJ18",
+          "name": "TREASURY NOTE",
+          "sector": "Treasuries",
+          "weight_pct": 8.88
+        },
+        {
+          "ticker": "US91282CJZ59",
+          "name": "TREASURY NOTE",
+          "sector": "Treasuries",
+          "weight_pct": 8.82
+        },
+        {
+          "ticker": "US91282CMM00",
+          "name": "TREASURY NOTE",
+          "sector": "Treasuries",
+          "weight_pct": 8.8
+        },
+        {
+          "ticker": "US91282CLW90",
+          "name": "TREASURY NOTE",
+          "sector": "Treasuries",
+          "weight_pct": 8.77
+        },
+        {
+          "ticker": "US91282CNT44",
+          "name": "TREASURY NOTE (2OLD)",
+          "sector": "Treasuries",
+          "weight_pct": 8.76
+        },
+        {
+          "ticker": "US91282CPJ44",
+          "name": "TREASURY NOTE (OLD)",
+          "sector": "Treasuries",
+          "weight_pct": 8.66
+        },
+        {
+          "ticker": "US91282CNC19",
+          "name": "TREASURY NOTE",
+          "sector": "Treasuries",
+          "weight_pct": 8.35
+        },
+        {
+          "ticker": "US91282CLF67",
+          "name": "TREASURY NOTE",
+          "sector": "Treasuries",
+          "weight_pct": 6.76
+        },
+        {
+          "ticker": "US91282CHC82",
+          "name": "TREASURY NOTE",
+          "sector": "Treasuries",
+          "weight_pct": 6.49
+        },
+        {
+          "ticker": "US91282CPZ85",
+          "name": "TREASURY NOTE (OTR)",
+          "sector": "Treasuries",
+          "weight_pct": 6.46
+        },
+        {
+          "ticker": "US91282CHT18",
+          "name": "TREASURY NOTE",
+          "sector": "Treasuries",
+          "weight_pct": 6.45
+        },
+        {
+          "ticker": "US91282CGM73",
+          "name": "TREASURY NOTE",
+          "sector": "Treasuries",
+          "weight_pct": 3.8
+        },
+        {
+          "ticker": "US0669224778",
+          "name": "BLK CSH FND TREASURY SL AGENCY",
+          "sector": "Cash and/or Derivatives",
+          "weight_pct": 0.01
+        }
+      ],
+      "holdings_as_of": "2026-03-16",
+      "holdings_provider": "etf_dot_com",
+      "n_holdings_total": 14
+    },
+    "LQD": {
+      "class": "INT_TREAS",
+      "mu_annual": 0.027262,
+      "sigma_annual": 0.089243,
+      "expense_ratio": 0.0014,
+      "tracking_error": 0.01,
+      "dist": {
+        "yield_annual": 0.045512,
+        "qualified_ratio": 0.0
+      },
+      "_provenance": {
+        "basis": "investment grade corporate; +20bp spread over Treasuries, slightly higher sigma"
+      },
+      "_calibration": {
+        "method": "multi_window_blend",
+        "windows_yr": [
+          5,
+          10,
+          20
+        ],
+        "weights": [
+          0.15,
+          0.35,
+          0.3
+        ],
+        "prior_weight": 0.2,
+        "bars_used": 5030,
+        "as_of": "2026-03-16",
+        "provider": "yfinance"
+      },
+      "sector": "iShares",
+      "instrument_type": "broad_etf",
+      "sector_provider": "yfinance",
+      "sector_as_of": "2026-03-16",
+      "top_holdings": [
+        {
+          "ticker": "US0669224778",
+          "name": "BLK CSH FND TREASURY SL AGENCY",
+          "sector": "Cash and/or Derivatives",
+          "weight_pct": 0.82
+        },
+        {
+          "ticker": "US03522AAJ97",
+          "name": "ANHEUSER-BUSCH COMPANIES LLC",
+          "sector": "Consumer Non-Cyclical",
+          "weight_pct": 0.19
+        },
+        {
+          "ticker": "US126650CZ11",
+          "name": "CVS HEALTH CORP",
+          "sector": "Consumer Non-Cyclical",
+          "weight_pct": 0.17
+        },
+        {
+          "ticker": "US87264ABF12",
+          "name": "T-MOBILE USA INC",
+          "sector": "Communications",
+          "weight_pct": 0.16
+        },
+        {
+          "ticker": "US30303MAE21",
+          "name": "META PLATFORMS INC",
+          "sector": "Communications",
+          "weight_pct": 0.14
+        },
+        {
+          "ticker": "US38145GAR11",
+          "name": "GOLDMAN SACHS GROUP INC (FXD-FRN)",
+          "sector": "Banking",
+          "weight_pct": 0.14
+        },
+        {
+          "ticker": "US716973AG71",
+          "name": "PFIZER INVESTMENT ENTERPRISES PTE",
+          "sector": "Consumer Non-Cyclical",
+          "weight_pct": 0.14
+        },
+        {
+          "ticker": "US38141GFD16",
+          "name": "GOLDMAN SACHS GROUP INC/THE",
+          "sector": "Banking",
+          "weight_pct": 0.14
+        },
+        {
+          "ticker": "US03522AAH32",
+          "name": "ANHEUSER-BUSCH COMPANIES LLC",
+          "sector": "Consumer Non-Cyclical",
+          "weight_pct": 0.14
+        },
+        {
+          "ticker": "US00206RLJ94",
+          "name": "AT&T INC",
+          "sector": "Communications",
+          "weight_pct": 0.14
+        },
+        {
+          "ticker": "US06051GLH01",
+          "name": "BANK OF AMERICA CORP MTN",
+          "sector": "Banking",
+          "weight_pct": 0.13
+        },
+        {
+          "ticker": "US95000U2M49",
+          "name": "WELLS FARGO & COMPANY MTN",
+          "sector": "Banking",
+          "weight_pct": 0.13
+        },
+        {
+          "ticker": "US00287YBX67",
+          "name": "ABBVIE INC",
+          "sector": "Consumer Non-Cyclical",
+          "weight_pct": 0.13
+        },
+        {
+          "ticker": "US06051GMA49",
+          "name": "BANK OF AMERICA CORP MTN",
+          "sector": "Banking",
+          "weight_pct": 0.13
+        },
+        {
+          "ticker": "US00206RKJ04",
+          "name": "AT&T INC",
+          "sector": "Communications",
+          "weight_pct": 0.13
+        },
+        {
+          "ticker": "US097023CW33",
+          "name": "BOEING CO",
+          "sector": "Capital Goods",
+          "weight_pct": 0.13
+        },
+        {
+          "ticker": "US38145GAT76",
+          "name": "GOLDMAN SACHS GROUP INC/THE",
+          "sector": "Banking",
+          "weight_pct": 0.12
+        },
+        {
+          "ticker": "US95000U3F88",
+          "name": "WELLS FARGO & COMPANY MTN",
+          "sector": "Banking",
+          "weight_pct": 0.12
+        },
+        {
+          "ticker": "US30303M8Y18",
+          "name": "META PLATFORMS INC",
+          "sector": "Communications",
+          "weight_pct": 0.12
+        },
+        {
+          "ticker": "US95000U3B74",
+          "name": "WELLS FARGO & COMPANY MTN",
+          "sector": "Banking",
+          "weight_pct": 0.12
+        }
+      ],
+      "holdings_as_of": "2026-03-16",
+      "holdings_provider": "etf_dot_com",
+      "n_holdings_total": 3095
+    },
+    "MSFT": {
+      "class": "US_STOCKS",
+      "mu_annual": 0.166742,
+      "sigma_annual": 0.262056,
+      "expense_ratio": 0.0,
+      "tracking_error": 0.02,
+      "dist": {
+        "yield_annual": 0.008798,
+        "qualified_ratio": 0.9
+      },
+      "_provenance": {
+        "basis": "single stock; large cap quality, slightly lower sigma than AAPL"
+      },
+      "_calibration": {
+        "method": "multi_window_blend",
+        "windows_yr": [
+          5,
+          10,
+          20
+        ],
+        "weights": [
+          0.15,
+          0.35,
+          0.3
+        ],
+        "prior_weight": 0.2,
+        "bars_used": 5030,
+        "as_of": "2026-03-16",
+        "provider": "yfinance"
+      },
+      "sector": "Technology",
+      "instrument_type": "stock",
+      "sector_provider": "yfinance",
+      "sector_as_of": "2026-03-16"
+    },
+    "NVDA": {
+      "class": "US_STOCKS",
+      "mu_annual": 0.22,
+      "sigma_annual": 0.467522,
+      "expense_ratio": 0.0,
+      "tracking_error": 0.04,
+      "dist": {
+        "yield_annual": 0.000222,
+        "qualified_ratio": 0.9
+      },
+      "_provenance": {
+        "basis": "single stock; AI/semiconductor cycle exposure; highest sigma in class"
+      },
+      "_calibration": {
+        "method": "multi_window_blend",
+        "windows_yr": [
+          5,
+          10,
+          20
+        ],
+        "weights": [
+          0.15,
+          0.35,
+          0.3
+        ],
+        "prior_weight": 0.2,
+        "bars_used": 5030,
+        "as_of": "2026-03-16",
+        "provider": "yfinance"
+      },
+      "sector": "Technology",
+      "instrument_type": "stock",
+      "sector_provider": "yfinance",
+      "sector_as_of": "2026-03-16"
     },
     "PDBC": {
       "class": "COMMOD",
-      "mu_annual": 0.028,
-      "sigma_annual": 0.19,
+      "mu_annual": 0.070574,
+      "sigma_annual": 0.182305,
       "expense_ratio": 0.0059,
       "tracking_error": 0.02,
       "dist": {
-        "yield_annual": 0.0,
+        "yield_annual": 0.029714,
         "qualified_ratio": 0.0
       },
       "_provenance": {
         "basis": "optimized roll commodities; similar to DBC, lower ER, slightly lower sigma from roll optimization"
+      },
+      "_calibration": {
+        "method": "multi_window_blend",
+        "windows_yr": [
+          5,
+          10,
+          20
+        ],
+        "weights": [
+          0.15,
+          0.35,
+          0.3
+        ],
+        "prior_weight": 0.2,
+        "bars_used": 2852,
+        "as_of": "2026-03-16",
+        "provider": "yfinance"
+      },
+      "sector": "Invesco",
+      "instrument_type": "broad_etf",
+      "sector_provider": "yfinance",
+      "sector_as_of": "2026-03-16"
+    },
+    "QQQ": {
+      "class": "US_STOCKS",
+      "mu_annual": 0.151402,
+      "sigma_annual": 0.221161,
+      "expense_ratio": 0.002,
+      "tracking_error": 0.02,
+      "dist": {
+        "yield_annual": 0.004708,
+        "qualified_ratio": 0.9
+      },
+      "_provenance": {
+        "basis": "Nasdaq-100 tech tilt; +1% mu vs broad market, +3% sigma for concentration risk"
+      },
+      "_calibration": {
+        "method": "multi_window_blend",
+        "windows_yr": [
+          5,
+          10,
+          20
+        ],
+        "weights": [
+          0.15,
+          0.35,
+          0.3
+        ],
+        "prior_weight": 0.2,
+        "bars_used": 5030,
+        "as_of": "2026-03-16",
+        "provider": "yfinance"
+      },
+      "sector": "Invesco",
+      "instrument_type": "sector_etf",
+      "sector_provider": "yfinance",
+      "sector_as_of": "2026-03-16",
+      "top_holdings": [
+        {
+          "ticker": "NVDA",
+          "name": "NVIDIA Corporation Common Stock",
+          "sector": "",
+          "weight_pct": 3.0
+        },
+        {
+          "ticker": "AAPL",
+          "name": "Apple Inc. Common Stock",
+          "sector": "",
+          "weight_pct": 2.985
+        },
+        {
+          "ticker": "GOOGL",
+          "name": "Alphabet Inc. Class A Common Stock",
+          "sector": "",
+          "weight_pct": 2.97
+        },
+        {
+          "ticker": "GOOG",
+          "name": "Alphabet Inc. Class C Capital Stock",
+          "sector": "",
+          "weight_pct": 2.955
+        },
+        {
+          "ticker": "MSFT",
+          "name": "Microsoft Corporation Common Stock",
+          "sector": "",
+          "weight_pct": 2.94
+        },
+        {
+          "ticker": "AMZN",
+          "name": "Amazon.com, Inc. Common Stock",
+          "sector": "",
+          "weight_pct": 2.925
+        },
+        {
+          "ticker": "META",
+          "name": "Meta Platforms, Inc. Class A Common Stock",
+          "sector": "",
+          "weight_pct": 2.91
+        },
+        {
+          "ticker": "AVGO",
+          "name": "Broadcom Inc. Common Stock",
+          "sector": "",
+          "weight_pct": 2.895
+        },
+        {
+          "ticker": "TSLA",
+          "name": "Tesla, Inc. Common Stock",
+          "sector": "",
+          "weight_pct": 2.88
+        },
+        {
+          "ticker": "WMT",
+          "name": "Walmart Inc. Common Stock",
+          "sector": "",
+          "weight_pct": 2.865
+        },
+        {
+          "ticker": "ASML",
+          "name": "ASML Holding N.V. New York Registry Shares",
+          "sector": "",
+          "weight_pct": 2.85
+        },
+        {
+          "ticker": "MU",
+          "name": "Micron Technology, Inc. Common Stock",
+          "sector": "",
+          "weight_pct": 2.835
+        },
+        {
+          "ticker": "COST",
+          "name": "Costco Wholesale Corporation Common Stock",
+          "sector": "",
+          "weight_pct": 2.82
+        },
+        {
+          "ticker": "NFLX",
+          "name": "Netflix, Inc. Common Stock",
+          "sector": "",
+          "weight_pct": 2.805
+        },
+        {
+          "ticker": "PLTR",
+          "name": "Palantir Technologies Inc. Class A Common Stock",
+          "sector": "",
+          "weight_pct": 2.79
+        },
+        {
+          "ticker": "AMD",
+          "name": "Advanced Micro Devices, Inc. Common Stock",
+          "sector": "",
+          "weight_pct": 2.775
+        },
+        {
+          "ticker": "CSCO",
+          "name": "Cisco Systems, Inc. Common Stock (DE)",
+          "sector": "",
+          "weight_pct": 2.76
+        },
+        {
+          "ticker": "AMAT",
+          "name": "Applied Materials, Inc. Common Stock",
+          "sector": "",
+          "weight_pct": 2.745
+        },
+        {
+          "ticker": "LRCX",
+          "name": "Lam Research Corporation Common Stock",
+          "sector": "",
+          "weight_pct": 2.73
+        },
+        {
+          "ticker": "TMUS",
+          "name": "T-Mobile US, Inc. Common Stock",
+          "sector": "",
+          "weight_pct": 2.715
+        }
+      ],
+      "holdings_as_of": "2026-03-16",
+      "holdings_provider": "etf_dot_com",
+      "n_holdings_total": 200
+    },
+    "SCHP": {
+      "class": "TIPS",
+      "mu_annual": 0.024512,
+      "sigma_annual": 0.057601,
+      "expense_ratio": 0.0003,
+      "tracking_error": 0.0,
+      "dist": {
+        "yield_annual": 0.0397,
+        "qualified_ratio": 0.0
+      },
+      "_provenance": {
+        "basis": "Schwab TIPS ETF; near-identical to TIP, slightly lower ER"
+      },
+      "_calibration": {
+        "method": "multi_window_blend",
+        "windows_yr": [
+          5,
+          10,
+          20
+        ],
+        "weights": [
+          0.15,
+          0.35,
+          0.3
+        ],
+        "prior_weight": 0.2,
+        "bars_used": 3925,
+        "as_of": "2026-03-16",
+        "provider": "yfinance"
+      },
+      "sector": "Schwab ETFs",
+      "instrument_type": "broad_etf",
+      "sector_provider": "yfinance",
+      "sector_as_of": "2026-03-16"
+    },
+    "SPY": {
+      "class": "US_STOCKS",
+      "mu_annual": 0.114784,
+      "sigma_annual": 0.178292,
+      "expense_ratio": 0.0009,
+      "tracking_error": 0.01,
+      "dist": {
+        "yield_annual": 0.010994,
+        "qualified_ratio": 0.9
+      },
+      "_provenance": {
+        "basis": "broad US market long-run; 6.5% real+inflation consistent with CRSP 1926-2024 ~10% minus ~3.5% inflation premium for planning"
+      },
+      "_calibration": {
+        "method": "multi_window_blend",
+        "windows_yr": [
+          5,
+          10,
+          20
+        ],
+        "weights": [
+          0.15,
+          0.35,
+          0.3
+        ],
+        "prior_weight": 0.2,
+        "bars_used": 5030,
+        "as_of": "2026-03-16",
+        "provider": "yfinance"
+      },
+      "sector": "State Street Investment Management",
+      "instrument_type": "broad_etf",
+      "sector_provider": "yfinance",
+      "sector_as_of": "2026-03-16",
+      "top_holdings": [
+        {
+          "ticker": "NVDA",
+          "name": "NVIDIA CORP",
+          "sector": "-",
+          "weight_pct": 7.7076
+        },
+        {
+          "ticker": "AAPL",
+          "name": "APPLE INC",
+          "sector": "-",
+          "weight_pct": 6.5036
+        },
+        {
+          "ticker": "MSFT",
+          "name": "MICROSOFT CORP",
+          "sector": "-",
+          "weight_pct": 5.1733
+        },
+        {
+          "ticker": "AMZN",
+          "name": "AMAZON.COM INC",
+          "sector": "-",
+          "weight_pct": 3.5549
+        },
+        {
+          "ticker": "GOOGL",
+          "name": "ALPHABET INC CL A",
+          "sector": "-",
+          "weight_pct": 3.0946
+        },
+        {
+          "ticker": "AVGO",
+          "name": "BROADCOM INC",
+          "sector": "-",
+          "weight_pct": 2.677
+        },
+        {
+          "ticker": "GOOG",
+          "name": "ALPHABET INC CL C",
+          "sector": "-",
+          "weight_pct": 2.4666
+        },
+        {
+          "ticker": "META",
+          "name": "META PLATFORMS INC CLASS A",
+          "sector": "-",
+          "weight_pct": 2.3499
+        },
+        {
+          "ticker": "TSLA",
+          "name": "TESLA INC",
+          "sector": "-",
+          "weight_pct": 1.9342
+        },
+        {
+          "ticker": "BRK.B",
+          "name": "BERKSHIRE HATHAWAY INC CL B",
+          "sector": "-",
+          "weight_pct": 1.5811
+        },
+        {
+          "ticker": "LLY",
+          "name": "ELI LILLY + CO",
+          "sector": "-",
+          "weight_pct": 1.3768
+        },
+        {
+          "ticker": "JPM",
+          "name": "JPMORGAN CHASE + CO",
+          "sector": "-",
+          "weight_pct": 1.3576
+        },
+        {
+          "ticker": "XOM",
+          "name": "EXXON MOBIL CORP",
+          "sector": "-",
+          "weight_pct": 1.1587
+        },
+        {
+          "ticker": "JNJ",
+          "name": "JOHNSON + JOHNSON",
+          "sector": "-",
+          "weight_pct": 1.0241
+        },
+        {
+          "ticker": "WMT",
+          "name": "WALMART INC",
+          "sector": "-",
+          "weight_pct": 0.9764
+        },
+        {
+          "ticker": "V",
+          "name": "VISA INC CLASS A SHARES",
+          "sector": "-",
+          "weight_pct": 0.9122
+        },
+        {
+          "ticker": "MU",
+          "name": "MICRON TECHNOLOGY INC",
+          "sector": "-",
+          "weight_pct": 0.8418
+        },
+        {
+          "ticker": "COST",
+          "name": "COSTCO WHOLESALE CORP",
+          "sector": "-",
+          "weight_pct": 0.7865
+        },
+        {
+          "ticker": "MA",
+          "name": "MASTERCARD INC   A",
+          "sector": "-",
+          "weight_pct": 0.7186
+        },
+        {
+          "ticker": "NFLX",
+          "name": "NETFLIX INC",
+          "sector": "-",
+          "weight_pct": 0.7107
+        }
+      ],
+      "holdings_as_of": "2026-03-16",
+      "holdings_provider": "etf_dot_com",
+      "n_holdings_total": 504
+    },
+    "TIP": {
+      "class": "TIPS",
+      "mu_annual": 0.025727,
+      "sigma_annual": 0.060187,
+      "expense_ratio": 0.00019,
+      "tracking_error": 0.0,
+      "dist": {
+        "yield_annual": 0.034333,
+        "qualified_ratio": 0.0
+      },
+      "_provenance": {
+        "basis": "TIPS; real yield + inflation adjustment; low sigma, inflation hedge"
+      },
+      "_calibration": {
+        "method": "multi_window_blend",
+        "windows_yr": [
+          5,
+          10,
+          20
+        ],
+        "weights": [
+          0.15,
+          0.35,
+          0.3
+        ],
+        "prior_weight": 0.2,
+        "bars_used": 5030,
+        "as_of": "2026-03-16",
+        "provider": "yfinance"
+      },
+      "sector": "iShares",
+      "instrument_type": "broad_etf",
+      "sector_provider": "yfinance",
+      "sector_as_of": "2026-03-16",
+      "top_holdings": [
+        {
+          "ticker": "US91282CNS60",
+          "name": "TREASURY (CPI) NOTE",
+          "sector": "Treasuries",
+          "weight_pct": 4.18
+        },
+        {
+          "ticker": "US91282CML27",
+          "name": "TREASURY (CPI) NOTE",
+          "sector": "Treasuries",
+          "weight_pct": 4.11
+        },
+        {
+          "ticker": "US91282CLE92",
+          "name": "TREASURY (CPI) NOTE",
+          "sector": "Treasuries",
+          "weight_pct": 3.87
+        },
+        {
+          "ticker": "US91282CJY84",
+          "name": "TREASURY (CPI) NOTE",
+          "sector": "Treasuries",
+          "weight_pct": 3.7
+        },
+        {
+          "ticker": "US91282CPH87",
+          "name": "TREASURY (CPI) NOTE",
+          "sector": "Treasuries",
+          "weight_pct": 3.49
+        },
+        {
+          "ticker": "US91282CNB36",
+          "name": "TREASURY (CPI) NOTE",
+          "sector": "Treasuries",
+          "weight_pct": 3.44
+        },
+        {
+          "ticker": "US91282CHP95",
+          "name": "TREASURY (CPI) NOTE",
+          "sector": "Treasuries",
+          "weight_pct": 3.43
+        },
+        {
+          "ticker": "US91282CGK18",
+          "name": "TREASURY (CPI) NOTE",
+          "sector": "Treasuries",
+          "weight_pct": 3.41
+        },
+        {
+          "ticker": "US91282CEZ05",
+          "name": "TREASURY (CPI) NOTE",
+          "sector": "Treasuries",
+          "weight_pct": 3.37
+        },
+        {
+          "ticker": "US91282CLV18",
+          "name": "TREASURY (CPI) NOTE",
+          "sector": "Treasuries",
+          "weight_pct": 3.33
+        },
+        {
+          "ticker": "US91282CJH51",
+          "name": "TREASURY (CPI) NOTE",
+          "sector": "Treasuries",
+          "weight_pct": 3.24
+        },
+        {
+          "ticker": "US91282CDX65",
+          "name": "TREASURY (CPI) NOTE",
+          "sector": "Treasuries",
+          "weight_pct": 3.2
+        },
+        {
+          "ticker": "US91282CKL45",
+          "name": "TREASURY (CPI) NOTE",
+          "sector": "Treasuries",
+          "weight_pct": 3.2
+        },
+        {
+          "ticker": "US91282CFR79",
+          "name": "TREASURY (CPI) NOTE",
+          "sector": "Treasuries",
+          "weight_pct": 3.12
+        },
+        {
+          "ticker": "US91282CGW55",
+          "name": "TREASURY (CPI) NOTE",
+          "sector": "Treasuries",
+          "weight_pct": 3.03
+        },
+        {
+          "ticker": "US91282CCM10",
+          "name": "TREASURY (CPI) NOTE",
+          "sector": "Treasuries",
+          "weight_pct": 2.99
+        },
+        {
+          "ticker": "US91282CEJ62",
+          "name": "TREASURY (CPI) NOTE",
+          "sector": "Treasuries",
+          "weight_pct": 2.98
+        },
+        {
+          "ticker": "US91282CBF77",
+          "name": "TREASURY (CPI) NOTE",
+          "sector": "Treasuries",
+          "weight_pct": 2.95
+        },
+        {
+          "ticker": "US912828ZZ63",
+          "name": "TREASURY (CPI) NOTE",
+          "sector": "Treasuries",
+          "weight_pct": 2.89
+        },
+        {
+          "ticker": "US9128283R96",
+          "name": "TREASURY (CPI) NOTE",
+          "sector": "Treasuries",
+          "weight_pct": 2.7
+        }
+      ],
+      "holdings_as_of": "2026-03-16",
+      "holdings_provider": "etf_dot_com",
+      "n_holdings_total": 48
+    },
+    "TLT": {
+      "class": "LONG_TREAS",
+      "mu_annual": -0.000302,
+      "sigma_annual": 0.144727,
+      "expense_ratio": 0.00015,
+      "tracking_error": 0.0,
+      "dist": {
+        "yield_annual": 0.044973,
+        "qualified_ratio": 0.0
+      },
+      "_provenance": {
+        "basis": "20yr Treasury; mu reflects current yield minus duration risk premium; interest income, not qualified dividends"
+      },
+      "_calibration": {
+        "method": "multi_window_blend",
+        "windows_yr": [
+          5,
+          10,
+          20
+        ],
+        "weights": [
+          0.15,
+          0.35,
+          0.3
+        ],
+        "prior_weight": 0.2,
+        "bars_used": 5030,
+        "as_of": "2026-03-16",
+        "provider": "yfinance"
+      },
+      "sector": "iShares",
+      "instrument_type": "broad_etf",
+      "sector_provider": "yfinance",
+      "sector_as_of": "2026-03-16",
+      "top_holdings": [
+        {
+          "ticker": "US912810SZ21",
+          "name": "TREASURY BOND",
+          "sector": "Treasuries",
+          "weight_pct": 4.84
+        },
+        {
+          "ticker": "US912810TB44",
+          "name": "TREASURY BOND",
+          "sector": "Treasuries",
+          "weight_pct": 4.79
+        },
+        {
+          "ticker": "US912810TT51",
+          "name": "TREASURY BOND",
+          "sector": "Treasuries",
+          "weight_pct": 4.61
+        },
+        {
+          "ticker": "US912810TV08",
+          "name": "TREASURY BOND",
+          "sector": "Treasuries",
+          "weight_pct": 4.59
+        },
+        {
+          "ticker": "US912810UK24",
+          "name": "TREASURY BOND",
+          "sector": "Treasuries",
+          "weight_pct": 4.55
+        },
+        {
+          "ticker": "US912810UA42",
+          "name": "TREASURY BOND",
+          "sector": "Treasuries",
+          "weight_pct": 4.48
+        },
+        {
+          "ticker": "US912810UC08",
+          "name": "TREASURY BOND",
+          "sector": "Treasuries",
+          "weight_pct": 4.28
+        },
+        {
+          "ticker": "US912810TX63",
+          "name": "TREASURY BOND",
+          "sector": "Treasuries",
+          "weight_pct": 4.06
+        },
+        {
+          "ticker": "US912810TR95",
+          "name": "TREASURY BOND",
+          "sector": "Treasuries",
+          "weight_pct": 3.93
+        },
+        {
+          "ticker": "US912810UG12",
+          "name": "TREASURY BOND",
+          "sector": "Treasuries",
+          "weight_pct": 3.83
+        },
+        {
+          "ticker": "US912810TL26",
+          "name": "TREASURY BOND",
+          "sector": "Treasuries",
+          "weight_pct": 3.69
+        },
+        {
+          "ticker": "US912810UE63",
+          "name": "TREASURY BOND",
+          "sector": "Treasuries",
+          "weight_pct": 3.53
+        },
+        {
+          "ticker": "US912810SU34",
+          "name": "TREASURY BOND",
+          "sector": "Treasuries",
+          "weight_pct": 3.49
+        },
+        {
+          "ticker": "US912810UM89",
+          "name": "TREASURY BOND (2OLD)",
+          "sector": "Treasuries",
+          "weight_pct": 2.92
+        },
+        {
+          "ticker": "US912810SE91",
+          "name": "TREASURY BOND",
+          "sector": "Treasuries",
+          "weight_pct": 2.85
+        },
+        {
+          "ticker": "US912810SD19",
+          "name": "TREASURY BOND",
+          "sector": "Treasuries",
+          "weight_pct": 2.74
+        },
+        {
+          "ticker": "US912810TN81",
+          "name": "TREASURY BOND",
+          "sector": "Treasuries",
+          "weight_pct": 2.71
+        },
+        {
+          "ticker": "US912810SS87",
+          "name": "TREASURY BOND",
+          "sector": "Treasuries",
+          "weight_pct": 2.7
+        },
+        {
+          "ticker": "US912810SC36",
+          "name": "TREASURY BOND",
+          "sector": "Treasuries",
+          "weight_pct": 2.66
+        },
+        {
+          "ticker": "US912810SP49",
+          "name": "TREASURY BOND",
+          "sector": "Treasuries",
+          "weight_pct": 2.55
+        }
+      ],
+      "holdings_as_of": "2026-03-16",
+      "holdings_provider": "etf_dot_com",
+      "n_holdings_total": 44
+    },
+    "VTI": {
+      "class": "US_STOCKS",
+      "mu_annual": 0.111044,
+      "sigma_annual": 0.18081,
+      "expense_ratio": 0.0003,
+      "tracking_error": 0.01,
+      "dist": {
+        "yield_annual": 0.011517,
+        "qualified_ratio": 0.9
+      },
+      "_provenance": {
+        "basis": "same as SPY; total market, slightly lower ER"
+      },
+      "_calibration": {
+        "method": "multi_window_blend",
+        "windows_yr": [
+          5,
+          10,
+          20
+        ],
+        "weights": [
+          0.15,
+          0.35,
+          0.3
+        ],
+        "prior_weight": 0.2,
+        "bars_used": 5030,
+        "as_of": "2026-03-16",
+        "provider": "yfinance"
+      },
+      "sector": "Vanguard",
+      "instrument_type": "broad_etf",
+      "sector_provider": "yfinance",
+      "sector_as_of": "2026-03-16",
+      "top_holdings": [
+        {
+          "ticker": "NVDA",
+          "name": "NVIDIA Corp.",
+          "sector": "",
+          "weight_pct": 6.18
+        },
+        {
+          "ticker": "AAPL",
+          "name": "Apple Inc.",
+          "sector": "",
+          "weight_pct": 5.89
+        },
+        {
+          "ticker": "MSFT",
+          "name": "Microsoft Corp.",
+          "sector": "",
+          "weight_pct": 4.41
+        },
+        {
+          "ticker": "AMZN",
+          "name": "Amazon.com Inc.",
+          "sector": "",
+          "weight_pct": 3.05
+        },
+        {
+          "ticker": "GOOGL",
+          "name": "Alphabet Inc. Class A",
+          "sector": "",
+          "weight_pct": 2.74
+        },
+        {
+          "ticker": "AVGO",
+          "name": "Broadcom Inc.",
+          "sector": "",
+          "weight_pct": 2.28
+        },
+        {
+          "ticker": "GOOG",
+          "name": "Alphabet Inc. Class C",
+          "sector": "",
+          "weight_pct": 2.16
+        },
+        {
+          "ticker": "META",
+          "name": "Facebook Inc. Class A",
+          "sector": "",
+          "weight_pct": 2.13
+        },
+        {
+          "ticker": "TSLA",
+          "name": "Tesla Inc.",
+          "sector": "",
+          "weight_pct": 1.72
+        },
+        {
+          "ticker": "BRK.B",
+          "name": "Berkshire Hathaway Inc. Class B",
+          "sector": "",
+          "weight_pct": 1.37
+        },
+        {
+          "ticker": "LLY",
+          "name": "Eli Lilly & Co.",
+          "sector": "",
+          "weight_pct": 1.35
+        },
+        {
+          "ticker": "JPM",
+          "name": "JPMorgan Chase & Co.",
+          "sector": "",
+          "weight_pct": 1.15
+        },
+        {
+          "ticker": "XOM",
+          "name": "Exxon Mobil Corp.",
+          "sector": "",
+          "weight_pct": 0.97
+        },
+        {
+          "ticker": "JNJ",
+          "name": "Johnson & Johnson",
+          "sector": "",
+          "weight_pct": 0.9
+        },
+        {
+          "ticker": "WMT",
+          "name": "Walmart Inc.",
+          "sector": "",
+          "weight_pct": 0.85
+        },
+        {
+          "ticker": "V",
+          "name": "Visa Inc. Class A",
+          "sector": "",
+          "weight_pct": 0.8
+        },
+        {
+          "ticker": "MU",
+          "name": "Micron Technology Inc.",
+          "sector": "",
+          "weight_pct": 0.7
+        },
+        {
+          "ticker": "COST",
+          "name": "Costco Wholesale Corp.",
+          "sector": "",
+          "weight_pct": 0.68
+        },
+        {
+          "ticker": "MA",
+          "name": "Mastercard Inc. Class A",
+          "sector": "",
+          "weight_pct": 0.63
+        },
+        {
+          "ticker": "ABBV",
+          "name": "AbbVie Inc.",
+          "sector": "",
+          "weight_pct": 0.62
+        }
+      ],
+      "holdings_as_of": "2026-03-16",
+      "holdings_provider": "etf_dot_com",
+      "n_holdings_total": 1179
+    },
+    "VTV": {
+      "class": "US_STOCKS",
+      "mu_annual": 0.098333,
+      "sigma_annual": 0.171313,
+      "expense_ratio": 0.0004,
+      "tracking_error": 0.01,
+      "dist": {
+        "yield_annual": 0.0198,
+        "qualified_ratio": 0.9
+      },
+      "_provenance": {
+        "basis": "US value; slightly lower mu than growth, higher yield"
+      },
+      "_calibration": {
+        "method": "multi_window_blend",
+        "windows_yr": [
+          5,
+          10,
+          20
+        ],
+        "weights": [
+          0.15,
+          0.35,
+          0.3
+        ],
+        "prior_weight": 0.2,
+        "bars_used": 5030,
+        "as_of": "2026-03-16",
+        "provider": "yfinance"
+      },
+      "sector": "Vanguard",
+      "instrument_type": "sector_etf",
+      "sector_provider": "yfinance",
+      "sector_as_of": "2026-03-16",
+      "top_holdings": [
+        {
+          "ticker": "BRK.B",
+          "name": "Berkshire Hathaway Inc. Class B",
+          "sector": "",
+          "weight_pct": 3.08
+        },
+        {
+          "ticker": "JPM",
+          "name": "JPMorgan Chase & Co.",
+          "sector": "",
+          "weight_pct": 3.0
+        },
+        {
+          "ticker": "XOM",
+          "name": "Exxon Mobil Corp.",
+          "sector": "",
+          "weight_pct": 2.51
+        },
+        {
+          "ticker": "JNJ",
+          "name": "Johnson & Johnson",
+          "sector": "",
+          "weight_pct": 2.34
+        },
+        {
+          "ticker": "WMT",
+          "name": "Walmart Inc.",
+          "sector": "",
+          "weight_pct": 2.19
+        },
+        {
+          "ticker": "MU",
+          "name": "Micron Technology Inc.",
+          "sector": "",
+          "weight_pct": 1.81
+        },
+        {
+          "ticker": "ABBV",
+          "name": "AbbVie Inc.",
+          "sector": "",
+          "weight_pct": 1.6
+        },
+        {
+          "ticker": "PG",
+          "name": "Procter & Gamble Co.",
+          "sector": "",
+          "weight_pct": 1.53
+        },
+        {
+          "ticker": "HD",
+          "name": "Home Depot Inc.",
+          "sector": "",
+          "weight_pct": 1.48
+        },
+        {
+          "ticker": "CVX",
+          "name": "Chevron Corp.",
+          "sector": "",
+          "weight_pct": 1.4
+        },
+        {
+          "ticker": "CAT",
+          "name": "Caterpillar Inc.",
+          "sector": "",
+          "weight_pct": 1.36
+        },
+        {
+          "ticker": "BAC",
+          "name": "Bank of America Corp.",
+          "sector": "",
+          "weight_pct": 1.22
+        },
+        {
+          "ticker": "MRK",
+          "name": "Merck & Co. Inc.",
+          "sector": "",
+          "weight_pct": 1.2
+        },
+        {
+          "ticker": "PM",
+          "name": "Philip Morris International Inc.",
+          "sector": "",
+          "weight_pct": 1.14
+        },
+        {
+          "ticker": "CSCO",
+          "name": "Cisco Systems Inc.",
+          "sector": "",
+          "weight_pct": 1.1
+        },
+        {
+          "ticker": "KO",
+          "name": "Coca-Cola Co.",
+          "sector": "",
+          "weight_pct": 1.1
+        },
+        {
+          "ticker": "RTX",
+          "name": "RTX Corp.",
+          "sector": "",
+          "weight_pct": 1.06
+        },
+        {
+          "ticker": "UNH",
+          "name": "UnitedHealth Group Inc.",
+          "sector": "",
+          "weight_pct": 1.04
+        },
+        {
+          "ticker": "WFC",
+          "name": "Wells Fargo & Co.",
+          "sector": "",
+          "weight_pct": 1.0
+        },
+        {
+          "ticker": "GS",
+          "name": "Goldman Sachs Group Inc.",
+          "sector": "",
+          "weight_pct": 0.96
+        }
+      ],
+      "holdings_as_of": "2026-03-16",
+      "holdings_provider": "etf_dot_com",
+      "n_holdings_total": 310
+    },
+    "VUG": {
+      "class": "US_STOCKS",
+      "mu_annual": 0.129874,
+      "sigma_annual": 0.212063,
+      "expense_ratio": 0.0004,
+      "tracking_error": 0.02,
+      "dist": {
+        "yield_annual": 0.004465,
+        "qualified_ratio": 0.9
+      },
+      "_provenance": {
+        "basis": "US growth; between broad market and QQQ"
+      },
+      "_calibration": {
+        "method": "multi_window_blend",
+        "windows_yr": [
+          5,
+          10,
+          20
+        ],
+        "weights": [
+          0.15,
+          0.35,
+          0.3
+        ],
+        "prior_weight": 0.2,
+        "bars_used": 5030,
+        "as_of": "2026-03-16",
+        "provider": "yfinance"
+      },
+      "sector": "Vanguard",
+      "instrument_type": "sector_etf",
+      "sector_provider": "yfinance",
+      "sector_as_of": "2026-03-16",
+      "top_holdings": [
+        {
+          "ticker": "NVDA",
+          "name": "NVIDIA Corp.",
+          "sector": "",
+          "weight_pct": 12.82
+        },
+        {
+          "ticker": "AAPL",
+          "name": "Apple Inc.",
+          "sector": "",
+          "weight_pct": 12.23
+        },
+        {
+          "ticker": "MSFT",
+          "name": "Microsoft Corp.",
+          "sector": "",
+          "weight_pct": 9.15
+        },
+        {
+          "ticker": "GOOGL",
+          "name": "Alphabet Inc. Class A",
+          "sector": "",
+          "weight_pct": 5.69
+        },
+        {
+          "ticker": "GOOG",
+          "name": "Alphabet Inc. Class C",
+          "sector": "",
+          "weight_pct": 4.49
+        },
+        {
+          "ticker": "META",
+          "name": "Facebook Inc. Class A",
+          "sector": "",
+          "weight_pct": 4.44
+        },
+        {
+          "ticker": "AMZN",
+          "name": "Amazon.com Inc.",
+          "sector": "",
+          "weight_pct": 4.41
+        },
+        {
+          "ticker": "AVGO",
+          "name": "Broadcom Inc.",
+          "sector": "",
+          "weight_pct": 3.95
+        },
+        {
+          "ticker": "TSLA",
+          "name": "Tesla Inc.",
+          "sector": "",
+          "weight_pct": 3.58
+        },
+        {
+          "ticker": "LLY",
+          "name": "Eli Lilly & Co.",
+          "sector": "",
+          "weight_pct": 2.82
+        },
+        {
+          "ticker": "V",
+          "name": "Visa Inc. Class A",
+          "sector": "",
+          "weight_pct": 1.67
+        },
+        {
+          "ticker": "COST",
+          "name": "Costco Wholesale Corp.",
+          "sector": "",
+          "weight_pct": 1.42
+        },
+        {
+          "ticker": "MA",
+          "name": "Mastercard Inc. Class A",
+          "sector": "",
+          "weight_pct": 1.32
+        },
+        {
+          "ticker": "NFLX",
+          "name": "Netflix Inc.",
+          "sector": "",
+          "weight_pct": 1.3
+        },
+        {
+          "ticker": "AMD",
+          "name": "Advanced Micro Devices Inc.",
+          "sector": "",
+          "weight_pct": 1.04
+        },
+        {
+          "ticker": "LRCX",
+          "name": "Lam Research Corp.",
+          "sector": "",
+          "weight_pct": 0.95
+        },
+        {
+          "ticker": "PLTR",
+          "name": "Palantir Technologies Inc. Class A",
+          "sector": "",
+          "weight_pct": 0.95
+        },
+        {
+          "ticker": "ORCL",
+          "name": "Oracle Corp.",
+          "sector": "",
+          "weight_pct": 0.79
+        },
+        {
+          "ticker": "MCD",
+          "name": "McDonald's Corp.",
+          "sector": "",
+          "weight_pct": 0.78
+        },
+        {
+          "ticker": "GEV",
+          "name": "GE Vernova LLC",
+          "sector": "",
+          "weight_pct": 0.77
+        }
+      ],
+      "holdings_as_of": "2026-03-16",
+      "holdings_provider": "etf_dot_com",
+      "n_holdings_total": 150
+    },
+    "VXUS": {
+      "class": "INTL_STOCKS",
+      "mu_annual": 0.072243,
+      "sigma_annual": 0.172346,
+      "expense_ratio": 0.0007,
+      "tracking_error": 0.01,
+      "dist": {
+        "yield_annual": 0.031261,
+        "qualified_ratio": 0.8
+      },
+      "_provenance": {
+        "basis": "total intl; lower mu reflects valuation/FX/political risk discount vs US"
+      },
+      "_calibration": {
+        "method": "multi_window_blend",
+        "windows_yr": [
+          5,
+          10,
+          20
+        ],
+        "weights": [
+          0.15,
+          0.35,
+          0.3
+        ],
+        "prior_weight": 0.2,
+        "bars_used": 3803,
+        "as_of": "2026-03-16",
+        "provider": "yfinance"
+      },
+      "sector": "Vanguard",
+      "instrument_type": "broad_etf",
+      "sector_provider": "yfinance",
+      "sector_as_of": "2026-03-16",
+      "top_holdings": [
+        {
+          "ticker": "2330",
+          "name": "Taiwan Semiconductor Manufacturing Co. Ltd.",
+          "sector": "",
+          "weight_pct": 3.42
+        },
+        {
+          "ticker": "005930",
+          "name": "Samsung Electronics Co. Ltd.",
+          "sector": "",
+          "weight_pct": 1.59
+        },
+        {
+          "ticker": "ASML",
+          "name": "ASML Holding NV",
+          "sector": "",
+          "weight_pct": 1.29
+        },
+        {
+          "ticker": "700",
+          "name": "Tencent Holdings Ltd.",
+          "sector": "",
+          "weight_pct": 0.92
+        },
+        {
+          "ticker": "000660",
+          "name": "SK hynix Inc.",
+          "sector": "",
+          "weight_pct": 0.9
+        },
+        {
+          "ticker": "ROG",
+          "name": "Roche Holding AG",
+          "sector": "",
+          "weight_pct": 0.75
+        },
+        {
+          "ticker": "9988",
+          "name": "Alibaba Group Holding Ltd.",
+          "sector": "",
+          "weight_pct": 0.73
+        },
+        {
+          "ticker": "NOVN",
+          "name": "Novartis AG",
+          "sector": "",
+          "weight_pct": 0.73
+        },
+        {
+          "ticker": "HSBA",
+          "name": "HSBC Holdings plc",
+          "sector": "",
+          "weight_pct": 0.72
+        },
+        {
+          "ticker": "AZN",
+          "name": "AstraZeneca plc",
+          "sector": "",
+          "weight_pct": 0.71
+        },
+        {
+          "ticker": "NESN",
+          "name": "Nestle SA",
+          "sector": "",
+          "weight_pct": 0.62
+        },
+        {
+          "ticker": "7203",
+          "name": "Toyota Motor Corp.",
+          "sector": "",
+          "weight_pct": 0.58
+        },
+        {
+          "ticker": "SHEL",
+          "name": "Shell plc",
+          "sector": "",
+          "weight_pct": 0.55
+        },
+        {
+          "ticker": "RY",
+          "name": "Royal Bank of Canada",
+          "sector": "",
+          "weight_pct": 0.53
+        },
+        {
+          "ticker": "SIE",
+          "name": "Siemens AG",
+          "sector": "",
+          "weight_pct": 0.48
+        },
+        {
+          "ticker": "CBA",
+          "name": "Commonwealth Bank of Australia",
+          "sector": "",
+          "weight_pct": 0.47
+        },
+        {
+          "ticker": "SAP",
+          "name": "SAP SE",
+          "sector": "",
+          "weight_pct": 0.47
+        },
+        {
+          "ticker": "8306",
+          "name": "Mitsubishi UFJ Financial Group Inc.",
+          "sector": "",
+          "weight_pct": 0.46
+        },
+        {
+          "ticker": "SAN",
+          "name": "Banco Santander SA",
+          "sector": "",
+          "weight_pct": 0.42
+        },
+        {
+          "ticker": "SU",
+          "name": "Schneider Electric SE",
+          "sector": "",
+          "weight_pct": 0.4
+        }
+      ],
+      "holdings_as_of": "2026-03-16",
+      "holdings_provider": "etf_dot_com",
+      "n_holdings_total": 2280
+    },
+    "XLE": {
+      "class": "US_STOCKS",
+      "mu_annual": 0.103013,
+      "sigma_annual": 0.279978,
+      "expense_ratio": 0.0013,
+      "tracking_error": 0.02,
+      "dist": {
+        "yield_annual": 0.025381,
+        "qualified_ratio": 0.9
+      },
+      "_provenance": {
+        "basis": "energy sector; commodity-linked, lower qualified ratio (MLPs)"
+      },
+      "_calibration": {
+        "method": "multi_window_blend",
+        "windows_yr": [
+          5,
+          10,
+          20
+        ],
+        "weights": [
+          0.15,
+          0.35,
+          0.3
+        ],
+        "prior_weight": 0.2,
+        "bars_used": 5030,
+        "as_of": "2026-03-16",
+        "provider": "yfinance"
+      },
+      "sector": "State Street Investment Management",
+      "instrument_type": "sector_etf",
+      "sector_provider": "yfinance",
+      "sector_as_of": "2026-03-16",
+      "top_holdings": [
+        {
+          "ticker": "XOM",
+          "name": "EXXON MOBIL CORP",
+          "sector": "-",
+          "weight_pct": 23.9023
+        },
+        {
+          "ticker": "CVX",
+          "name": "CHEVRON CORP",
+          "sector": "-",
+          "weight_pct": 17.6679
+        },
+        {
+          "ticker": "COP",
+          "name": "CONOCOPHILLIPS",
+          "sector": "-",
+          "weight_pct": 7.1436
+        },
+        {
+          "ticker": "WMB",
+          "name": "WILLIAMS COS INC",
+          "sector": "-",
+          "weight_pct": 4.3408
+        },
+        {
+          "ticker": "EOG",
+          "name": "EOG RESOURCES INC",
+          "sector": "-",
+          "weight_pct": 4.0161
+        },
+        {
+          "ticker": "VLO",
+          "name": "VALERO ENERGY CORP",
+          "sector": "-",
+          "weight_pct": 3.8965
+        },
+        {
+          "ticker": "PSX",
+          "name": "PHILLIPS 66",
+          "sector": "-",
+          "weight_pct": 3.856
+        },
+        {
+          "ticker": "MPC",
+          "name": "MARATHON PETROLEUM CORP",
+          "sector": "-",
+          "weight_pct": 3.7668
+        },
+        {
+          "ticker": "SLB",
+          "name": "SLB LTD",
+          "sector": "-",
+          "weight_pct": 3.7013
+        },
+        {
+          "ticker": "KMI",
+          "name": "KINDER MORGAN INC",
+          "sector": "-",
+          "weight_pct": 3.6216
+        },
+        {
+          "ticker": "OKE",
+          "name": "ONEOK INC",
+          "sector": "-",
+          "weight_pct": 2.9757
+        },
+        {
+          "ticker": "BKR",
+          "name": "BAKER HUGHES CO",
+          "sector": "-",
+          "weight_pct": 2.9663
+        },
+        {
+          "ticker": "TRGP",
+          "name": "TARGA RESOURCES CORP",
+          "sector": "-",
+          "weight_pct": 2.8548
+        },
+        {
+          "ticker": "OXY",
+          "name": "OCCIDENTAL PETROLEUM CORP",
+          "sector": "-",
+          "weight_pct": 2.3062
+        },
+        {
+          "ticker": "EQT",
+          "name": "EQT CORP",
+          "sector": "-",
+          "weight_pct": 2.2256
+        },
+        {
+          "ticker": "FANG",
+          "name": "DIAMONDBACK ENERGY INC",
+          "sector": "-",
+          "weight_pct": 1.8817
+        },
+        {
+          "ticker": "TPL",
+          "name": "TEXAS PACIFIC LAND CORP",
+          "sector": "-",
+          "weight_pct": 1.704
+        },
+        {
+          "ticker": "DVN",
+          "name": "DEVON ENERGY CORP",
+          "sector": "-",
+          "weight_pct": 1.6074
+        },
+        {
+          "ticker": "HAL",
+          "name": "HALLIBURTON CO",
+          "sector": "-",
+          "weight_pct": 1.5709
+        },
+        {
+          "ticker": "EXE",
+          "name": "EXPAND ENERGY CORP",
+          "sector": "-",
+          "weight_pct": 1.4121
+        }
+      ],
+      "holdings_as_of": "2026-03-16",
+      "holdings_provider": "etf_dot_com",
+      "n_holdings_total": 24
+    },
+    "XLF": {
+      "class": "US_STOCKS",
+      "mu_annual": 0.085444,
+      "sigma_annual": 0.233273,
+      "expense_ratio": 0.0013,
+      "tracking_error": 0.01,
+      "dist": {
+        "yield_annual": 0.014727,
+        "qualified_ratio": 0.9
+      },
+      "_provenance": {
+        "basis": "financials sector; cyclical, higher sigma"
+      },
+      "_calibration": {
+        "method": "multi_window_blend",
+        "windows_yr": [
+          5,
+          10,
+          20
+        ],
+        "weights": [
+          0.15,
+          0.35,
+          0.3
+        ],
+        "prior_weight": 0.2,
+        "bars_used": 5030,
+        "as_of": "2026-03-16",
+        "provider": "yfinance"
+      },
+      "sector": "State Street Investment Management",
+      "instrument_type": "sector_etf",
+      "sector_provider": "yfinance",
+      "sector_as_of": "2026-03-16",
+      "top_holdings": [
+        {
+          "ticker": "BRK.B",
+          "name": "BERKSHIRE HATHAWAY INC CL B",
+          "sector": "-",
+          "weight_pct": 12.8543
+        },
+        {
+          "ticker": "JPM",
+          "name": "JPMORGAN CHASE + CO",
+          "sector": "-",
+          "weight_pct": 11.0377
+        },
+        {
+          "ticker": "V",
+          "name": "VISA INC CLASS A SHARES",
+          "sector": "-",
+          "weight_pct": 7.4148
+        },
+        {
+          "ticker": "MA",
+          "name": "MASTERCARD INC   A",
+          "sector": "-",
+          "weight_pct": 5.8412
+        },
+        {
+          "ticker": "BAC",
+          "name": "BANK OF AMERICA CORP",
+          "sector": "-",
+          "weight_pct": 4.4901
+        },
+        {
+          "ticker": "GS",
+          "name": "GOLDMAN SACHS GROUP INC",
+          "sector": "-",
+          "weight_pct": 3.356
+        },
+        {
+          "ticker": "WFC",
+          "name": "WELLS FARGO + CO",
+          "sector": "-",
+          "weight_pct": 3.3274
+        },
+        {
+          "ticker": "C",
+          "name": "CITIGROUP INC",
+          "sector": "-",
+          "weight_pct": 2.7053
+        },
+        {
+          "ticker": "MS",
+          "name": "MORGAN STANLEY",
+          "sector": "-",
+          "weight_pct": 2.6759
+        },
+        {
+          "ticker": "AXP",
+          "name": "AMERICAN EXPRESS CO",
+          "sector": "-",
+          "weight_pct": 2.3056
+        },
+        {
+          "ticker": "SCHW",
+          "name": "SCHWAB (CHARLES) CORP",
+          "sector": "-",
+          "weight_pct": 2.2236
+        },
+        {
+          "ticker": "BLK",
+          "name": "BLACKROCK INC",
+          "sector": "-",
+          "weight_pct": 1.9072
+        },
+        {
+          "ticker": "SPGI",
+          "name": "S+P GLOBAL INC",
+          "sector": "-",
+          "weight_pct": 1.8738
+        },
+        {
+          "ticker": "CB",
+          "name": "CHUBB LTD",
+          "sector": "-",
+          "weight_pct": 1.7224
+        },
+        {
+          "ticker": "PGR",
+          "name": "PROGRESSIVE CORP",
+          "sector": "-",
+          "weight_pct": 1.7211
+        },
+        {
+          "ticker": "COF",
+          "name": "CAPITAL ONE FINANCIAL CORP",
+          "sector": "-",
+          "weight_pct": 1.635
+        },
+        {
+          "ticker": "CME",
+          "name": "CME GROUP INC",
+          "sector": "-",
+          "weight_pct": 1.6064
+        },
+        {
+          "ticker": "ICE",
+          "name": "INTERCONTINENTAL EXCHANGE IN",
+          "sector": "-",
+          "weight_pct": 1.2984
+        },
+        {
+          "ticker": "MRSH",
+          "name": "MARSH + MCLENNAN COS",
+          "sector": "-",
+          "weight_pct": 1.2065
+        },
+        {
+          "ticker": "BK",
+          "name": "BANK OF NEW YORK MELLON CORP",
+          "sector": "-",
+          "weight_pct": 1.1589
+        }
+      ],
+      "holdings_as_of": "2026-03-16",
+      "holdings_provider": "etf_dot_com",
+      "n_holdings_total": 79
+    },
+    "XLK": {
+      "class": "US_STOCKS",
+      "mu_annual": 0.161951,
+      "sigma_annual": 0.234277,
+      "expense_ratio": 0.0013,
+      "tracking_error": 0.02,
+      "dist": {
+        "yield_annual": 0.005735,
+        "qualified_ratio": 0.9
+      },
+      "_provenance": {
+        "basis": "tech sector; similar to QQQ"
+      },
+      "_calibration": {
+        "method": "multi_window_blend",
+        "windows_yr": [
+          5,
+          10,
+          20
+        ],
+        "weights": [
+          0.15,
+          0.35,
+          0.3
+        ],
+        "prior_weight": 0.2,
+        "bars_used": 5030,
+        "as_of": "2026-03-16",
+        "provider": "yfinance"
+      },
+      "sector": "State Street Investment Management",
+      "instrument_type": "sector_etf",
+      "sector_provider": "yfinance",
+      "sector_as_of": "2026-03-16",
+      "top_holdings": [
+        {
+          "ticker": "NVDA",
+          "name": "NVIDIA CORP",
+          "sector": "-",
+          "weight_pct": 15.1439
+        },
+        {
+          "ticker": "AAPL",
+          "name": "APPLE INC",
+          "sector": "-",
+          "weight_pct": 12.7782
+        },
+        {
+          "ticker": "MSFT",
+          "name": "MICROSOFT CORP",
+          "sector": "-",
+          "weight_pct": 10.1645
+        },
+        {
+          "ticker": "AVGO",
+          "name": "BROADCOM INC",
+          "sector": "-",
+          "weight_pct": 5.26
+        },
+        {
+          "ticker": "MU",
+          "name": "MICRON TECHNOLOGY INC",
+          "sector": "-",
+          "weight_pct": 4.3162
+        },
+        {
+          "ticker": "PLTR",
+          "name": "PALANTIR TECHNOLOGIES INC A",
+          "sector": "-",
+          "weight_pct": 3.1115
+        },
+        {
+          "ticker": "AMD",
+          "name": "ADVANCED MICRO DEVICES",
+          "sector": "-",
+          "weight_pct": 2.8411
+        },
+        {
+          "ticker": "CSCO",
+          "name": "CISCO SYSTEMS INC",
+          "sector": "-",
+          "weight_pct": 2.7854
+        },
+        {
+          "ticker": "AMAT",
+          "name": "APPLIED MATERIALS INC",
+          "sector": "-",
+          "weight_pct": 2.4551
+        },
+        {
+          "ticker": "LRCX",
+          "name": "LAM RESEARCH CORP",
+          "sector": "-",
+          "weight_pct": 2.4051
+        },
+        {
+          "ticker": "ORCL",
+          "name": "ORACLE CORP",
+          "sector": "-",
+          "weight_pct": 2.3542
+        },
+        {
+          "ticker": "IBM",
+          "name": "INTL BUSINESS MACHINES CORP",
+          "sector": "-",
+          "weight_pct": 2.0773
+        },
+        {
+          "ticker": "INTC",
+          "name": "INTEL CORP",
+          "sector": "-",
+          "weight_pct": 1.8519
+        },
+        {
+          "ticker": "KLAC",
+          "name": "KLA CORP",
+          "sector": "-",
+          "weight_pct": 1.682
+        },
+        {
+          "ticker": "CRM",
+          "name": "SALESFORCE INC",
+          "sector": "-",
+          "weight_pct": 1.6565
+        },
+        {
+          "ticker": "TXN",
+          "name": "TEXAS INSTRUMENTS INC",
+          "sector": "-",
+          "weight_pct": 1.5642
+        },
+        {
+          "ticker": "APH",
+          "name": "AMPHENOL CORP CL A",
+          "sector": "-",
+          "weight_pct": 1.4792
+        },
+        {
+          "ticker": "ADI",
+          "name": "ANALOG DEVICES INC",
+          "sector": "-",
+          "weight_pct": 1.3587
+        },
+        {
+          "ticker": "QCOM",
+          "name": "QUALCOMM INC",
+          "sector": "-",
+          "weight_pct": 1.2546
+        },
+        {
+          "ticker": "ANET",
+          "name": "ARISTA NETWORKS INC",
+          "sector": "-",
+          "weight_pct": 1.2446
+        }
+      ],
+      "holdings_as_of": "2026-03-16",
+      "holdings_provider": "etf_dot_com",
+      "n_holdings_total": 73
+    }
+  },
+  "class_fallbacks": {
+    "US_STOCKS": {
+      "class": "US_STOCKS",
+      "_fallback": true,
+      "mu_annual": 0.145127,
+      "sigma_annual": 0.255525,
+      "expense_ratio": 0.001,
+      "tracking_error": 0.01,
+      "dist": {
+        "yield_annual": 0.009209,
+        "qualified_ratio": 0.9
+      }
+    },
+    "INT_TREAS": {
+      "class": "INT_TREAS",
+      "_fallback": true,
+      "mu_annual": 0.020991,
+      "sigma_annual": 0.072795,
+      "expense_ratio": 0.001,
+      "tracking_error": 0.01,
+      "dist": {
+        "yield_annual": 0.040923,
+        "qualified_ratio": 0.0
+      }
+    },
+    "COMMOD": {
+      "class": "COMMOD",
+      "_fallback": true,
+      "mu_annual": 0.06898,
+      "sigma_annual": 0.185383,
+      "expense_ratio": 0.001,
+      "tracking_error": 0.01,
+      "dist": {
+        "yield_annual": 0.027814,
+        "qualified_ratio": 0.0
+      }
+    },
+    "INTL_STOCKS": {
+      "class": "INTL_STOCKS",
+      "_fallback": true,
+      "mu_annual": 0.067162,
+      "sigma_annual": 0.195012,
+      "expense_ratio": 0.001,
+      "tracking_error": 0.01,
+      "dist": {
+        "yield_annual": 0.02879,
+        "qualified_ratio": 0.8
+      }
+    },
+    "GOLD": {
+      "class": "GOLD",
+      "_fallback": true,
+      "mu_annual": 0.125418,
+      "sigma_annual": 0.165434,
+      "expense_ratio": 0.001,
+      "tracking_error": 0.01,
+      "dist": {
+        "yield_annual": 0.0,
+        "qualified_ratio": 0.0
+      }
+    },
+    "TIPS": {
+      "class": "TIPS",
+      "_fallback": true,
+      "mu_annual": 0.025119,
+      "sigma_annual": 0.058894,
+      "expense_ratio": 0.001,
+      "tracking_error": 0.01,
+      "dist": {
+        "yield_annual": 0.037017,
+        "qualified_ratio": 0.0
+      }
+    },
+    "LONG_TREAS": {
+      "class": "LONG_TREAS",
+      "_fallback": true,
+      "mu_annual": -0.000302,
+      "sigma_annual": 0.144727,
+      "expense_ratio": 0.001,
+      "tracking_error": 0.01,
+      "dist": {
+        "yield_annual": 0.044973,
+        "qualified_ratio": 0.0
       }
     }
   },
   "correlations": {
     "assets_order": [
-      "SPY",
-      "VTI",
-      "QQQ",
-      "VUG",
-      "VTV",
-      "XLK",
-      "XLF",
-      "XLE",
       "AAPL",
-      "MSFT",
       "AMZN",
-      "NVDA",
-      "VXUS",
-      "EFA",
-      "EEM",
-      "TLT",
-      "IEF",
       "BND",
-      "LQD",
-      "TIP",
+      "DBC",
+      "EEM",
+      "EFA",
       "GLD",
       "IAU",
-      "DBC",
+      "IEF",
+      "LQD",
+      "MSFT",
+      "NVDA",
       "PDBC",
-      "SCHP"
+      "QQQ",
+      "SCHP",
+      "SPY",
+      "TIP",
+      "TLT",
+      "VTI",
+      "VTV",
+      "VUG",
+      "VXUS",
+      "XLE",
+      "XLF",
+      "XLK"
     ],
     "matrix": [
       [
         1.0,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.82,
-        0.82,
-        0.82,
-        -0.2,
-        -0.1,
-        -0.1,
-        -0.1,
-        -0.05,
-        0.02,
-        0.02,
-        0.25,
-        0.25,
-        -0.05
+        0.551968566488177,
+        0.08371323959681694,
+        0.21137524970474067,
+        0.5521130508312325,
+        0.5792093160748307,
+        0.018046436154333368,
+        0.01857916681657109,
+        -0.10105176772822902,
+        0.20439005267535787,
+        0.6488859986660608,
+        0.5300697658896273,
+        0.1959983744758668,
+        0.7982039410800896,
+        0.02216746331711606,
+        0.7452968473994235,
+        0.025083188810987277,
+        -0.11522156085870572,
+        0.7324498906827847,
+        0.59472068600476,
+        0.7813136286713785,
+        0.5915290826143846,
+        0.3557274780089043,
+        0.5249077308951147,
+        0.8063638588532537
       ],
       [
-        0.95,
+        0.551968566488177,
+        0.9999999999999998,
+        0.08888954091412096,
+        0.17414141519777313,
+        0.47012552290819987,
+        0.47799033742503766,
+        0.017963050806281654,
+        0.01871734447244048,
+        -0.04589062356134543,
+        0.17647069556487088,
+        0.6415451923904334,
+        0.5159717472682467,
+        0.15749541375017728,
+        0.7523908923687349,
+        0.057051428908801695,
+        0.6383485588037731,
+        0.05834155611401671,
+        -0.05280736332478638,
+        0.6310120284306762,
+        0.4394564234106895,
+        0.7262740602642385,
+        0.49174784066498095,
+        0.23831382596553294,
+        0.396209612273419,
+        0.6767724789852781
+      ],
+      [
+        0.08371323959681692,
+        0.08888954091412096,
         1.0,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.82,
-        0.82,
-        0.82,
-        -0.2,
-        -0.1,
-        -0.1,
-        -0.1,
-        -0.05,
-        0.02,
-        0.02,
-        0.25,
-        0.25,
-        -0.05
+        -0.027225186813501865,
+        0.11226145898654706,
+        0.1441191393568646,
+        0.306445149717775,
+        0.30838343351234593,
+        0.8570703051661334,
+        0.8733478131094752,
+        0.08684476413966098,
+        0.05818460619414208,
+        -0.02643934329589678,
+        0.10611865063439273,
+        0.7624687278301938,
+        0.1051560523999856,
+        0.7426639012305808,
+        0.8036805966745032,
+        0.11181553679691417,
+        0.06978275385861016,
+        0.12258811370865771,
+        0.14263329424252377,
+        -0.02026107991058062,
+        -0.006546329029276383,
+        0.09694223427207516
       ],
       [
-        0.95,
-        0.95,
+        0.21137524970474067,
+        0.1741414151977731,
+        -0.02722518681350187,
         1.0,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.82,
-        0.82,
-        0.82,
-        -0.2,
-        -0.1,
-        -0.1,
-        -0.1,
-        -0.05,
-        0.02,
-        0.02,
-        0.25,
-        0.25,
-        -0.05
+        0.3930741788873063,
+        0.3739535537305139,
+        0.2886303622190739,
+        0.28989271617065443,
+        -0.14044032224363495,
+        0.05472258349138343,
+        0.21278339529582327,
+        0.17186890225741214,
+        0.9550743478544386,
+        0.2652009157875345,
+        0.12408376635889029,
+        0.3410889736814216,
+        0.13106224772676872,
+        -0.16888532895621072,
+        0.3448328148687279,
+        0.37050263840706865,
+        0.2822843594764768,
+        0.40989296460493074,
+        0.645418127817757,
+        0.3051467463674095,
+        0.2725084697316099
       ],
       [
-        0.95,
-        0.95,
-        0.95,
+        0.5521130508312325,
+        0.47012552290819987,
+        0.11226145898654706,
+        0.3930741788873063,
         1.0,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.82,
-        0.82,
-        0.82,
-        -0.2,
-        -0.1,
-        -0.1,
-        -0.1,
-        -0.05,
-        0.02,
-        0.02,
-        0.25,
-        0.25,
-        -0.05
+        0.8311091962499033,
+        0.17735832764241577,
+        0.17809764296711617,
+        -0.11412277900620417,
+        0.2371734343045038,
+        0.5656950214294392,
+        0.5087240394776602,
+        0.3665124202355431,
+        0.7201726456917081,
+        0.058323555311627716,
+        0.751875164295014,
+        0.06671646041350486,
+        -0.13720214888522392,
+        0.7587426564202309,
+        0.7029655469175994,
+        0.7214617737905188,
+        0.9129375457025046,
+        0.5489523134744041,
+        0.6330388688552777,
+        0.7089093275115759
       ],
       [
-        0.95,
-        0.95,
-        0.95,
-        0.95,
+        0.5792093160748306,
+        0.47799033742503766,
+        0.1441191393568646,
+        0.373953553730514,
+        0.8311091962499033,
+        0.9999999999999999,
+        0.14453295918297296,
+        0.1448995068867737,
+        -0.11686549237802182,
+        0.2841793644092244,
+        0.6015340301065296,
+        0.5051937657817435,
+        0.3504467861180216,
+        0.7529074084957474,
+        0.07687779612446677,
+        0.8464446841867715,
+        0.0822774378902709,
+        -0.1562304117014306,
+        0.8507988601535101,
+        0.8339423600818239,
+        0.7766768625222948,
+        0.9804100089816538,
+        0.6086349601621068,
+        0.77309682614167,
+        0.7456304055177606
+      ],
+      [
+        0.018046436154333368,
+        0.017963050806281654,
+        0.3064451497177749,
+        0.2886303622190739,
+        0.17735832764241577,
+        0.144532959182973,
+        0.9999999999999998,
+        0.9978361732540045,
+        0.3265442219879797,
+        0.28937180372917787,
+        0.01999434536780888,
+        0.019830903976676337,
+        0.26698219922358957,
+        0.054673008769152334,
+        0.34995406176745764,
+        0.04487916260186976,
+        0.350237077069162,
+        0.2578635356890097,
+        0.04928836046170741,
+        0.031925812306863734,
+        0.0535935925898649,
+        0.17240216894468535,
+        0.07163238397666595,
+        -0.0648368823394156,
+        0.056595733322381776
+      ],
+      [
+        0.01857916681657109,
+        0.01871734447244048,
+        0.308383433512346,
+        0.28989271617065443,
+        0.1780976429671162,
+        0.14489950688677372,
+        0.9978361732540046,
         1.0,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.82,
-        0.82,
-        0.82,
-        -0.2,
-        -0.1,
-        -0.1,
-        -0.1,
-        -0.05,
-        0.02,
-        0.02,
-        0.25,
-        0.25,
-        -0.05
+        0.3285310200637165,
+        0.29035144134780494,
+        0.01896327200569149,
+        0.017890560199743832,
+        0.2680966164895837,
+        0.05368810227337258,
+        0.3516972706107006,
+        0.04442173190253,
+        0.3525129991840266,
+        0.2596298760630151,
+        0.04881158198766609,
+        0.03153290945930008,
+        0.052840572164322,
+        0.1729065905923513,
+        0.07313375537221133,
+        -0.06442217581591922,
+        0.05571980738681127
       ],
       [
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
+        -0.10105176772822903,
+        -0.04589062356134542,
+        0.8570703051661335,
+        -0.14044032224363495,
+        -0.11412277900620416,
+        -0.11686549237802182,
+        0.3265442219879797,
+        0.3285310200637165,
         1.0,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.82,
-        0.82,
-        0.82,
-        -0.2,
-        -0.1,
-        -0.1,
-        -0.1,
-        -0.05,
-        0.02,
-        0.02,
-        0.25,
-        0.25,
-        -0.05
+        0.7164608194902775,
+        -0.10816311581170678,
+        -0.09183331447214584,
+        -0.1385027207427609,
+        -0.11744148067114363,
+        0.7873129067907765,
+        -0.1632282988651271,
+        0.7792318454852023,
+        0.9163561867988342,
+        -0.15898099265818388,
+        -0.2088935011540531,
+        -0.11401836364952794,
+        -0.11997298400329791,
+        -0.2253423240675853,
+        -0.2817301587739143,
+        -0.13307207142909216
       ],
       [
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
+        0.20439005267535784,
+        0.17647069556487088,
+        0.8733478131094752,
+        0.05472258349138343,
+        0.23717343430450377,
+        0.2841793644092244,
+        0.28937180372917787,
+        0.29035144134780494,
+        0.7164608194902775,
+        0.9999999999999999,
+        0.19783672624987522,
+        0.17178544826501116,
+        0.05503134607553223,
+        0.25537651198354755,
+        0.6862117571129377,
+        0.26987045420388733,
+        0.6715471014256104,
+        0.6999028750752225,
+        0.27604838165994683,
+        0.22220542230783552,
+        0.27794179908596256,
+        0.2831800733618831,
+        0.0964255019567348,
+        0.14871880054533518,
+        0.2494090858883585
+      ],
+      [
+        0.6488859986660608,
+        0.6415451923904334,
+        0.08684476413966098,
+        0.2127833952958233,
+        0.5656950214294392,
+        0.6015340301065296,
+        0.01999434536780888,
+        0.01896327200569149,
+        -0.10816311581170678,
+        0.19783672624987525,
         1.0,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.82,
-        0.82,
-        0.82,
-        -0.2,
-        -0.1,
-        -0.1,
-        -0.1,
-        -0.05,
-        0.02,
-        0.02,
-        0.25,
-        0.25,
-        -0.05
+        0.6004752088250547,
+        0.18795850871417644,
+        0.8385772932390062,
+        0.01911751687430601,
+        0.7757915931998814,
+        0.023218024777371893,
+        -0.12357019366628355,
+        0.7625265984478862,
+        0.6125687337627002,
+        0.8239259625996762,
+        0.6116972479028705,
+        0.33485761984916457,
+        0.5411201786255353,
+        0.8466092332863955
       ],
       [
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
+        0.5300697658896273,
+        0.5159717472682468,
+        0.058184606194142084,
+        0.17186890225741214,
+        0.5087240394776602,
+        0.5051937657817435,
+        0.019830903976676337,
+        0.017890560199743832,
+        -0.09183331447214584,
+        0.17178544826501113,
+        0.6004752088250547,
         1.0,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.82,
-        0.82,
-        0.82,
-        -0.2,
-        -0.1,
-        -0.1,
-        -0.1,
-        -0.05,
-        0.02,
-        0.02,
-        0.25,
-        0.25,
-        -0.05
+        0.16063162626402053,
+        0.7437795790145,
+        0.01294638861612965,
+        0.6509300231937593,
+        0.014477343011306125,
+        -0.08056049316604089,
+        0.6496606985865253,
+        0.4622365518057558,
+        0.7302331196305273,
+        0.5229503468195016,
+        0.2726614975074706,
+        0.41636631173619504,
+        0.758744064605564
       ],
       [
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
+        0.1959983744758668,
+        0.15749541375017728,
+        -0.02643934329589678,
+        0.9550743478544385,
+        0.3665124202355431,
+        0.3504467861180216,
+        0.26698219922358957,
+        0.2680966164895837,
+        -0.13850272074276093,
+        0.05503134607553223,
+        0.18795850871417644,
+        0.16063162626402053,
         1.0,
-        0.95,
-        0.95,
-        0.95,
-        0.82,
-        0.82,
-        0.82,
-        -0.2,
-        -0.1,
-        -0.1,
-        -0.1,
-        -0.05,
-        0.02,
-        0.02,
-        0.25,
-        0.25,
-        -0.05
+        0.24299516638577456,
+        0.12260078252559445,
+        0.31680286890423975,
+        0.12753795781742905,
+        -0.16211231113820482,
+        0.32017372073147204,
+        0.3444413695918554,
+        0.26010383571019763,
+        0.38430880698120234,
+        0.6140225290683471,
+        0.2873796937209047,
+        0.25029254351909636
       ],
       [
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
+        0.7982039410800896,
+        0.7523908923687348,
+        0.10611865063439271,
+        0.2652009157875346,
+        0.720172645691708,
+        0.7529074084957474,
+        0.054673008769152334,
+        0.05368810227337258,
+        -0.11744148067114363,
+        0.25537651198354755,
+        0.8385772932390063,
+        0.7437795790145,
+        0.2429951663857746,
         1.0,
-        0.95,
-        0.95,
-        0.82,
-        0.82,
-        0.82,
-        -0.2,
-        -0.1,
-        -0.1,
-        -0.1,
-        -0.05,
-        0.02,
-        0.02,
-        0.25,
-        0.25,
-        -0.05
+        0.03638358119196147,
+        0.9337569844104324,
+        0.041156665410201604,
+        -0.13132430597834807,
+        0.9285670973209293,
+        0.7515157318564977,
+        0.98110964468124,
+        0.7698111304967878,
+        0.439300265843324,
+        0.6669557531434522,
+        0.9738933230693078
       ],
       [
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
+        0.022167463317116057,
+        0.057051428908801695,
+        0.7624687278301937,
+        0.12408376635889029,
+        0.058323555311627716,
+        0.07687779612446677,
+        0.34995406176745764,
+        0.3516972706107006,
+        0.7873129067907766,
+        0.6862117571129377,
+        0.01911751687430601,
+        0.01294638861612965,
+        0.12260078252559445,
+        0.03638358119196147,
         1.0,
-        0.95,
-        0.82,
-        0.82,
-        0.82,
-        -0.2,
-        -0.1,
-        -0.1,
-        -0.1,
-        -0.05,
-        0.02,
-        0.02,
-        0.25,
-        0.25,
-        -0.05
+        0.030519535538053352,
+        0.9816225659748073,
+        0.7391601229686913,
+        0.03828141629650721,
+        -0.003198848964884453,
+        0.051339624512085326,
+        0.08109881442024158,
+        0.061936940942848344,
+        -0.06406935949189987,
+        0.024691413333444552
       ],
       [
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
-        0.95,
+        0.7452968473994234,
+        0.6383485588037731,
+        0.1051560523999856,
+        0.3410889736814216,
+        0.7518751642950141,
+        0.8464446841867714,
+        0.04487916260186977,
+        0.044421731902529994,
+        -0.16322829886512713,
+        0.26987045420388733,
+        0.7757915931998814,
+        0.6509300231937593,
+        0.3168028689042397,
+        0.9337569844104324,
+        0.030519535538053352,
         1.0,
-        0.82,
-        0.82,
-        0.82,
-        -0.2,
-        -0.1,
-        -0.1,
-        -0.1,
-        -0.05,
-        0.02,
-        0.02,
-        0.25,
-        0.25,
-        -0.05
+        0.03319328800281321,
+        -0.18472951665291584,
+        0.9960859150178422,
+        0.9241416389264107,
+        0.9561432248335406,
+        0.8513841111090888,
+        0.6202250246403903,
+        0.8468287053848206,
+        0.9284353670175489
       ],
       [
-        0.82,
-        0.82,
-        0.82,
-        0.82,
-        0.82,
-        0.82,
-        0.82,
-        0.82,
-        0.82,
-        0.82,
-        0.82,
-        0.82,
+        0.025083188810987277,
+        0.05834155611401671,
+        0.7426639012305808,
+        0.13106224772676872,
+        0.06671646041350485,
+        0.0822774378902709,
+        0.350237077069162,
+        0.3525129991840267,
+        0.7792318454852023,
+        0.6715471014256104,
+        0.02321802477737189,
+        0.014477343011306123,
+        0.12753795781742905,
+        0.041156665410201604,
+        0.9816225659748073,
+        0.03319328800281321,
         1.0,
-        0.92,
-        0.92,
-        -0.15,
-        -0.08,
-        -0.08,
-        -0.08,
-        -0.03,
-        0.05,
-        0.05,
-        0.3,
-        0.3,
-        -0.03
+        0.7355005505161767,
+        0.04096511556739958,
+        -0.002622747700240421,
+        0.05685701638614996,
+        0.08730943053928966,
+        0.06219412847166471,
+        -0.06309436233584222,
+        0.030011384773181105
       ],
       [
-        0.82,
-        0.82,
-        0.82,
-        0.82,
-        0.82,
-        0.82,
-        0.82,
-        0.82,
-        0.82,
-        0.82,
-        0.82,
-        0.82,
-        0.92,
+        -0.11522156085870572,
+        -0.05280736332478638,
+        0.8036805966745032,
+        -0.16888532895621072,
+        -0.1372021488852239,
+        -0.1562304117014306,
+        0.25786353568900966,
+        0.2596298760630151,
+        0.9163561867988342,
+        0.6999028750752225,
+        -0.12357019366628355,
+        -0.08056049316604089,
+        -0.16211231113820482,
+        -0.13132430597834807,
+        0.7391601229686914,
+        -0.18472951665291584,
+        0.7355005505161767,
         1.0,
-        0.92,
-        -0.15,
-        -0.08,
-        -0.08,
-        -0.08,
-        -0.03,
-        0.05,
-        0.05,
-        0.3,
-        0.3,
-        -0.03
+        -0.18016048285625458,
+        -0.24009892267628538,
+        -0.12979727200231855,
+        -0.15702685584825973,
+        -0.24294581536912438,
+        -0.29771648244486926,
+        -0.1457975908110494
       ],
       [
-        0.82,
-        0.82,
-        0.82,
-        0.82,
-        0.82,
-        0.82,
-        0.82,
-        0.82,
-        0.82,
-        0.82,
-        0.82,
-        0.82,
-        0.92,
-        0.92,
+        0.7324498906827847,
+        0.631012028430676,
+        0.11181553679691418,
+        0.34483281486872797,
+        0.7587426564202308,
+        0.8507988601535103,
+        0.049288360461707405,
+        0.04881158198766609,
+        -0.15898099265818388,
+        0.27604838165994683,
+        0.7625265984478862,
+        0.6496606985865253,
+        0.320173720731472,
+        0.9285670973209293,
+        0.03828141629650721,
+        0.9960859150178422,
+        0.04096511556739958,
+        -0.18016048285625455,
         1.0,
-        -0.15,
-        -0.08,
-        -0.08,
-        -0.08,
-        -0.03,
-        0.05,
-        0.05,
-        0.3,
-        0.3,
-        -0.03
+        0.9245273626725902,
+        0.9538447107277674,
+        0.8574532865114368,
+        0.6299948292650542,
+        0.853325749333791,
+        0.9215596125539997
       ],
       [
-        -0.2,
-        -0.2,
-        -0.2,
-        -0.2,
-        -0.2,
-        -0.2,
-        -0.2,
-        -0.2,
-        -0.2,
-        -0.2,
-        -0.2,
-        -0.2,
-        -0.15,
-        -0.15,
-        -0.15,
+        0.59472068600476,
+        0.4394564234106895,
+        0.06978275385861014,
+        0.37050263840706865,
+        0.7029655469175994,
+        0.8339423600818238,
+        0.03192581230686373,
+        0.03153290945930008,
+        -0.2088935011540531,
+        0.2222054223078355,
+        0.6125687337627002,
+        0.46223655180575585,
+        0.3444413695918554,
+        0.7515157318564977,
+        -0.0031988489648844525,
+        0.9241416389264105,
+        -0.002622747700240421,
+        -0.24009892267628538,
+        0.9245273626725902,
         1.0,
-        0.88,
-        0.88,
-        0.88,
-        0.6,
-        0.15,
-        0.15,
-        -0.05,
-        -0.05,
-        0.6
+        0.7809927176464465,
+        0.8292909844517633,
+        0.7284617422468439,
+        0.9250836205497867,
+        0.7552271458642998
       ],
       [
-        -0.1,
-        -0.1,
-        -0.1,
-        -0.1,
-        -0.1,
-        -0.1,
-        -0.1,
-        -0.1,
-        -0.1,
-        -0.1,
-        -0.1,
-        -0.1,
-        -0.08,
-        -0.08,
-        -0.08,
-        0.88,
+        0.7813136286713785,
+        0.7262740602642385,
+        0.12258811370865771,
+        0.2822843594764768,
+        0.7214617737905188,
+        0.7766768625222948,
+        0.053593592589864895,
+        0.052840572164321996,
+        -0.11401836364952796,
+        0.27794179908596256,
+        0.8239259625996762,
+        0.7302331196305273,
+        0.2601038357101977,
+        0.98110964468124,
+        0.051339624512085326,
+        0.9561432248335406,
+        0.056857016386149956,
+        -0.12979727200231855,
+        0.9538447107277674,
+        0.7809927176464465,
         1.0,
-        0.96,
-        0.96,
-        0.72,
-        0.1,
-        0.1,
-        -0.02,
-        -0.02,
-        0.72
+        0.789387671396041,
+        0.47635688317622604,
+        0.7096160831616682,
+        0.9657396898698644
       ],
       [
-        -0.1,
-        -0.1,
-        -0.1,
-        -0.1,
-        -0.1,
-        -0.1,
-        -0.1,
-        -0.1,
-        -0.1,
-        -0.1,
-        -0.1,
-        -0.1,
-        -0.08,
-        -0.08,
-        -0.08,
-        0.88,
-        0.96,
+        0.5915290826143846,
+        0.491747840664981,
+        0.14263329424252377,
+        0.40989296460493074,
+        0.9129375457025046,
+        0.9804100089816536,
+        0.17240216894468538,
+        0.1729065905923513,
+        -0.11997298400329791,
+        0.2831800733618831,
+        0.6116972479028706,
+        0.5229503468195015,
+        0.38430880698120234,
+        0.7698111304967878,
+        0.08109881442024158,
+        0.8513841111090888,
+        0.08730943053928966,
+        -0.15702685584825973,
+        0.8574532865114368,
+        0.8292909844517633,
+        0.789387671396041,
         1.0,
-        0.96,
-        0.72,
-        0.1,
-        0.1,
-        -0.02,
-        -0.02,
-        0.72
+        0.6291404942250206,
+        0.7621421210301292,
+        0.76189103113663
       ],
       [
-        -0.1,
-        -0.1,
-        -0.1,
-        -0.1,
-        -0.1,
-        -0.1,
-        -0.1,
-        -0.1,
-        -0.1,
-        -0.1,
-        -0.1,
-        -0.1,
-        -0.08,
-        -0.08,
-        -0.08,
-        0.88,
-        0.96,
-        0.96,
+        0.35572747800890425,
+        0.23831382596553294,
+        -0.020261079910580623,
+        0.645418127817757,
+        0.5489523134744041,
+        0.6086349601621067,
+        0.07163238397666595,
+        0.07313375537221133,
+        -0.2253423240675853,
+        0.0964255019567348,
+        0.33485761984916457,
+        0.2726614975074706,
+        0.6140225290683471,
+        0.43930026584332404,
+        0.061936940942848344,
+        0.6202250246403903,
+        0.06219412847166471,
+        -0.24294581536912438,
+        0.6299948292650542,
+        0.7284617422468438,
+        0.4763568831762261,
+        0.6291404942250207,
         1.0,
-        0.72,
-        0.1,
-        0.1,
-        -0.02,
-        -0.02,
-        0.72
+        0.6733238305045824,
+        0.4536871999111315
       ],
       [
-        -0.05,
-        -0.05,
-        -0.05,
-        -0.05,
-        -0.05,
-        -0.05,
-        -0.05,
-        -0.05,
-        -0.05,
-        -0.05,
-        -0.05,
-        -0.05,
-        -0.03,
-        -0.03,
-        -0.03,
-        0.6,
-        0.72,
-        0.72,
-        0.72,
-        1.0,
-        0.18,
-        0.18,
-        0.15,
-        0.15,
-        0.97
+        0.5249077308951147,
+        0.396209612273419,
+        -0.006546329029276382,
+        0.3051467463674095,
+        0.6330388688552777,
+        0.77309682614167,
+        -0.0648368823394156,
+        -0.06442217581591922,
+        -0.2817301587739143,
+        0.14871880054533518,
+        0.5411201786255353,
+        0.41636631173619504,
+        0.28737969372090477,
+        0.6669557531434523,
+        -0.06406935949189987,
+        0.8468287053848206,
+        -0.06309436233584222,
+        -0.2977164824448692,
+        0.853325749333791,
+        0.9250836205497867,
+        0.7096160831616681,
+        0.7621421210301292,
+        0.6733238305045824,
+        0.9999999999999999,
+        0.6716342713384705
       ],
       [
-        0.02,
-        0.02,
-        0.02,
-        0.02,
-        0.02,
-        0.02,
-        0.02,
-        0.02,
-        0.02,
-        0.02,
-        0.02,
-        0.02,
-        0.05,
-        0.05,
-        0.05,
-        0.15,
-        0.1,
-        0.1,
-        0.1,
-        0.18,
-        1.0,
-        0.99,
-        0.25,
-        0.25,
-        0.18
-      ],
-      [
-        0.02,
-        0.02,
-        0.02,
-        0.02,
-        0.02,
-        0.02,
-        0.02,
-        0.02,
-        0.02,
-        0.02,
-        0.02,
-        0.02,
-        0.05,
-        0.05,
-        0.05,
-        0.15,
-        0.1,
-        0.1,
-        0.1,
-        0.18,
-        0.99,
-        1.0,
-        0.25,
-        0.25,
-        0.18
-      ],
-      [
-        0.25,
-        0.25,
-        0.25,
-        0.25,
-        0.25,
-        0.25,
-        0.25,
-        0.25,
-        0.25,
-        0.25,
-        0.25,
-        0.25,
-        0.3,
-        0.3,
-        0.3,
-        -0.05,
-        -0.02,
-        -0.02,
-        -0.02,
-        0.15,
-        0.25,
-        0.25,
-        1.0,
-        0.92,
-        0.15
-      ],
-      [
-        0.25,
-        0.25,
-        0.25,
-        0.25,
-        0.25,
-        0.25,
-        0.25,
-        0.25,
-        0.25,
-        0.25,
-        0.25,
-        0.25,
-        0.3,
-        0.3,
-        0.3,
-        -0.05,
-        -0.02,
-        -0.02,
-        -0.02,
-        0.15,
-        0.25,
-        0.25,
-        0.92,
-        1.0,
-        0.15
-      ],
-      [
-        -0.05,
-        -0.05,
-        -0.05,
-        -0.05,
-        -0.05,
-        -0.05,
-        -0.05,
-        -0.05,
-        -0.05,
-        -0.05,
-        -0.05,
-        -0.05,
-        -0.03,
-        -0.03,
-        -0.03,
-        0.6,
-        0.72,
-        0.72,
-        0.72,
-        0.97,
-        0.18,
-        0.18,
-        0.15,
-        0.15,
-        1.0
+        0.8063638588532536,
+        0.676772478985278,
+        0.09694223427207514,
+        0.2725084697316099,
+        0.7089093275115759,
+        0.7456304055177606,
+        0.056595733322381776,
+        0.05571980738681127,
+        -0.13307207142909216,
+        0.2494090858883585,
+        0.8466092332863955,
+        0.758744064605564,
+        0.25029254351909636,
+        0.9738933230693076,
+        0.024691413333444556,
+        0.9284353670175488,
+        0.030011384773181105,
+        -0.1457975908110494,
+        0.9215596125539998,
+        0.7552271458642998,
+        0.9657396898698642,
+        0.76189103113663,
+        0.4536871999111315,
+        0.6716342713384706,
+        0.9999999999999999
       ]
     ],
-    "_note": "Class-level empirical long-run correlations. Crisis correlations (all→1) are not modeled here — that is a simulation_core.py regime feature."
+    "_note": "Computed from 2852 overlapping daily bars."
   },
-  "overrides": []
+  "overrides": [],
+  "readme": {
+    "purpose": "Asset model artifact \u2014 mu, sigma, correlation, and distribution parameters for Monte Carlo simulation. System file in src/config/, shared by all profiles. v1.0 hand-calibrated baseline; will be superseded by asset_calibration.py pipeline output.",
+    "do_not_edit_note": "These parameters drive all portfolio return simulations. Changes here affect every profile. Use asset_calibration.py to update from new market data rather than editing manually.",
+    "mu_annual": "Conservative long-run REAL return estimate (net of inflation). NOT raw historical nominal return and NOT recent-window return. Sources: Vanguard/BlackRock 10yr CMAs, CRSP long-run data. Example: 0.065 = 6.5% real annual return. The simulator adds the inflation rate from inflation_yearly.json on top to get nominal returns.",
+    "sigma_annual": "Annualized return volatility (standard deviation). Long-run estimate \u2014 not a recent-window figure. Drives the spread of Monte Carlo paths.",
+    "expense_ratio": "Annual fund expense ratio subtracted from returns every year. E.g. 0.0009 = 0.09% (9 basis points). Already reflected in net-of-fee mu.",
+    "tracking_error": "Additional per-year return noise above the asset class model. 0.0 for broad index funds. 0.03-0.04 for single stocks or active funds.",
+    "dist_yield_annual": "Annual distribution yield (dividends + interest). Drives taxable income in BROKERAGE accounts each year. Distributions from TRAD and Roth accounts are NOT taxed annually \u2014 they are tax-deferred or tax-free respectively.",
+    "dist_qualified_ratio": "Fraction of annual distributions taxed at LTCG rates (0/15/20%) rather than ordinary income rates. E.g. 0.9 = 90% qualified dividends. 0.0 for Treasury interest (always ordinary income). Only relevant for BROKERAGE accounts.",
+    "tax_note": "Distributions from BROKERAGE accounts generate taxable income each year: (yield \u00d7 balance \u00d7 qualified_ratio) taxed at LTCG rates, remainder at ordinary rates. TRAD IRA distributions are taxed at ordinary rates only when withdrawn. Roth IRA distributions are always tax-free.",
+    "_provenance": "Audit trail per ticker \u2014 basis for parameter choices. Ignored by simulator. Keep updated when changing parameters.",
+    "auto_refresh_enabled": "false \u2014 asset model is managed manually or via asset_calibration.py pipeline. Do not run refresh_assets.py against this file.",
+    "correlations": "Class-level empirical long-run correlation matrix. Conservative estimates \u2014 lower than peak-crisis correlations. Used by Monte Carlo to generate correlated return paths across asset classes."
+  },
+  "promoted_at": "2026-03-16T23:01:43.494131"
 }

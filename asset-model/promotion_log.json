@@ -1,0 +1,27 @@
+[
+  {
+    "version": "1.1.0",
+    "promoted_at": "2026-03-16T23:01:43.494131",
+    "from_candidate": "/Volumes/My Shared Files/workspace/research/c-eNDinomics/asset-model/candidate/assets.json",
+    "to_production": "/Volumes/My Shared Files/workspace/research/c-eNDinomics/src/config/assets.json",
+    "training": {
+      "method": "multi_window_blend",
+      "data_through": "2026-03-16",
+      "windows_used": [
+        5,
+        10,
+        20
+      ],
+      "weights": [
+        0.15,
+        0.35,
+        0.3
+      ],
+      "prior_weight": 0.2,
+      "event_signals_included": false,
+      "auto_refresh_enabled": false,
+      "notes": "Calibrated from market_data cache. Multi-window blend: [(5, 0.15), (10, 0.35), (20, 0.3)] + prior\u00d70.2. Promoted from 1.0.0."
+    },
+    "n_tickers": 25
+  }
+]

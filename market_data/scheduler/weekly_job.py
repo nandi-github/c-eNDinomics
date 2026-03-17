@@ -31,7 +31,7 @@ from typing import List
 
 # Resolve paths relative to this file
 _HERE      = os.path.dirname(os.path.abspath(__file__))
-_REPO_ROOT = os.path.abspath(os.path.join(_HERE, "..", "..", ".."))
+_REPO_ROOT = os.path.abspath(os.path.join(_HERE, "..", ".."))   # market_data/scheduler/ → market_data/ → repo root
 _SRC_DIR   = os.path.join(_REPO_ROOT, "src")
 sys.path.insert(0, _REPO_ROOT)   # so `market_data` package is importable
 

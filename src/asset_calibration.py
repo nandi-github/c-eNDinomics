@@ -72,14 +72,14 @@ SIGMA_FLOOR: Dict[str, float] = {
 
 # Per-class mu ceiling — prevents short windows from producing absurd estimates
 MU_CEIL: Dict[str, float] = {
-    "US_STOCKS":   0.18,
-    "INTL_STOCKS": 0.16,
+    "US_STOCKS":   0.22,   # individual stocks can hit 18-22% annualised
+    "INTL_STOCKS": 0.18,
     "LONG_TREAS":  0.10,
     "INT_TREAS":   0.08,
     "TIPS":        0.07,
-    "GOLD":        0.12,
-    "COMMOD":      0.14,
-    "REIT":        0.14,
+    "GOLD":        0.15,
+    "COMMOD":      0.16,
+    "REIT":        0.16,
     "CASH":        0.06,
 }
 MU_FLOOR: Dict[str, float] = {
@@ -209,7 +209,7 @@ def _build_correlation_matrix(
         return [[1.0]] if n == 1 else []
 
     # Find overlapping length
-    min_len = min(len(price_map[t]) for t in tickers if t in price_map)
+    min_len = min((len(price_map[t]) for t in tickers if t in price_map), default=0)
     if min_len < 50:
         return np.eye(n).tolist()
 

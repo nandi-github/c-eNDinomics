@@ -60,14 +60,14 @@ MU_BOUNDS: Dict[str, Tuple[float, float]] = {
 }
 
 SIGMA_BOUNDS: Dict[str, Tuple[float, float]] = {
-    "US_STOCKS":   (0.08, 0.40),
-    "INTL_STOCKS": (0.08, 0.40),
+    "US_STOCKS":   (0.08, 0.65),   # wide upper bound: individual stocks (NVDA ~0.47) are valid
+    "INTL_STOCKS": (0.08, 0.55),
     "LONG_TREAS":  (0.04, 0.25),
     "INT_TREAS":   (0.02, 0.18),
     "TIPS":        (0.02, 0.15),
     "GOLD":        (0.08, 0.40),
-    "COMMOD":      (0.10, 0.50),
-    "REIT":        (0.08, 0.40),
+    "COMMOD":      (0.10, 0.55),
+    "REIT":        (0.08, 0.45),
     "CASH":        (0.00, 0.06),
 }
 
