@@ -108,8 +108,8 @@ test.beforeAll(async ({ browser }) => {
   await expect(page.locator("h1")).toContainText("eNDinomics");
 
   // Switch to Run tab
-  await page.locator(".tab", { hasText: "Run" }).click();
-  await expect(page.locator("h2")).toContainText("Run Simulation");
+  await page.locator(".tab", { hasText: "Simulation" }).click();
+  await expect(page.locator("h2")).toContainText("Simulation");
 
   // Select Test profile
   await page.locator(".form-grid .field").filter({ hasText: "Profile" })
@@ -178,7 +178,8 @@ test("page loads with correct title and tabs", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator("h1")).toContainText("eNDinomics Investment Simulator");
   await expect(page.locator(".tab", { hasText: "Configure" })).toBeVisible();
-  await expect(page.locator(".tab", { hasText: "Run" })).toBeVisible();
+  await expect(page.locator(".tab", { hasText: "Simulation" })).toBeVisible();
+  await expect(page.locator(".tab", { hasText: "Investment" })).toBeVisible();
   await expect(page.locator(".tab", { hasText: "Results" })).toBeVisible();
 });
 
@@ -612,6 +613,8 @@ test("Run Parameters show correct profile metadata", async ({ page }) => {
   await expect(paramsSection).toContainText("2");
   await expect(paramsSection).toContainText("California");
   await expect(paramsSection).toContainText("MFJ");
+  // Simulation mode is always shown (pill badge)
+  await expect(paramsSection).toContainText("Simulation mode");
 });
 
 // ─── Test 13b: Run panel has all four ignore checkboxes ───────────────────────
@@ -620,8 +623,8 @@ test("Run Parameters show correct profile metadata", async ({ page }) => {
 
 test("Run panel: all four ignore checkboxes + simulation mode selector present", async ({ page }) => {
   await page.goto("/");
-  await page.locator(".tab", { hasText: "Run" }).click();
-  await expect(page.locator("h2", { hasText: "Run Simulation" })).toBeVisible();
+  await page.locator(".tab", { hasText: "Simulation" }).click();
+  await expect(page.locator("h2", { hasText: "Simulation" })).toBeVisible();
 
   const expectedCheckboxes = [
     "Ignore withdrawals",

@@ -20,6 +20,50 @@ from roth_conversion_core import (
 logger = logging.getLogger(__name__)
 
 
+# ── Simulation Mode Transformer ───────────────────────────────────────────────
+# Computes objective blend weights without changing the GBM math.
+# investment_w → emphasise CAGR/Sharpe, relax withdrawal constraints
+# retirement_w → emphasise survival probability, enforce spending floor
+
+def compute_mode_weights(
+    current_age: float,
+    retirement_age: float,
+    simulation_mode: str,
+) -> tuple:
+    """
+    Return (investment_w, retirement_w) in [0, 1] summing to 1.0.
+
+    Modes:
+      "investment"  → pure growth objective (retirement as constraint)
+      "retirement"  → pure survival objective
+      "balanced"    → equal weight on both
+      "automatic"   → glide path based on years to retirement
+    """
+    mode = str(simulation_mode or "automatic").lower().strip()
+
+    if mode == "investment":
+        return 1.0, 0.0
+    if mode == "retirement":
+        return 0.0, 1.0
+    if mode == "balanced":
+        return 0.5, 0.5
+
+    # automatic: glide path
+    years_to_retirement = max(0.0, float(retirement_age) - float(current_age))
+    if years_to_retirement >= 15:
+        investment_w = 0.85
+    elif years_to_retirement >= 10:
+        investment_w = 0.65
+    elif years_to_retirement >= 5:
+        investment_w = 0.40
+    elif years_to_retirement >= 0:
+        investment_w = 0.20
+    else:
+        investment_w = 0.0
+
+    return investment_w, 1.0 - investment_w
+
+
 # NOTE: YEARS = 30 removed — all call sites pass n_years explicitly.
 # The simulation horizon is driven by target_age - current_age (api.py).
 
@@ -152,6 +196,23 @@ def run_accounts_new(
             "rmd_table":      override_rmd_table,
         }.items() if v is not None
     }
+
+    # ── Simulation Mode Transformer ─────────────────────────────────────────
+    # Reads simulation_mode from person_cfg (set by UI and person.json).
+    # Does NOT change GBM math — same Monte Carlo paths for all modes.
+    # Changes: summary metrics emphasis, display flags in meta.
+    _simulation_mode  = str(_pcfg.get("simulation_mode", "automatic")).lower()
+    _retirement_age   = float(_pcfg.get("retirement_age", 65))
+    _current_age_now  = float(_pcfg.get("current_age", 60))
+    _investment_w, _retirement_w = compute_mode_weights(
+        current_age    = _current_age_now,
+        retirement_age = _retirement_age,
+        simulation_mode= _simulation_mode,
+    )
+    logger.debug(
+        "[mode] simulation_mode=%s investment_w=%.2f retirement_w=%.2f",
+        _simulation_mode, _investment_w, _retirement_w,
+    )
 
     # Core Monte Carlo
     acct_eoy_nom, total_nom_paths, total_real_paths, acct_class_eoy_nom = simulate_balances(
@@ -1218,6 +1279,23 @@ def run_accounts_new(
         "cagr_real_median":           cagr_real_median,
         "cagr_real_p10":              cagr_real_p10,
         "cagr_real_p90":              cagr_real_p90,
+        # ── Mode-aware objective metrics ────────────────────────────────────
+        # These tell the UI which metrics to emphasise in the dashboard.
+        # The underlying numbers are always computed — the weights control
+        # which ones are surfaced as "primary" vs "secondary".
+        "simulation_mode":            _simulation_mode,
+        "investment_weight":          _investment_w,
+        "retirement_weight":          _retirement_w,
+        # Primary metric label for the dashboard header
+        "primary_metric":             "cagr" if _investment_w >= 0.5 else "survival",
+        # Mode-blended composite score (0-100) combining both objectives:
+        #   investment side: CAGR percentile vs 6% real benchmark
+        #   retirement side: survival rate
+        "composite_score":            round(
+            _investment_w  * min(100.0, max(0.0, cagr_real_mean / 6.0 * 100.0)) +
+            _retirement_w  * success_rate_pct,
+            1
+        ),
     }
 
 
@@ -1244,6 +1322,9 @@ def run_accounts_new(
             "assumed_death_age":_pcfg.get("assumed_death_age"),
             "roth_conversion_enabled": (_pcfg.get("roth_conversion_policy") or {}).get("enabled", False),
             "rmd_extra_handling": (_pcfg.get("rmd_policy") or {}).get("extra_handling", "cash_out"),
+            "simulation_mode":    _simulation_mode,
+            "investment_weight":  _investment_w,
+            "retirement_weight":  _retirement_w,
         },
         # Flags any values that were overridden at runtime vs person.json.
         # Empty dict {} means all values came directly from person.json.

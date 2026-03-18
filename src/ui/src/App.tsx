@@ -202,7 +202,7 @@ type RunResponse = {
 type ProfileList = { profiles: string[] };
 type ReportsList = { runs: string[] };
 
-type TabKey = "configure" | "run" | "results";
+type TabKey = "configure" | "simulation" | "investment" | "results";
 
 const API_BASE = "";
 
@@ -340,6 +340,7 @@ const App: React.FC = () => {
     if (!selectedProfile) return;
     loadRuns(selectedProfile);
     loadConfig(selectedProfile, configFile, "view");
+    loadPersonDefaults(selectedProfile);
     setEndingBalances(null);
   }, [selectedProfile]);
 
@@ -368,6 +369,29 @@ const App: React.FC = () => {
         setSelectedRun("");
         setSnapshot(null);
       });
+  };
+
+  // ── Seed Simulation tab from person.json whenever profile changes ─────────
+  // person.json is the source of truth for defaults; user can override in UI.
+  const loadPersonDefaults = (profile: string) => {
+    apiGet<any>(
+      `/profile-config/${encodeURIComponent(profile)}/${encodeURIComponent("person.json")}`,
+    )
+      .then((data) => {
+        let parsed: any = null;
+        if (data && typeof data === "object" && "content" in data) {
+          try { parsed = JSON.parse((data as any).content as string); } catch {}
+        } else {
+          const { readme, ...rest } = data as any;
+          parsed = rest;
+        }
+        if (!parsed) return;
+        // Seed run panel — only set if person.json has the field
+        if (parsed.state)            setRunState(parsed.state);
+        if (parsed.filing_status)    setRunFiling(parsed.filing_status);
+        if (parsed.simulation_mode)  setRunSimulationMode(parsed.simulation_mode);
+      })
+      .catch(() => {});
   };
 
   const loadConfig = (
@@ -650,10 +674,16 @@ const App: React.FC = () => {
             Configure
           </button>
           <button
-            className={tab === "run" ? "tab active" : "tab"}
-            onClick={() => setTab("run")}
+            className={tab === "simulation" ? "tab active" : "tab"}
+            onClick={() => setTab("simulation")}
           >
-            Run
+            Simulation
+          </button>
+          <button
+            className={tab === "investment" ? "tab active" : "tab"}
+            onClick={() => setTab("investment")}
+          >
+            Investment
           </button>
           <button
             className={tab === "results" ? "tab active" : "tab"}
@@ -765,67 +795,83 @@ const App: React.FC = () => {
                 </ul>
               </div>
 
-              <div className="config-editor">
-                <div className="config-editor-header">
-                  <div>
-                    <strong>
-                      {configMode === "edit"
-                        ? "Edit Configuration"
-                        : "View Configuration"}
-                    </strong>{" "}
-                    — {configFile}
-                  </div>
-                  {isDefaultProfile && (
-                    <div className="warning">
-                      Default profile is view-only; no edits are saved.
+              {/* Editor on top, Readme below — both visible without scrolling */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+
+                {/* Top: JSON editor */}
+                <div className="config-editor">
+                  <div className="config-editor-header">
+                    <div>
+                      <strong>
+                        {configMode === "edit"
+                          ? "Edit Configuration"
+                          : "View Configuration"}
+                      </strong>{" "}
+                      — {configFile}
                     </div>
-                  )}
+                    {isDefaultProfile && (
+                      <div className="warning">
+                        Default profile is view-only; no edits are saved.
+                      </div>
+                    )}
+                  </div>
+                  <textarea
+                    value={configContent}
+                    onChange={(e) => {
+                      setConfigContent(e.target.value);
+                      if (configMode === "edit" && !isDefaultProfile) {
+                        setEditorDirty(true);
+                      }
+                    }}
+                    readOnly={configMode === "view" || isDefaultProfile}
+                    style={{ height: "40vh", minHeight: 240 }}
+                  />
+                  <div className="config-editor-actions">
+                    <button
+                      onClick={saveConfig}
+                      disabled={
+                        configMode !== "edit" || isDefaultProfile || !editorDirty
+                      }
+                    >
+                      Save to Profile
+                    </button>
+                    <button
+                      onClick={() =>
+                        selectedProfile &&
+                        loadConfig(selectedProfile, configFile, configMode)
+                      }
+                    >
+                      Clear Cache (Profile Editor)
+                    </button>
+                  </div>
                 </div>
-                <textarea
-                  value={configContent}
-                  onChange={(e) => {
-                    setConfigContent(e.target.value);
-                    if (configMode === "edit" && !isDefaultProfile) {
-                      setEditorDirty(true);
-                    }
-                  }}
-                  readOnly={configMode === "view" || isDefaultProfile}
-                />
-                <div className="config-editor-actions">
-                  <button
-                    onClick={saveConfig}
-                    disabled={
-                      configMode !== "edit" || isDefaultProfile || !editorDirty
-                    }
-                  >
-                    Save to Profile
-                  </button>
-                  <button
-                    onClick={() =>
-                      selectedProfile &&
-                      loadConfig(selectedProfile, configFile, configMode)
-                    }
-                  >
-                    Clear Cache (Profile Editor)
-                  </button>
-                </div>
-                {configReadme && (
-                  <div className="config-readme">
+
+                {/* Bottom: Field reference readme */}
+                {configReadme ? (
+                  <div className="config-readme" style={{ maxHeight: "40vh" }}>
                     <div className="config-readme-title">📖 Field Reference — {configFile}</div>
-                    <div className="config-readme-scroll">
+                    <div className="config-readme-scroll" style={{ maxHeight: "calc(40vh - 30px)" }}>
                       <ReadmePanel data={configReadme} depth={0} />
                     </div>
                   </div>
+                ) : (
+                  <div style={{
+                    padding: "12px 16px", color: "#9ca3af", fontSize: 13,
+                    border: "1px dashed #d1d5db", borderRadius: 8
+                  }}>
+                    No field reference for this file
+                  </div>
                 )}
+
               </div>
             </div>
           )}
         </section>
       )}
 
-      {tab === "run" && (
+      {tab === "simulation" && (
         <section className="panel">
-          <h2>Run Simulation</h2>
+          <h2>Simulation</h2>
 
           <div className="form-grid">
             <div className="field">
@@ -1048,6 +1094,88 @@ const App: React.FC = () => {
         </section>
       )}
 
+      {tab === "investment" && (
+        <section className="panel">
+          <h2>Investment</h2>
+
+          {/* ── Phase 1 Placeholder ── */}
+          <div style={{ marginBottom: 16 }}>
+            <div style={{
+              display: "inline-flex", alignItems: "center", gap: 8,
+              background: "#fffbe6", border: "1px solid #f0c040",
+              borderRadius: 8, padding: "6px 14px", fontSize: 13, color: "#7a5c00"
+            }}>
+              <span>⚙</span>
+              <span>Signal computation coming — Phase 2</span>
+            </div>
+          </div>
+
+          {/* ── market_signals.json status ── */}
+          <section className="results-section">
+            <h3>Market Signals</h3>
+            <div style={{ fontSize: 13, color: "#6b7280" }}>
+              <p style={{ margin: "0 0 4px" }}>
+                <strong>market_signals.json</strong> — auto-populated by{" "}
+                <code>signal_computation.py</code> (Phase 2)
+              </p>
+              <p style={{ margin: 0 }}>
+                Status: <span style={{
+                  background: "#fee2e2", color: "#b91c1c",
+                  borderRadius: 999, padding: "2px 10px", fontSize: 12
+                }}>not yet generated</span>
+              </p>
+            </div>
+          </section>
+
+          {/* ── investment_strategy.json editor stub ── */}
+          <section className="results-section">
+            <h3>Investment Strategy</h3>
+            <p style={{ fontSize: 13, color: "#6b7280", margin: "0 0 10px" }}>
+              Configure your directional investment philosophy. Signals and action
+              recommendations will use these settings in Phase 3.
+            </p>
+            <div style={{ background: "#f8fafc", border: "1px solid #d1d5db", borderRadius: 8, padding: 14 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
+                {[
+                  { label: "Risk Appetite", value: "moderate", options: ["aggressive", "moderate", "conservative"] },
+                  { label: "Time Horizon", value: "quarterly", options: ["immediate", "weekly", "monthly", "quarterly"] },
+                  { label: "Rebalancing Trigger", value: "signal", options: ["signal", "drift_band", "manual"] },
+                  { label: "Tax Sensitivity", value: "high", options: ["high", "medium", "low"] },
+                  { label: "Position Sizing", value: "kelly", options: ["kelly", "equal_weight", "risk_parity", "manual"] },
+                ].map(({ label, value, options }) => (
+                  <div key={label} className="field">
+                    <label>{label}</label>
+                    <select defaultValue={value} disabled style={{ opacity: 0.7, cursor: "not-allowed" }}>
+                      {options.map(o => <option key={o} value={o}>{o}</option>)}
+                    </select>
+                  </div>
+                ))}
+              </div>
+              <p style={{ margin: "12px 0 0", fontSize: 12, color: "#9ca3af" }}>
+                Editor will be wired to <code>investment_strategy.json</code> in Phase 2.
+              </p>
+            </div>
+          </section>
+
+          {/* ── What's coming ── */}
+          <section className="results-section">
+            <h3>Roadmap</h3>
+            <div style={{ fontSize: 13, color: "#374151", lineHeight: 1.7 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "4px 16px" }}>
+                <span style={{ color: "#16a34a", fontWeight: 600 }}>✓ Phase 1</span>
+                <span>Tab structure + config file editor stub (current)</span>
+                <span style={{ color: "#2563eb", fontWeight: 600 }}>→ Phase 2</span>
+                <span>Signal computation — CMF, Wyckoff, OBV, CAPE, Bayesian regime</span>
+                <span style={{ color: "#6b7280", fontWeight: 600 }}>Phase 3</span>
+                <span>Action generator — ordered recommendations with rationale + review date</span>
+                <span style={{ color: "#6b7280", fontWeight: 600 }}>Phase 4</span>
+                <span>Outcome tracking — recalibrate signal weights from actual results</span>
+              </div>
+            </div>
+          </section>
+        </section>
+      )}
+
       {tab === "results" && (
         <section className="panel">
           <h2>Results</h2>
@@ -1111,6 +1239,21 @@ const App: React.FC = () => {
                     {snapshot.run_info.shocks_mode}
                   </div>
                   <div>
+                    <strong>Simulation mode:</strong>{" "}
+                    <span style={{
+                      background: "#e8f0fb",
+                      color: "#12326f",
+                      borderRadius: 999,
+                      padding: "1px 9px",
+                      fontSize: 12,
+                      fontWeight: 600,
+                    }}>
+                      {snapshot.run_info.flags?.simulation_mode
+                        || snapshot.summary?.simulation_mode
+                        || "automatic"}
+                    </span>
+                  </div>
+                  <div>
                     <strong>Ignore withdrawals:</strong>{" "}
                     {snapshot.run_info.flags?.ignore_withdrawals ? "Yes" : "No"}
                   </div>
@@ -1126,12 +1269,6 @@ const App: React.FC = () => {
                     <strong>Ignore taxes:</strong>{" "}
                     {snapshot.run_info.flags?.ignore_taxes ? "Yes" : "No"}
                   </div>
-                  {snapshot.run_info.flags?.simulation_mode && (
-                  <div>
-                    <strong>Simulation mode:</strong>{" "}
-                    {snapshot.run_info.flags.simulation_mode}
-                  </div>
-                  )}
                 </div>
               </section>
 

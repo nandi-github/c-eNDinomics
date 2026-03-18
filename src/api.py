@@ -531,6 +531,8 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
     ignore_withdrawals = bool(payload.get("ignore_withdrawals", False))
     ignore_rmds = bool(payload.get("ignore_rmds", False))
     ignore_conversions = bool(payload.get("ignore_conversions", False))
+    ignore_taxes = bool(payload.get("ignore_taxes", False))
+    simulation_mode = str(payload.get("simulation_mode", "automatic")).lower().strip()
 
     rebalance_threshold = float(payload.get("rebalance_threshold", 0.10))
     rebalance_brokerage_enabled = bool(payload.get("rebalance_brokerage_enabled", False))
@@ -668,6 +670,11 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
 
     person_cfg = load_person(person_path)
     print("[DEBUG api] person_cfg.rmd_policy:", person_cfg.get("rmd_policy") if person_cfg else None)
+
+    # Inject UI-selected simulation_mode into person_cfg so simulator_new.py
+    # reads the correct value. The UI selection always wins over person.json default.
+    if person_cfg is not None:
+        person_cfg["simulation_mode"] = simulation_mode
 
     # Dynamic simulation years: target_age - current_age (default target=95, min 10, max 60)
     _current_age = int((person_cfg or {}).get("current_age", 55))
@@ -965,8 +972,10 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
         "shocks_mode": raw_shocks_mode,
         "flags": {
             "ignore_withdrawals": bool(ignore_withdrawals),
-            "ignore_rmds": bool(ignore_rmds),
+            "ignore_rmds":        bool(ignore_rmds),
             "ignore_conversions": bool(ignore_conversions),
+            "ignore_taxes":       bool(ignore_taxes),
+            "simulation_mode":    simulation_mode,
         },
     }
 
