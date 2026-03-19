@@ -20,6 +20,21 @@ from roth_conversion_core import (
 logger = logging.getLogger(__name__)
 
 
+# ── Simulation Mode Transformer ───────────────────────────────────────────────
+def compute_mode_weights(current_age: float, retirement_age: float, simulation_mode: str):
+    mode = str(simulation_mode or "automatic").lower().strip()
+    if mode == "investment":  return 1.0, 0.0
+    if mode == "retirement":  return 0.0, 1.0
+    if mode == "balanced":    return 0.5, 0.5
+    years_to_retirement = max(0.0, float(retirement_age) - float(current_age))
+    if years_to_retirement >= 15:   investment_w = 0.85
+    elif years_to_retirement >= 10: investment_w = 0.65
+    elif years_to_retirement >= 5:  investment_w = 0.40
+    elif years_to_retirement >= 0:  investment_w = 0.20
+    else:                           investment_w = 0.0
+    return investment_w, 1.0 - investment_w
+
+
 # NOTE: YEARS = 30 removed — all call sites pass n_years explicitly.
 # The simulation horizon is driven by target_age - current_age (api.py).
 
@@ -152,6 +167,14 @@ def run_accounts_new(
             "rmd_table":      override_rmd_table,
         }.items() if v is not None
     }
+
+    _simulation_mode  = str(_pcfg.get("simulation_mode", "automatic")).lower()
+    _retirement_age   = float(_pcfg.get("retirement_age", 65))
+    _current_age_now  = float(_pcfg.get("current_age", 60))
+    _investment_w, _retirement_w = compute_mode_weights(
+        current_age=_current_age_now, retirement_age=_retirement_age,
+        simulation_mode=_simulation_mode,
+    )
 
     # Core Monte Carlo
     acct_eoy_nom, total_nom_paths, total_real_paths, acct_class_eoy_nom = simulate_balances(
@@ -1102,20 +1125,28 @@ def run_accounts_new(
     dd_max_per_path = dd_each.max(axis=1)   # worst drawdown this path ever saw
     drawdown_p50   = float(np.percentile(dd_max_per_path, 50))
     drawdown_p90   = float(np.percentile(dd_max_per_path, 90))
-
-    # Per-year drawdown percentiles — cross-section across all paths at each year.
-    # dd_each[:, y] = drawdown each path is experiencing at year y (from its own running peak).
-    # P50 = median path drawdown that year; P90 = bad-case drawdown that year.
-    # These power the drawdown-over-time chart in the UI.
     drawdown_by_year_p50 = [float(np.percentile(dd_each[:, y], 50)) for y in range(n_years)]
     drawdown_by_year_p90 = [float(np.percentile(dd_each[:, y], 90)) for y in range(n_years)]
 
-    # Success rate: % of paths that FULLY delivered the planned withdrawal every year.
-    # A path "fails" in any year where realized < planned (shortfall > 0).
-    # Uses _shortfall_any_path accumulated during STEP 3 (only set when withdrawals enabled).
-    # When withdrawals are disabled, all paths succeed by definition.
-    # _shortfall_any_path always defined above (zeros when withdrawals disabled)
-    _path_ever_short = _shortfall_any_path.any(axis=1)
+    # Success rate: mode-dependent shortfall threshold.
+    # retirement_w high  → full plan is the bar (strict)
+    # investment_w high  → floor (sched_base) is the bar (lenient — plan overruns ok)
+    # balanced/automatic → blend: use full plan when retirement_w >= 0.5, floor otherwise
+    #
+    # The GBM math is identical across modes. Only the success measurement changes.
+    if apply_withdrawals and sched is not None and '_sched_base' in locals() and _investment_w >= 0.5:
+        # Investment-first / Balanced-investment: shortfall measured against floor, not full plan
+        # Rebuild _shortfall_any_path against _sched_base instead of planned amount
+        _floor_nom_paths = np.outer(np.ones(paths), _sched_base * deflator)  # (paths x years)
+        if 'realized_nom_paths' in locals():
+            _shortfall_any_path_mode = realized_nom_paths < (_floor_nom_paths - 1.0)
+        else:
+            _shortfall_any_path_mode = _shortfall_any_path
+    else:
+        # Retirement-first / Automatic-retirement: shortfall vs full plan (strict)
+        _shortfall_any_path_mode = _shortfall_any_path
+
+    _path_ever_short = _shortfall_any_path_mode.any(axis=1)
     _first_short_yr  = np.where(
         _path_ever_short,
         np.argmax(_shortfall_any_path, axis=1),
@@ -1130,6 +1161,19 @@ def run_accounts_new(
     # Mean shortfall duration (only among paths that failed)
     _fail_dur = n_years - _first_short_yr[_path_ever_short]
     shortfall_years_mean = float(_fail_dur.mean()) if _fail_dur.size > 0 else 0.0
+
+    # Floor-only success rate (always computed regardless of mode — useful for UI comparison)
+    # Total money delivered = non-RMD withdrawal + RMD (both paths x years, nominal)
+    # _sched_base is in current USD → multiply by deflator to get nominal floor
+    if apply_withdrawals and sched is not None and '_sched_base' in locals() and 'realized_nom_paths' in locals():
+        _total_delivered_nom = realized_nom_paths.copy()
+        if rmd_total_nom_paths is not None:
+            _total_delivered_nom = _total_delivered_nom + rmd_total_nom_paths
+        _floor_nom = np.outer(np.ones(paths), _sched_base * deflator)
+        _floor_short = (_total_delivered_nom < (_floor_nom - 1.0)).any(axis=1)
+        floor_success_rate_pct = float(100.0 * (~_floor_short).mean())
+    else:
+        floor_success_rate_pct = success_rate_pct
 
     # --- Attach RMD summaries and total-withdrawal totals to withdrawals dict ---
     withdrawals["rmd_current_mean"] = rmd_current_mean.tolist()
@@ -1207,12 +1251,21 @@ def run_accounts_new(
 
     res["summary"] = {
         "success_rate":               success_rate_pct,
+        "success_rate_label":         "Floor survival rate" if _investment_w >= 0.5 else "Full-plan survival rate",
+        "floor_success_rate":         floor_success_rate_pct,
         "success_rate_by_year":       success_rate_by_year,
         "shortfall_years_mean":       shortfall_years_mean,
         "drawdown_p50":               drawdown_p50,
         "drawdown_p90":               drawdown_p90,
         "drawdown_by_year_p50":       drawdown_by_year_p50,
         "drawdown_by_year_p90":       drawdown_by_year_p90,
+        "simulation_mode":            _simulation_mode,
+        "investment_weight":          _investment_w,
+        "retirement_weight":          _retirement_w,
+        "primary_metric":             "cagr" if _investment_w >= 0.5 else "survival",
+        "composite_score":            round(
+            _investment_w  * min(100.0, max(0.0, cagr_real_mean / 6.0 * 100.0)) +
+            _retirement_w  * success_rate_pct, 1),
         "taxes_fed_total_current":    float(taxes_fed_cur_paths.sum(axis=1).mean()),
         "taxes_state_total_current":  float(taxes_state_cur_paths.sum(axis=1).mean()),
         "taxes_niit_total_current":   float(taxes_niit_cur_paths.sum(axis=1).mean()),
@@ -1253,6 +1306,9 @@ def run_accounts_new(
             "assumed_death_age":_pcfg.get("assumed_death_age"),
             "roth_conversion_enabled": (_pcfg.get("roth_conversion_policy") or {}).get("enabled", False),
             "rmd_extra_handling": (_pcfg.get("rmd_policy") or {}).get("extra_handling", "cash_out"),
+            "simulation_mode":    _simulation_mode,
+            "investment_weight":  _investment_w,
+            "retirement_weight":  _retirement_w,
         },
         # Flags any values that were overridden at runtime vs person.json.
         # Empty dict {} means all values came directly from person.json.

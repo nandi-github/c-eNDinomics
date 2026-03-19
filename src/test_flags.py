@@ -2997,6 +2997,81 @@ def group17_ui_data_integrity(paths: int):
                 f"spendable={spendable:.0f} total={total_yr:.0f} planned={planned_yr:.0f}"
             ))
 
+    # ── 17j: Simulation mode transformer fields present and valid ──────────
+    S = res.get("summary", {})
+
+    # New scalar fields added by compute_mode_weights
+    checks.append(chk(
+        "17j: summary.simulation_mode present (string)",
+        isinstance(S.get("simulation_mode"), str) and len(S.get("simulation_mode", "")) > 0,
+        f"got {S.get('simulation_mode')!r}"
+    ))
+    checks.append(chk(
+        "17j: summary.investment_weight in [0, 1]",
+        0.0 <= float(S.get("investment_weight", -1)) <= 1.0,
+        f"got {S.get('investment_weight')}"
+    ))
+    checks.append(chk(
+        "17j: summary.retirement_weight in [0, 1]",
+        0.0 <= float(S.get("retirement_weight", -1)) <= 1.0,
+        f"got {S.get('retirement_weight')}"
+    ))
+    checks.append(chk(
+        "17j: investment_weight + retirement_weight ≈ 1.0",
+        abs(float(S.get("investment_weight", 0)) + float(S.get("retirement_weight", 0)) - 1.0) < 1e-6,
+        f"sum={float(S.get('investment_weight',0)) + float(S.get('retirement_weight',0)):.6f}"
+    ))
+    checks.append(chk(
+        "17j: summary.primary_metric is 'cagr' or 'survival'",
+        S.get("primary_metric") in ("cagr", "survival"),
+        f"got {S.get('primary_metric')!r}"
+    ))
+    checks.append(chk(
+        "17j: summary.composite_score in [0, 100]",
+        0.0 <= float(S.get("composite_score", -1)) <= 100.0,
+        f"got {S.get('composite_score')}"
+    ))
+    checks.append(chk(
+        "17j: summary.floor_success_rate in [0, 100]",
+        0.0 <= float(S.get("floor_success_rate", -1)) <= 100.0,
+        f"got {S.get('floor_success_rate')}"
+    ))
+    checks.append(chk(
+        "17j: floor_success_rate >= success_rate (floor bar is always easier or equal)",
+        float(S.get("floor_success_rate", 0)) >= float(S.get("success_rate", 0)) - 1e-6,
+        f"floor={S.get('floor_success_rate'):.2f} success={S.get('success_rate'):.2f}"
+    ))
+    checks.append(chk(
+        "17j: success_rate_label is a non-empty string",
+        isinstance(S.get("success_rate_label"), str) and len(S.get("success_rate_label", "")) > 0,
+        f"got {S.get('success_rate_label')!r}"
+    ))
+
+    # Per-year drawdown arrays (added by session 20)
+    for field in ["drawdown_by_year_p50", "drawdown_by_year_p90"]:
+        arr = S.get(field, [])
+        checks.append(chk(
+            f"17j: summary.{field} present, len={NY}",
+            len(arr) == NY,
+            f"len={len(arr)} expected={NY}"
+        ))
+    # P90 >= P50 every year (stress always >= typical)
+    dd50 = S.get("drawdown_by_year_p50", [])
+    dd90 = S.get("drawdown_by_year_p90", [])
+    if dd50 and dd90 and len(dd50) == len(dd90):
+        all_ordered = all(float(dd90[i]) >= float(dd50[i]) - 1e-6 for i in range(len(dd50)))
+        checks.append(chk(
+            "17j: drawdown_by_year_p90 >= drawdown_by_year_p50 every year",
+            all_ordered,
+            f"violated at years: {[i+1 for i in range(len(dd50)) if float(dd90[i]) < float(dd50[i]) - 1e-6]}"
+        ))
+    # All drawdown values non-negative
+    checks.append(chk(
+        "17j: drawdown_by_year_p50 all non-negative",
+        all(float(v) >= 0 for v in dd50),
+        f"min={min(float(v) for v in dd50):.4f}" if dd50 else "empty"
+    ))
+
     return "G17", "UI data integrity (median-path fields, diff correctness, no silent zeros)", checks, elapsed
 
 

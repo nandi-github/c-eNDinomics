@@ -93,6 +93,8 @@ type SnapshotWithdrawals = {
 
 type SnapshotSummary = {
   success_rate?: number;
+  success_rate_label?: string;
+  floor_success_rate?: number;
   success_rate_by_year?: number[];
   shortfall_years_mean?: number;
   drawdown_p50?: number;
@@ -1264,70 +1266,268 @@ const App: React.FC = () => {
                   <thead>
                     <tr>
                       <th>Metric</th>
-                      <th><Tip label="Value" tip="Median = typical outcome (half of scenarios above, half below). Mean = mathematical average, skewed up by outlier paths. P10 stress = only 10% of scenarios worse than this. P90 upside = only 10% of scenarios better than this." /></th>
+                      <th><Tip label="Value" tip="Typical = median outcome — half of scenarios above, half below. Mean = mathematical average, skewed up by outlier paths. Stress floor = only 10% of scenarios land below this (the bad 10%). Upside ceiling = only 10% of scenarios exceed this (the best 10%)." /></th>
                     </tr>
                   </thead>
                   <tbody>
-                    <tr>
-                      <td>Success rate</td>
-                      <td>{formatPct(snapshot.summary?.success_rate)}</td>
-                    </tr>
-              
-              
-                    <tr>
-                      <td>Investment YoY (Nominal, Lifetime Geometric)</td>
-                      <td>
-                        Median: {formatPct(snapshot.summary?.cagr_nominal_median ?? 0)} ·
-                        Mean: {formatPct(snapshot.summary?.cagr_nominal_mean ?? 0)} ·
-                        P10 (stress): {formatPct(snapshot.summary?.cagr_nominal_p10 ?? 0)} ·
-                        P90 (upside): {formatPct(snapshot.summary?.cagr_nominal_p90 ?? 0)}
-                      </td>
-                    </tr>
-                    <tr>
-                      <td>Investment YoY (Real, Lifetime Geometric)</td>
-                      <td>
-                        Median: {formatPct(snapshot.summary?.cagr_real_median ?? 0)} ·
-                        Mean: {formatPct(snapshot.summary?.cagr_real_mean ?? 0)} ·
-                        P10 (stress): {formatPct(snapshot.summary?.cagr_real_p10 ?? 0)} ·
-                        P90 (upside): {formatPct(snapshot.summary?.cagr_real_p90 ?? 0)}
-                      </td>
-                    </tr>
+                    {(() => {
+                      const mode = snapshot.summary?.simulation_mode ?? "automatic";
+                      const invW = snapshot.summary?.investment_weight ?? 0.5;
+                      const isInvestmentFirst = invW >= 0.5;
+                      const isRetirement = !isInvestmentFirst;
+                      const dd90sc = snapshot.summary?.drawdown_p90 ?? 0;
+                      const successLabel = snapshot.summary?.success_rate_label ?? "Survival rate";
+                      const successRate  = snapshot.summary?.success_rate ?? 0;
+                      const floorRate    = snapshot.summary?.floor_success_rate;
+                      const composite    = snapshot.summary?.composite_score;
+                      return (<>
+                        {/* Mode badge row */}
+                        <tr style={{ background: "#f8faff" }}>
+                          <td style={{ fontSize: 12, color: "#6b7280" }}>
+                            Objective
+                          </td>
+                          <td style={{ fontSize: 12 }}>
+                            <span style={{
+                              background: isInvestmentFirst ? "#fef3c7" : "#eff6ff",
+                              color: isInvestmentFirst ? "#92400e" : "#1e40af",
+                              borderRadius: 999, padding: "2px 10px", fontSize: 11, fontWeight: 600
+                            }}>
+                              {mode === "investment"  ? "📈 Investment-first — CAGR is primary metric" :
+                               mode === "retirement"  ? "🛡 Retirement-first — survival is primary metric" :
+                               mode === "balanced"    ? "⚖ Balanced — equal weight on both" :
+                               "🔄 Automatic — glide path blend"}
+                            </span>
+                            {composite !== undefined && (
+                              <span style={{ marginLeft: 10, fontSize: 11, color: "#6b7280" }}>
+                                Composite score: <strong>{composite}</strong>/100
+                              </span>
+                            )}
+                          </td>
+                        </tr>
 
-                    <tr>
-                      <td><Tip label="Peak-to-trough decline — stress (P90)" tip="In 10% of simulation paths the portfolio fell this far or more below its prior peak at some point. Classic financial drawdown — % dip from highest value reached, not a measure of failure or bankruptcy. Higher number = worse outcome." /></td>
-                      <td>{formatPct(snapshot.summary?.drawdown_p90)}</td>
-                    </tr>
-                    <tr>
-                      <td><Tip label="Peak-to-trough decline — typical (P50)" tip="The median path's worst dip below its prior portfolio peak. Half of scenarios had a smaller decline. Classic financial drawdown — not a measure of failure or whether withdrawals were met. Higher number = worse outcome." /></td>
-                      <td>{formatPct(snapshot.summary?.drawdown_p50)}</td>
-                    </tr>
+                        {/* Primary metric — success rate (label changes by mode) */}
+                        <tr style={{ fontWeight: isInvestmentFirst ? 400 : 600 }}>
+                          <td>
+                            <Tip label={successLabel}
+                              tip={isInvestmentFirst
+                                ? "Investment-first mode: success measured against the spending floor only. Going below the full plan is acceptable — the portfolio is optimized for growth."
+                                : "Retirement-first mode: success measured against the full spending plan. Any shortfall below the planned withdrawal counts as a failure year."} />
+                          </td>
+                          <td>{formatPct(successRate)}</td>
+                        </tr>
+
+                        {/* Show floor rate as secondary when in retirement mode */}
+                        {!isInvestmentFirst && floorRate !== undefined && floorRate !== successRate && (
+                          <tr style={{ color: "#6b7280", fontSize: 12 }}>
+                            <td style={{ paddingLeft: 16 }}>↳ Floor-only survival rate</td>
+                            <td>{formatPct(floorRate)}</td>
+                          </tr>
+                        )}
+
+                        {/* CAGR rows — primary in investment mode */}
+                        <tr style={{ fontWeight: isInvestmentFirst ? 600 : 400 }}>
+                          <td>Investment YoY — Nominal CAGR</td>
+                          <td>
+                            Median: {formatPct(snapshot.summary?.cagr_nominal_median ?? 0)} ·
+                            Mean: {formatPct(snapshot.summary?.cagr_nominal_mean ?? 0)} ·
+                            Stress floor: {formatPct(snapshot.summary?.cagr_nominal_p10 ?? 0)} ·
+                            Upside ceiling: {formatPct(snapshot.summary?.cagr_nominal_p90 ?? 0)}
+                          </td>
+                        </tr>
+                        <tr style={{ fontWeight: isInvestmentFirst ? 600 : 400 }}>
+                          <td>Investment YoY — Real CAGR</td>
+                          <td>
+                            Median: {formatPct(snapshot.summary?.cagr_real_median ?? 0)} ·
+                            Mean: {formatPct(snapshot.summary?.cagr_real_mean ?? 0)} ·
+                            Stress floor: {formatPct(snapshot.summary?.cagr_real_p10 ?? 0)} ·
+                            Upside ceiling: {formatPct(snapshot.summary?.cagr_real_p90 ?? 0)}
+                          </td>
+                        </tr>
+
+                        <tr style={{ fontWeight: isRetirement ? 600 : 400, color: isRetirement && dd90sc > 20 ? "#b91c1c" : undefined }}>
+                          <td><Tip label="Peak-to-trough decline — stress scenario"
+                            tip={isRetirement
+                              ? "RETIREMENT MODE: In 10% of scenarios the portfolio fell this far from its peak. In retirement, a large drawdown forces selling at depressed prices to fund withdrawals — this is sequence-of-returns risk. The earlier it happens, the more damaging."
+                              : "In 10% of simulation paths the portfolio fell this far or more below its prior peak. Classic financial drawdown — % dip from highest value reached, not a measure of failure or bankruptcy. Higher number = worse outcome."} /></td>
+                          <td>{formatPct(snapshot.summary?.drawdown_p90)}</td>
+                        </tr>
+                        <tr style={{ fontWeight: isRetirement ? 600 : 400 }}>
+                          <td><Tip label="Peak-to-trough decline — typical scenario"
+                            tip={isRetirement
+                              ? "RETIREMENT MODE: The median scenario's worst portfolio dip from peak. In retirement, even a typical drawdown early in the plan creates forced selling at low prices. See the Drawdown Over Time chart for the sequence risk window."
+                              : "The median path's worst dip below its prior portfolio peak. Half of scenarios had a smaller decline. Classic financial drawdown — not a measure of failure or whether withdrawals were met. Higher number = worse outcome."} /></td>
+                          <td>{formatPct(snapshot.summary?.drawdown_p50)}</td>
+                        </tr>
+                      </>);
+                    })()}
                   </tbody>
                 </table>
               </section>
 
+
+              {/* ── Portfolio Projection — CAPE Scenario Bands ─────────────────── */}
+              {(() => {
+                const P = snapshot.portfolio;
+                const years = snapshot.years ?? [];
+                const median = P?.current_median ?? [];
+                const p10    = P?.current_p10_mean ?? [];
+                const p90    = P?.current_p90_mean ?? [];
+                if (!years.length || !median.length) return null;
+
+                const startVal = median[0] ?? 0;
+                if (startVal <= 0) return null;
+
+                // Scenario band growth rates (nominal, matching the simulation's inflation assumption ~3.5%)
+                // Base case is the actual Monte Carlo median — others are simple compound lines
+                const infl = 0.035;
+                const scenarios = [
+                  { label: "Optimistic (historical avg ~10% nominal)", rate: 0.10,  color: "#16a34a", dash: "4 3" },
+                  { label: "Base case (CAPE-adjusted ~7.4%)",          rate: null,   color: "#2563eb", dash: "" },    // actual median
+                  { label: "Conservative (CAPE-implied ~6%)",          rate: 0.06,  color: "#f59e0b", dash: "4 3" },
+                  { label: "Pessimistic (GMO view ~4% nominal)",        rate: 0.04,  color: "#ef4444", dash: "4 3" },
+                ];
+
+                const compoundLine = (rate: number) =>
+                  years.map((_, i) => startVal * Math.pow(1 + rate, i));
+
+                const W = 700, H = 220;
+                const PAD = { t: 12, r: 120, b: 32, l: 56 };
+                const cW = W - PAD.l - PAD.r;
+                const cH = H - PAD.t - PAD.b;
+                const n  = years.length;
+
+                const allVals = [...median, ...p90, ...compoundLine(0.10)];
+                const maxV = Math.max(...allVals) * 1.05;
+                const minV = 0;
+
+                const xPx = (i: number) => PAD.l + (i / Math.max(n - 1, 1)) * cW;
+                const yPx = (v: number) => PAD.t + cH - ((v - minV) / (maxV - minV)) * cH;
+
+                const toPath = (arr: number[]) =>
+                  arr.map((v, i) => `${i === 0 ? "M" : "L"}${xPx(i).toFixed(1)},${yPx(v).toFixed(1)}`).join(" ");
+
+                const fmtM = (v: number) => v >= 1e6 ? `$${(v/1e6).toFixed(1)}M` : `$${(v/1e3).toFixed(0)}K`;
+
+                // Y axis ticks
+                const yStep = Math.pow(10, Math.floor(Math.log10(maxV / 4)));
+                const yTicks: number[] = [];
+                for (let v = 0; v <= maxV * 1.05; v += yStep) yTicks.push(v);
+
+                // X labels every 10 years
+                const xLabels = years.reduce((acc: number[], yr, i) => {
+                  if (i === 0 || i === n-1 || yr % 10 === 0) acc.push(i);
+                  return acc;
+                }, []);
+
+                return (
+                  <section className="results-section">
+                    <h3>Portfolio Projection — Scenario Bands</h3>
+                    <p style={{ fontSize: 12, color: "#6b7280", margin: "0 0 10px" }}>
+                      Monte Carlo range (floor–ceiling, middle 80% of scenarios) vs deterministic CAPE scenario lines. All values in today's USD.
+                      Base case = actual simulation median. Other lines assume fixed nominal growth rates.
+                    </p>
+
+                    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ overflow: "visible", maxWidth: W }}>
+                      {/* Y grid + labels */}
+                      {yTicks.map(v => (
+                        <g key={v}>
+                          <line x1={PAD.l} x2={W - PAD.r} y1={yPx(v)} y2={yPx(v)}
+                            stroke="#e5e7eb" strokeWidth={0.8} />
+                          <text x={PAD.l - 5} y={yPx(v) + 4} textAnchor="end" fontSize={10} fill="#9ca3af">
+                            {fmtM(v)}
+                          </text>
+                        </g>
+                      ))}
+
+                      {/* X labels */}
+                      {xLabels.map(i => (
+                        <text key={i} x={xPx(i)} y={H - 6} textAnchor="middle" fontSize={10} fill="#9ca3af">
+                          Yr {years[i]}
+                        </text>
+                      ))}
+
+                      {/* Floor-to-ceiling range shading */}
+                      <path
+                        d={`${toPath(p90)} ${[...p10].reverse().map((v, i) =>
+                          `${i === 0 ? "L" : "L"}${xPx(n-1-i).toFixed(1)},${yPx(v).toFixed(1)}`).join(" ")} Z`}
+                        fill="#2563eb" fillOpacity={0.07}
+                      />
+                      {/* Floor and ceiling bound lines */}
+                      <path d={toPath(p90)} fill="none" stroke="#2563eb" strokeWidth={1} strokeOpacity={0.3} strokeDasharray="2 2" />
+                      <path d={toPath(p10)} fill="none" stroke="#2563eb" strokeWidth={1} strokeOpacity={0.3} strokeDasharray="2 2" />
+
+                      {/* Scenario lines */}
+                      {scenarios.map(sc => {
+                        const arr = sc.rate !== null ? compoundLine(sc.rate) : median;
+                        const isBase = sc.rate === null;
+                        return (
+                          <path key={sc.label} d={toPath(arr)} fill="none"
+                            stroke={sc.color} strokeWidth={isBase ? 2.5 : 1.5}
+                            strokeDasharray={sc.dash || undefined} />
+                        );
+                      })}
+
+                      {/* Legend — right side */}
+                      {scenarios.map((sc, idx) => {
+                        const arr = sc.rate !== null ? compoundLine(sc.rate) : median;
+                        const endVal = arr[arr.length - 1] ?? 0;
+                        const isBase = sc.rate === null;
+                        return (
+                          <g key={sc.label} transform={`translate(${W - PAD.r + 8}, ${PAD.t + idx * 44})`}>
+                            <line x1={0} x2={16} y1={6} y2={6}
+                              stroke={sc.color} strokeWidth={isBase ? 2.5 : 1.5}
+                              strokeDasharray={sc.dash || undefined} />
+                            <text x={20} y={4} fontSize={9.5} fill="#374151" dominantBaseline="hanging">
+                              {sc.rate !== null ? `${(sc.rate * 100).toFixed(0)}% nominal` : "Base (sim)"}
+                            </text>
+                            <text x={20} y={16} fontSize={9} fill="#6b7280" dominantBaseline="hanging">
+                              {fmtM(endVal)} at yr {years[n-1]}
+                            </text>
+                          </g>
+                        );
+                      })}
+                    </svg>
+
+                    <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 4 }}>
+                      Shaded band = middle 80% of simulation paths (floor to ceiling range).
+                      CAPE 35 implies ~2.8% 10yr real return; optimistic assumes long-run historical mean holds.
+                    </div>
+                  </section>
+                );
+              })()}
               {/* ── Drawdown Over Time ─────────────────────────────────────────── */}
               {(() => {
-                const years  = snapshot.years ?? [];
-                const ddP50  = snapshot.summary?.drawdown_by_year_p50 ?? [];
-                const ddP90  = snapshot.summary?.drawdown_by_year_p90 ?? [];
-                const dd50sc = snapshot.summary?.drawdown_p50 ?? 0;
-                const dd90sc = snapshot.summary?.drawdown_p90 ?? 0;
+                const years   = snapshot.years ?? [];
+                const ddP50   = snapshot.summary?.drawdown_by_year_p50 ?? [];
+                const ddP90   = snapshot.summary?.drawdown_by_year_p90 ?? [];
+                const dd50sc  = snapshot.summary?.drawdown_p50 ?? 0;
+                const dd90sc  = snapshot.summary?.drawdown_p90 ?? 0;
                 if (!years.length || !ddP50.length) return null;
 
-                const W = 680, H = 180;
-                const PAD = { t: 12, r: 16, b: 30, l: 44 };
+                const invW        = snapshot.summary?.investment_weight ?? 0.5;
+                const isRetirement = invW < 0.5;
+                const SEQ_RISK_YEARS = 10;
+                const seqRiskEnd = Math.min(SEQ_RISK_YEARS - 1, years.length - 1);
+                const seqStressMax = Math.max(...ddP90.slice(0, SEQ_RISK_YEARS), 0);
+                const seqSeverity = seqStressMax > 30
+                  ? { label: "HIGH", color: "#b91c1c" }
+                  : seqStressMax > 15
+                  ? { label: "MODERATE", color: "#b45309" }
+                  : { label: "LOW", color: "#15803d" };
+
+                const W = 680, H = isRetirement ? 200 : 180;
+                const PAD = { t: 14, r: 16, b: 30, l: 44 };
                 const cW = W - PAD.l - PAD.r;
                 const cH = H - PAD.t - PAD.b;
                 const n  = years.length;
                 const maxDD = Math.max(...ddP90, dd90sc, 5) * 1.08;
 
                 const xPx = (i: number) => PAD.l + (i / Math.max(n - 1, 1)) * cW;
-                const yPx = (v: number) => PAD.t + (Math.min(v / maxDD, 1)) * cH;  // 0% at top, dips down
+                const yPx = (v: number) => PAD.t + (Math.min(v / maxDD, 1)) * cH;
                 const toPath = (arr: number[]) =>
                   arr.map((v, i) => `${i === 0 ? "M" : "L"}${xPx(i).toFixed(1)},${yPx(v).toFixed(1)}`).join(" ");
                 const toArea = (arr: number[]) =>
                   `${toPath(arr)} L${xPx(n-1).toFixed(1)},${PAD.t.toFixed(1)} L${xPx(0).toFixed(1)},${PAD.t.toFixed(1)} Z`;
-
                 const yTicks = [0, 0.25, 0.5, 0.75, 1.0].map(f => Math.round(f * maxDD));
                 const xLabelIdxs = years.reduce((acc: number[], yr, i) => {
                   if (i === 0 || i === n - 1 || yr % 10 === 0) acc.push(i);
@@ -1345,25 +1545,81 @@ const App: React.FC = () => {
                       <span style={{ fontSize: "0.75em", fontWeight: 400, opacity: 0.55, marginLeft: "0.3rem" }}>
                         typical worst {dd50sc.toFixed(1)}% · stress worst {dd90sc.toFixed(1)}%
                       </span>
+                      {isRetirement && (
+                        <span style={{
+                          fontSize: "0.68em", fontWeight: 700,
+                          color: seqSeverity.color,
+                          background: seqSeverity.color + "18",
+                          borderRadius: 999, padding: "1px 8px", marginLeft: "0.5rem"
+                        }}>
+                          Sequence risk {seqSeverity.label}
+                        </span>
+                      )}
                       {!showDrawdown && (
                         <span style={{ fontSize: "0.7em", fontWeight: 400, color: "var(--color-muted,#888)", marginLeft: "0.5rem" }}>
                           click to expand
                         </span>
                       )}
                     </h3>
+
                     {showDrawdown && (
                       <div style={{ marginTop: "0.75rem" }}>
+                        {isRetirement && (
+                          <div style={{
+                            border: `1px solid ${seqSeverity.color}44`,
+                            borderLeft: `4px solid ${seqSeverity.color}`,
+                            borderRadius: 6,
+                            background: seqSeverity.color + "0e",
+                            padding: "8px 12px", marginBottom: 10,
+                            fontSize: 12, color: "#374151",
+                          }}>
+                            <strong style={{ color: seqSeverity.color }}>
+                              ⚠ Sequence-of-Returns Risk — first {SEQ_RISK_YEARS} years
+                            </strong>
+                            <span style={{ marginLeft: 8 }}>
+                              Stress drawdown in years 1–{SEQ_RISK_YEARS}: <strong>{seqStressMax.toFixed(1)}%</strong>
+                              {seqStressMax > 15 && (
+                                <span style={{ marginLeft: 6, color: "#6b7280" }}>
+                                  — A drawdown early in retirement forces selling depressed assets to fund withdrawals,
+                                  permanently impairing the base from which future returns compound. Recovery requires
+                                  proportionally larger gains, raising the risk of plan failure.
+                                </span>
+                              )}
+                            </span>
+                          </div>
+                        )}
+
                         <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8, display: "flex", gap: 20, flexWrap: "wrap" }}>
                           <span>
                             <span style={{ display: "inline-block", width: 18, height: 3, background: "#ef444466", borderRadius: 2, verticalAlign: "middle", marginRight: 5 }} />
-                            Stress (P90) — bad 10% of scenarios
+                            Stress — bad 10% of scenarios
                           </span>
                           <span>
                             <span style={{ display: "inline-block", width: 18, height: 3, background: "#3b82f6", borderRadius: 2, verticalAlign: "middle", marginRight: 5 }} />
-                            Median (P50) — typical scenario
+                            Typical (median) scenario
                           </span>
+                          {isRetirement && (
+                            <span>
+                              <span style={{ display: "inline-block", width: 18, height: 10, background: "#fca5a544", border: "1px solid #fca5a5", borderRadius: 2, verticalAlign: "middle", marginRight: 5 }} />
+                              Sequence risk zone (yrs 1–{SEQ_RISK_YEARS})
+                            </span>
+                          )}
                         </div>
+
                         <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ overflow: "visible", maxWidth: W }}>
+                          {isRetirement && (
+                            <>
+                              <rect x={xPx(0)} y={PAD.t}
+                                width={xPx(seqRiskEnd) - xPx(0)} height={cH}
+                                fill="#fca5a5" fillOpacity={0.15} />
+                              <text x={(xPx(0) + xPx(seqRiskEnd)) / 2} y={PAD.t + 9}
+                                textAnchor="middle" fontSize={9} fill="#ef4444" fillOpacity={0.8}>
+                                sequence risk zone
+                              </text>
+                              <line x1={xPx(seqRiskEnd)} x2={xPx(seqRiskEnd)} y1={PAD.t} y2={PAD.t + cH}
+                                stroke="#ef4444" strokeWidth={1} strokeOpacity={0.25} strokeDasharray="3 2" />
+                            </>
+                          )}
                           {yTicks.map(v => (
                             <g key={v}>
                               <line x1={PAD.l} x2={W - PAD.r} y1={yPx(v)} y2={yPx(v)}
@@ -1379,12 +1635,16 @@ const App: React.FC = () => {
                             </text>
                           ))}
                           <path d={toArea(ddP90)} fill="#ef4444" fillOpacity={0.10} />
-                          <path d={toPath(ddP90)} fill="none" stroke="#ef4444" strokeWidth={1.5} strokeOpacity={0.6} strokeDasharray="4 2" />
-                          <path d={toPath(ddP50)} fill="none" stroke="#3b82f6" strokeWidth={2} />
+                          <path d={toPath(ddP90)} fill="none" stroke="#ef4444"
+                            strokeWidth={isRetirement ? 2 : 1.5} strokeOpacity={0.65} strokeDasharray="4 2" />
+                          <path d={toPath(ddP50)} fill="none" stroke="#3b82f6"
+                            strokeWidth={isRetirement ? 1.5 : 2} />
                         </svg>
+
                         <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 4 }}>
-                          Per-year cross-section: how far below their prior peak the median and stress-case portfolio paths have fallen at each simulation year.
-                          Summary scalars show each path's single worst-ever dip, percentiled across all paths — a related but different cut.
+                          {isRetirement
+                            ? "Retirement mode: sequence risk in years 1–10 is highlighted. An early drawdown forces selling assets at depressed prices to fund withdrawals — locking in losses before recovery."
+                            : "Investment mode: drawdowns are volatility to ride through, not withdrawal-pressure events. The portfolio has time to recover without forced selling."}
                         </div>
                       </div>
                     )}
@@ -1949,8 +2209,8 @@ const App: React.FC = () => {
                       <th><Tip label="Typical balance (median)" tip="Portfolio value in future dollars where half of all simulated market scenarios land above and half below. Use this as your primary planning number." /></th>
                       <th><Tip label="Typical balance — today's $ (median)" tip="Same as typical balance but adjusted for inflation back to today's purchasing power." /></th>
                       <th><Tip label="Average balance (mean)" tip="Mathematical average across all paths. Skewed upward by a few exceptional market scenarios. The typical (median) column is usually more representative." /></th>
-                      <th><Tip label="Floor balance (P10)" tip="In 90% of simulated market scenarios, your portfolio exceeds this value in this year. This is your stress-test floor — plan for it to still cover essential needs." /></th>
-                      <th><Tip label="Ceiling balance (P90)" tip="In 90% of simulated scenarios, your portfolio is below this value. Represents your upside — don't plan spending on this number." /></th>
+                      <th><Tip label="Floor balance" tip="In 90% of simulated market scenarios your portfolio exceeds this value — a stress-test floor. Essential spending should remain viable at this level." /></th>
+                      <th><Tip label="Ceiling balance" tip="In 90% of simulated scenarios your portfolio stays below this value — your realistic upside. Don't build spending plans around this number." /></th>
                       <th><Tip label="Annual growth — total portfolio" tip="Year-over-year growth of the total portfolio in future (nominal) dollars. Includes investment returns, withdrawals, deposits, and RMDs." /></th>
                       <th><Tip label="Annual growth — inflation-adjusted" tip="Year-over-year growth after removing the effect of inflation. This is your real purchasing-power gain each year." /></th>
                       <th><Tip label="Investment return only (nominal)" tip="Pure investment return, excluding cashflows like withdrawals and deposits. Shows how your assets performed in the market." /></th>
@@ -2196,7 +2456,7 @@ const App: React.FC = () => {
                         <tr>
                           <th>Year</th><th>Age</th>
                           <th><Tip label="Typical balance (median)" tip="Account balance in future dollars at the median — half of all simulation paths land above this, half below." /></th><th><Tip label="Average balance (mean)" tip="Mean account balance in future dollars. Skewed upward by outperforming paths." /></th>
-                          <th><Tip label="Floor balance (P10)" tip="In 90% of scenarios this account exceeds this value. Per-year cross-section across all simulation paths." /></th><th><Tip label="Ceiling balance (P90)" tip="In 90% of scenarios this account is below this value. Per-year cross-section across all simulation paths." /></th>
+                          <th><Tip label="Floor balance" tip="In 90% of scenarios this account balance exceeds this value. Your stress-test floor for this account." /></th><th><Tip label="Ceiling balance" tip="In 90% of scenarios this account balance stays below this value. Your realistic upside for this account." /></th>
                           <th><Tip label="Portfolio growth (nominal)" tip="Year-over-year total portfolio growth in future dollars, including all cashflows." /></th><th><Tip label="Portfolio growth (real)" tip="Year-over-year total portfolio growth after adjusting for inflation." /></th>
                           <th><Tip label="Investment return (nominal)" tip="Pure investment return for this account in nominal terms, excluding deposits and withdrawals." /></th><th><Tip label="Investment return (real)" tip="Pure investment return after inflation for this account." /></th>
                           <th>Conversion Out Future USD</th>
@@ -2210,7 +2470,7 @@ const App: React.FC = () => {
                         <tr>
                           <th>Year</th><th>Age</th>
                           <th><Tip label="Typical balance (median)" tip="Account balance in future dollars at the median — half of all simulation paths land above this, half below." /></th><th><Tip label="Average balance (mean)" tip="Mean account balance in future dollars. Skewed upward by outperforming paths." /></th>
-                          <th><Tip label="Floor balance (P10)" tip="In 90% of scenarios this account exceeds this value. Per-year cross-section across all simulation paths." /></th><th><Tip label="Ceiling balance (P90)" tip="In 90% of scenarios this account is below this value. Per-year cross-section across all simulation paths." /></th>
+                          <th><Tip label="Floor balance" tip="In 90% of scenarios this account balance exceeds this value. Your stress-test floor for this account." /></th><th><Tip label="Ceiling balance" tip="In 90% of scenarios this account balance stays below this value. Your realistic upside for this account." /></th>
                           <th><Tip label="Portfolio growth (nominal)" tip="Year-over-year total portfolio growth in future dollars, including all cashflows." /></th><th><Tip label="Portfolio growth (real)" tip="Year-over-year total portfolio growth after adjusting for inflation." /></th>
                           <th><Tip label="Investment return (nominal)" tip="Pure investment return for this account in nominal terms, excluding deposits and withdrawals." /></th><th><Tip label="Investment return (real)" tip="Pure investment return after inflation for this account." /></th>
                           <th>Conversion In Future USD</th>
@@ -2223,7 +2483,7 @@ const App: React.FC = () => {
                         <tr>
                           <th>Year</th><th>Age</th>
                           <th><Tip label="Typical balance (median)" tip="Account balance in future dollars at the median — half of all simulation paths land above this, half below." /></th><th><Tip label="Average balance (mean)" tip="Mean account balance in future dollars. Skewed upward by outperforming paths." /></th>
-                          <th><Tip label="Floor balance (P10)" tip="In 90% of scenarios this account exceeds this value. Per-year cross-section across all simulation paths." /></th><th><Tip label="Ceiling balance (P90)" tip="In 90% of scenarios this account is below this value. Per-year cross-section across all simulation paths." /></th>
+                          <th><Tip label="Floor balance" tip="In 90% of scenarios this account balance exceeds this value. Your stress-test floor for this account." /></th><th><Tip label="Ceiling balance" tip="In 90% of scenarios this account balance stays below this value. Your realistic upside for this account." /></th>
                           <th><Tip label="Portfolio growth (nominal)" tip="Year-over-year total portfolio growth in future dollars, including all cashflows." /></th><th><Tip label="Portfolio growth (real)" tip="Year-over-year total portfolio growth after adjusting for inflation." /></th>
                           <th><Tip label="Investment return (nominal)" tip="Pure investment return for this account in nominal terms, excluding deposits and withdrawals." /></th><th><Tip label="Investment return (real)" tip="Pure investment return after inflation for this account." /></th>
                           <th>Conversion Tax Out Future USD</th>
@@ -2368,7 +2628,7 @@ const App: React.FC = () => {
                         <tr>
                           <th>Year</th><th>Age</th>
                           <th><Tip label="Typical balance — today's $ (median)" tip="Account balance in inflation-adjusted today's dollars at the median scenario." /></th><th><Tip label="Average balance — today's $ (mean)" tip="Mean account balance in today's dollars." /></th>
-                          <th><Tip label="Floor — today's $ (P10)" tip="In 90% of scenarios this account in today's dollars exceeds this value." /></th><th><Tip label="Ceiling — today's $ (P90)" tip="In 90% of scenarios this account in today's dollars is below this value." /></th>
+                          <th><Tip label="Floor — today's $" tip="In 90% of scenarios this account in today's dollars exceeds this value — your stress-test floor." /></th><th><Tip label="Ceiling — today's $" tip="In 90% of scenarios this account in today's dollars stays below this value — your realistic upside." /></th>
                           <th><Tip label="Portfolio growth (nominal)" tip="Year-over-year total portfolio growth in future dollars, including all cashflows." /></th><th><Tip label="Portfolio growth (real)" tip="Year-over-year total portfolio growth after adjusting for inflation." /></th>
                           <th><Tip label="Investment return (nominal)" tip="Pure investment return for this account in nominal terms, excluding deposits and withdrawals." /></th><th><Tip label="Investment return (real)" tip="Pure investment return after inflation for this account." /></th>
                           <th>Conversion Out Current USD</th>
@@ -2382,7 +2642,7 @@ const App: React.FC = () => {
                         <tr>
                           <th>Year</th><th>Age</th>
                           <th><Tip label="Typical balance — today's $ (median)" tip="Account balance in inflation-adjusted today's dollars at the median scenario." /></th><th><Tip label="Average balance — today's $ (mean)" tip="Mean account balance in today's dollars." /></th>
-                          <th><Tip label="Floor — today's $ (P10)" tip="In 90% of scenarios this account in today's dollars exceeds this value." /></th><th><Tip label="Ceiling — today's $ (P90)" tip="In 90% of scenarios this account in today's dollars is below this value." /></th>
+                          <th><Tip label="Floor — today's $" tip="In 90% of scenarios this account in today's dollars exceeds this value — your stress-test floor." /></th><th><Tip label="Ceiling — today's $" tip="In 90% of scenarios this account in today's dollars stays below this value — your realistic upside." /></th>
                           <th><Tip label="Portfolio growth (nominal)" tip="Year-over-year total portfolio growth in future dollars, including all cashflows." /></th><th><Tip label="Portfolio growth (real)" tip="Year-over-year total portfolio growth after adjusting for inflation." /></th>
                           <th><Tip label="Investment return (nominal)" tip="Pure investment return for this account in nominal terms, excluding deposits and withdrawals." /></th><th><Tip label="Investment return (real)" tip="Pure investment return after inflation for this account." /></th>
                           <th>Conversion In Current USD</th>
@@ -2394,7 +2654,7 @@ const App: React.FC = () => {
                         <tr>
                           <th>Year</th><th>Age</th>
                           <th><Tip label="Typical balance — today's $ (median)" tip="Account balance in inflation-adjusted today's dollars at the median scenario." /></th><th><Tip label="Average balance — today's $ (mean)" tip="Mean account balance in today's dollars." /></th>
-                          <th><Tip label="Floor — today's $ (P10)" tip="In 90% of scenarios this account in today's dollars exceeds this value." /></th><th><Tip label="Ceiling — today's $ (P90)" tip="In 90% of scenarios this account in today's dollars is below this value." /></th>
+                          <th><Tip label="Floor — today's $" tip="In 90% of scenarios this account in today's dollars exceeds this value — your stress-test floor." /></th><th><Tip label="Ceiling — today's $" tip="In 90% of scenarios this account in today's dollars stays below this value — your realistic upside." /></th>
                           <th><Tip label="Portfolio growth (nominal)" tip="Year-over-year total portfolio growth in future dollars, including all cashflows." /></th><th><Tip label="Portfolio growth (real)" tip="Year-over-year total portfolio growth after adjusting for inflation." /></th>
                           <th><Tip label="Investment return (nominal)" tip="Pure investment return for this account in nominal terms, excluding deposits and withdrawals." /></th><th><Tip label="Investment return (real)" tip="Pure investment return after inflation for this account." /></th>
                           <th>Conversion Tax Out Current USD</th>
