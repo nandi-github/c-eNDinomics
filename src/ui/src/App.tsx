@@ -97,6 +97,8 @@ type SnapshotSummary = {
   shortfall_years_mean?: number;
   drawdown_p50?: number;
   drawdown_p90?: number;
+  drawdown_by_year_p50?: number[];
+  drawdown_by_year_p90?: number[];
   taxes_fed_total_current?: number;
   taxes_state_total_current?: number;
   taxes_niit_total_current?: number;
@@ -322,6 +324,7 @@ const App: React.FC = () => {
   const [aggView, setAggView] = useState<"none" | "current" | "future">("none");
   const [showInsights, setShowInsights] = useState(false);
   const [showPortfolioAnalysis, setShowPortfolioAnalysis] = useState(false);
+  const [showDrawdown, setShowDrawdown] = useState(false);
 
   useEffect(() => {
     apiGet<ProfileList>("/profiles")
@@ -371,8 +374,7 @@ const App: React.FC = () => {
       });
   };
 
-  // ── Seed Simulation tab from person.json whenever profile changes ─────────
-  // person.json is the source of truth for defaults; user can override in UI.
+  // Seed Simulation tab from person.json whenever profile changes
   const loadPersonDefaults = (profile: string) => {
     apiGet<any>(
       `/profile-config/${encodeURIComponent(profile)}/${encodeURIComponent("person.json")}`,
@@ -386,7 +388,6 @@ const App: React.FC = () => {
           parsed = rest;
         }
         if (!parsed) return;
-        // Seed run panel — only set if person.json has the field
         if (parsed.state)            setRunState(parsed.state);
         if (parsed.filing_status)    setRunFiling(parsed.filing_status);
         if (parsed.simulation_mode)  setRunSimulationMode(parsed.simulation_mode);
@@ -795,10 +796,8 @@ const App: React.FC = () => {
                 </ul>
               </div>
 
-              {/* Editor on top, Readme below — both visible without scrolling */}
+              {/* Editor on top, Readme below */}
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-
-                {/* Top: JSON editor */}
                 <div className="config-editor">
                   <div className="config-editor-header">
                     <div>
@@ -845,8 +844,6 @@ const App: React.FC = () => {
                     </button>
                   </div>
                 </div>
-
-                {/* Bottom: Field reference readme */}
                 {configReadme ? (
                   <div className="config-readme" style={{ maxHeight: "40vh" }}>
                     <div className="config-readme-title">📖 Field Reference — {configFile}</div>
@@ -862,7 +859,6 @@ const App: React.FC = () => {
                     No field reference for this file
                   </div>
                 )}
-
               </div>
             </div>
           )}
@@ -1097,8 +1093,6 @@ const App: React.FC = () => {
       {tab === "investment" && (
         <section className="panel">
           <h2>Investment</h2>
-
-          {/* ── Phase 1 Placeholder ── */}
           <div style={{ marginBottom: 16 }}>
             <div style={{
               display: "inline-flex", alignItems: "center", gap: 8,
@@ -1109,8 +1103,6 @@ const App: React.FC = () => {
               <span>Signal computation coming — Phase 2</span>
             </div>
           </div>
-
-          {/* ── market_signals.json status ── */}
           <section className="results-section">
             <h3>Market Signals</h3>
             <div style={{ fontSize: 13, color: "#6b7280" }}>
@@ -1126,8 +1118,6 @@ const App: React.FC = () => {
               </p>
             </div>
           </section>
-
-          {/* ── investment_strategy.json editor stub ── */}
           <section className="results-section">
             <h3>Investment Strategy</h3>
             <p style={{ fontSize: 13, color: "#6b7280", margin: "0 0 10px" }}>
@@ -1156,8 +1146,6 @@ const App: React.FC = () => {
               </p>
             </div>
           </section>
-
-          {/* ── What's coming ── */}
           <section className="results-section">
             <h3>Roadmap</h3>
             <div style={{ fontSize: 13, color: "#374151", lineHeight: 1.7 }}>
@@ -1241,12 +1229,9 @@ const App: React.FC = () => {
                   <div>
                     <strong>Simulation mode:</strong>{" "}
                     <span style={{
-                      background: "#e8f0fb",
-                      color: "#12326f",
-                      borderRadius: 999,
-                      padding: "1px 9px",
-                      fontSize: 12,
-                      fontWeight: 600,
+                      background: "#e8f0fb", color: "#12326f",
+                      borderRadius: 999, padding: "1px 9px",
+                      fontSize: 12, fontWeight: 600,
                     }}>
                       {snapshot.run_info.flags?.simulation_mode
                         || snapshot.summary?.simulation_mode
@@ -1309,16 +1294,103 @@ const App: React.FC = () => {
                     </tr>
 
                     <tr>
-                      <td><Tip label="Worst drop — bad scenario" tip="90th percentile of worst peak-to-trough decline across all simulation paths and years. Only 10% of scenarios had a larger drop. Higher number = worse outcome." /></td>
+                      <td><Tip label="Peak-to-trough decline — stress (P90)" tip="In 10% of simulation paths the portfolio fell this far or more below its prior peak at some point. Classic financial drawdown — % dip from highest value reached, not a measure of failure or bankruptcy. Higher number = worse outcome." /></td>
                       <td>{formatPct(snapshot.summary?.drawdown_p90)}</td>
                     </tr>
                     <tr>
-                      <td><Tip label="Worst drop — typical (P50)" tip="Median worst peak-to-trough decline. Half of simulation scenarios experienced a larger drop, half a smaller one. Higher number = worse outcome." /></td>
+                      <td><Tip label="Peak-to-trough decline — typical (P50)" tip="The median path's worst dip below its prior portfolio peak. Half of scenarios had a smaller decline. Classic financial drawdown — not a measure of failure or whether withdrawals were met. Higher number = worse outcome." /></td>
                       <td>{formatPct(snapshot.summary?.drawdown_p50)}</td>
                     </tr>
                   </tbody>
                 </table>
               </section>
+
+              {/* ── Drawdown Over Time ─────────────────────────────────────────── */}
+              {(() => {
+                const years  = snapshot.years ?? [];
+                const ddP50  = snapshot.summary?.drawdown_by_year_p50 ?? [];
+                const ddP90  = snapshot.summary?.drawdown_by_year_p90 ?? [];
+                const dd50sc = snapshot.summary?.drawdown_p50 ?? 0;
+                const dd90sc = snapshot.summary?.drawdown_p90 ?? 0;
+                if (!years.length || !ddP50.length) return null;
+
+                const W = 680, H = 180;
+                const PAD = { t: 12, r: 16, b: 30, l: 44 };
+                const cW = W - PAD.l - PAD.r;
+                const cH = H - PAD.t - PAD.b;
+                const n  = years.length;
+                const maxDD = Math.max(...ddP90, dd90sc, 5) * 1.08;
+
+                const xPx = (i: number) => PAD.l + (i / Math.max(n - 1, 1)) * cW;
+                const yPx = (v: number) => PAD.t + (Math.min(v / maxDD, 1)) * cH;  // 0% at top, dips down
+                const toPath = (arr: number[]) =>
+                  arr.map((v, i) => `${i === 0 ? "M" : "L"}${xPx(i).toFixed(1)},${yPx(v).toFixed(1)}`).join(" ");
+                const toArea = (arr: number[]) =>
+                  `${toPath(arr)} L${xPx(n-1).toFixed(1)},${PAD.t.toFixed(1)} L${xPx(0).toFixed(1)},${PAD.t.toFixed(1)} Z`;
+
+                const yTicks = [0, 0.25, 0.5, 0.75, 1.0].map(f => Math.round(f * maxDD));
+                const xLabelIdxs = years.reduce((acc: number[], yr, i) => {
+                  if (i === 0 || i === n - 1 || yr % 10 === 0) acc.push(i);
+                  return acc;
+                }, []);
+
+                return (
+                  <section className="results-section">
+                    <h3
+                      style={{ cursor: "pointer", userSelect: "none", display: "flex", alignItems: "center", gap: "0.4rem" }}
+                      onClick={() => setShowDrawdown(v => !v)}
+                    >
+                      <span style={{ fontSize: "0.8em", opacity: 0.6 }}>{showDrawdown ? "▼" : "▶"}</span>
+                      Drawdown Over Time
+                      <span style={{ fontSize: "0.75em", fontWeight: 400, opacity: 0.55, marginLeft: "0.3rem" }}>
+                        typical worst {dd50sc.toFixed(1)}% · stress worst {dd90sc.toFixed(1)}%
+                      </span>
+                      {!showDrawdown && (
+                        <span style={{ fontSize: "0.7em", fontWeight: 400, color: "var(--color-muted,#888)", marginLeft: "0.5rem" }}>
+                          click to expand
+                        </span>
+                      )}
+                    </h3>
+                    {showDrawdown && (
+                      <div style={{ marginTop: "0.75rem" }}>
+                        <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8, display: "flex", gap: 20, flexWrap: "wrap" }}>
+                          <span>
+                            <span style={{ display: "inline-block", width: 18, height: 3, background: "#ef444466", borderRadius: 2, verticalAlign: "middle", marginRight: 5 }} />
+                            Stress (P90) — bad 10% of scenarios
+                          </span>
+                          <span>
+                            <span style={{ display: "inline-block", width: 18, height: 3, background: "#3b82f6", borderRadius: 2, verticalAlign: "middle", marginRight: 5 }} />
+                            Median (P50) — typical scenario
+                          </span>
+                        </div>
+                        <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ overflow: "visible", maxWidth: W }}>
+                          {yTicks.map(v => (
+                            <g key={v}>
+                              <line x1={PAD.l} x2={W - PAD.r} y1={yPx(v)} y2={yPx(v)}
+                                stroke={v === 0 ? "#9ca3af" : "#e5e7eb"} strokeWidth={v === 0 ? 1 : 0.8} />
+                              <text x={PAD.l - 5} y={yPx(v) + 4} textAnchor="end" fontSize={10} fill="#9ca3af">
+                                -{v.toFixed(0)}%
+                              </text>
+                            </g>
+                          ))}
+                          {xLabelIdxs.map(i => (
+                            <text key={i} x={xPx(i)} y={H - 6} textAnchor="middle" fontSize={10} fill="#9ca3af">
+                              Yr {years[i]}
+                            </text>
+                          ))}
+                          <path d={toArea(ddP90)} fill="#ef4444" fillOpacity={0.10} />
+                          <path d={toPath(ddP90)} fill="none" stroke="#ef4444" strokeWidth={1.5} strokeOpacity={0.6} strokeDasharray="4 2" />
+                          <path d={toPath(ddP50)} fill="none" stroke="#3b82f6" strokeWidth={2} />
+                        </svg>
+                        <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 4 }}>
+                          Per-year cross-section: how far below their prior peak the median and stress-case portfolio paths have fallen at each simulation year.
+                          Summary scalars show each path's single worst-ever dip, percentiled across all paths — a related but different cut.
+                        </div>
+                      </div>
+                    )}
+                  </section>
+                );
+              })()}
 
               {/* ── Insights ──────────────────────────────────────────────────────── */}
               {(() => {
@@ -2113,7 +2185,7 @@ const App: React.FC = () => {
                   </select>
                 </div>
 
-                <table className="table">
+                <table className="table" style={{ display: selectedResultsAccountFuture === "None" ? "none" : undefined }}>
                   <thead>
                     {(() => {
                       const selAcct = (snapshot.accounts || []).find(
@@ -2285,7 +2357,7 @@ const App: React.FC = () => {
                   </select>
                 </div>
 
-                <table className="table">
+                <table className="table" style={{ display: selectedResultsAccountCurrent === "None" ? "none" : undefined }}>
                   <thead>
                     {(() => {
                       const selAcct = (snapshot.accounts || []).find(
