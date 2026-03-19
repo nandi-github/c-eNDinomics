@@ -3527,6 +3527,7 @@ def group21_asset_weight_sanity(paths: int):
 
 
 GROUPS = [
+    group1_flag_matrix,
     group2_rmd,
     group3_conversion_policy,
     group4_income,
