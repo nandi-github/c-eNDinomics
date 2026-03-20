@@ -43,6 +43,7 @@ APP_ROOT = os.path.abspath(os.path.dirname(__file__))
 UI_DIST = os.path.join(APP_ROOT, "ui", "dist")
 ASSETS_DIR = os.path.join(UI_DIST, "assets")
 COMMON_ASSETS_JSON = os.path.join(APP_ROOT, "config", "assets.json")
+COMMON_RMD_JSON    = os.path.join(APP_ROOT, "config", "rmd.json")
 
 PROFILES_ROOT = os.path.join(APP_ROOT, "profiles")
 DEFAULT_PROFILE = "default"
@@ -181,8 +182,8 @@ def _default_json_names() -> List[str]:
         "inflation_yearly.json",
         "person.json",
         "income.json",
-        "rmd.json",
         "economic.json",
+        # rmd.json is a shared common file at src/config/rmd.json — not per-profile
     ]
 
 
@@ -540,7 +541,11 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
     alloc_path = payload.get("alloc_yearly") or P("allocation_yearly.json")
     person_path = payload.get("person") or P("person.json")
     income_path = payload.get("income") or P("income.json")
-    rmd_path = payload.get("rmd") or P("rmd.json")
+    # rmd.json: per-profile overrides common; fall back to src/config/rmd.json
+    _profile_rmd = P("rmd.json")
+    rmd_path = payload.get("rmd") or (
+        _profile_rmd if os.path.isfile(_profile_rmd) else COMMON_RMD_JSON
+    )
     economic_path        = payload.get("economic") or P("economic.json")
     economic_global_path = ECONOMIC_GLOBAL_PATH if os.path.isfile(ECONOMIC_GLOBAL_PATH) else None
     # Always resolve assets.json from APP_ROOT (global file, never per-profile)
