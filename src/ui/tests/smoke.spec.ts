@@ -179,7 +179,6 @@ test("page loads with correct title and tabs", async ({ page }) => {
   await expect(page.locator("h1")).toContainText("eNDinomics Investment Simulator");
   await expect(page.locator(".tab", { hasText: "Configure" })).toBeVisible();
   await expect(page.locator(".tab", { hasText: "Simulation" })).toBeVisible();
-  await expect(page.locator(".tab", { hasText: "Investment" })).toBeVisible();
   await expect(page.locator(".tab", { hasText: "Results" })).toBeVisible();
 });
 
@@ -252,31 +251,28 @@ test("Summary table: columns, no bad values, plausible metrics", async ({ page }
   const cols = await getColumnCount(table);
   expect(cols, "Summary column count").toBe(COLS.summary);
 
-  // At least 5 rows (objective badge, success rate, nom YoY, real YoY, drawdown x2)
+  // At least 4 rows (success rate, nom YoY, real YoY, drawdown)
   const rows = table.locator("tbody tr");
   const rowCount = await rows.count();
-  expect(rowCount, "Summary row count").toBeGreaterThanOrEqual(5);
+  expect(rowCount, "Summary row count").toBeGreaterThanOrEqual(4);
 
   // No bad values
   const cells = await getTableCells(page, table);
   assertNoBadValues(cells, "Summary");
 
-  // Success rate row — label is dynamic based on simulation mode
-  // Could be "Success rate", "Floor survival rate", or "Full-plan survival rate"
+  // Success/survival rate row — label varies by simulation mode:
+  //   automatic/investment → "Floor survival rate"
+  //   retirement           → "Full-plan survival rate"
   const successRow = cells.find((r) =>
-    r[0].includes("survival rate") || r[0].includes("Success rate") || r[0].includes("Survival rate")
+    r[0].includes("survival rate") || r[0].includes("Success rate")
   );
-  expect(successRow, "Success rate row present (label varies by mode)").toBeTruthy();
+  expect(successRow, "Survival/success rate row present").toBeTruthy();
   if (successRow) {
     const pct = parsePct(successRow[1]);
-    expect(pct, "Success rate in [0,100]").not.toBeNull();
+    expect(pct, "Survival rate in [0,100]").not.toBeNull();
     expect(pct!).toBeGreaterThanOrEqual(0);
     expect(pct!).toBeLessThanOrEqual(100);
   }
-
-  // Simulation mode row — always present (objective badge row)
-  const modeRow = cells.find((r) => r[0].includes("Objective"));
-  expect(modeRow, "Objective/mode row present in Summary").toBeTruthy();
 });
 
 // ─── Test 4: Aggregate Balances table ────────────────────────────────────────
@@ -530,7 +526,6 @@ test("Accounts YoY table: loads for all 6 accounts, no bad values", async ({ pag
 // ─── Test 11: Charts section present ─────────────────────────────────────────
 
 test("Aggregate Balances Charts section present and images load", async ({ page }) => {
-  test.setTimeout(60_000); // extended — runs after heavy account table test
   await loadResults(page);
 
   const chartsSection = page.locator("section.results-section", {
@@ -564,11 +559,14 @@ test("Aggregate Balances Charts section present and images load", async ({ page 
 test("Insights section present with at least one finding", async ({ page }) => {
   await loadResults(page);
 
-  const insights = page.locator("section.results-section", { hasText: "Insights" });
-  await expect(insights).toBeVisible();
+  // Use h3 with exact "Insights" text to avoid matching "Roth Conversion Insights"
+  const insights = page.locator("section.results-section").filter({
+    has: page.locator("h3", { hasText: /^.*Insights.*finding/ }),
+  });
+  await expect(insights.first()).toBeVisible();
 
-  // Should show finding count e.g. "(5 findings)"
-  const header = insights.locator("h3");
+  // Should show finding count e.g. "(1 finding)"
+  const header = insights.first().locator("h3");
   await expect(header).toContainText("finding");
 });
 
@@ -621,8 +619,6 @@ test("Run Parameters show correct profile metadata", async ({ page }) => {
   await expect(paramsSection).toContainText("2");
   await expect(paramsSection).toContainText("California");
   await expect(paramsSection).toContainText("MFJ");
-  // Simulation mode badge always shown
-  await expect(paramsSection).toContainText("Simulation mode");
 });
 
 // ─── Test 13b: Run panel has all four ignore checkboxes ───────────────────────

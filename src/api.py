@@ -375,6 +375,7 @@ def download_template(name: str = Path(..., description="Config filename e.g. pe
         "person.json", "withdrawal_schedule.json", "allocation_yearly.json",
         "income.json", "inflation_yearly.json", "shocks_yearly.json",
         "economic.json",
+        "cape_config.json",
     }
     if name not in allowed:
         raise HTTPException(status_code=400, detail=f"Unknown template file: {name}")
@@ -438,6 +439,54 @@ def save_profile_json(payload: Dict[str, Any] = Body(...)):
 
 
 # Reports endpoints
+@app.post("/roth-optimize")
+def run_roth_optimizer_standalone(payload: Dict[str, Any] = Body(...)):
+    """
+    Standalone Roth optimizer endpoint — runs without a full Monte Carlo simulation.
+    If run_id is provided, loads projected IRA balances from that snapshot.
+    Otherwise uses person.json alone (falls back to compound growth estimate).
+    """
+    profile  = str(payload.get("profile", "") or DEFAULT_PROFILE).strip()
+    run_id   = payload.get("run_id")
+    state    = str(payload.get("state", "California"))
+    filing   = str(payload.get("filing", "MFJ"))
+
+    person_path = os.path.join(PROFILES_ROOT, profile, "person.json")
+    if not os.path.isfile(person_path):
+        raise HTTPException(status_code=404, detail=f"Profile '{profile}' not found")
+
+    try:
+        from roth_optimizer import optimize_roth_conversion_full
+        person_cfg = load_person(person_path)
+
+        # Override state/filing from request
+        person_cfg["state"]          = state
+        person_cfg["filing_status"]  = filing
+
+        # Load projected portfolio from snapshot if run_id provided
+        sim_portfolio: Dict[str, Any] = {}
+        sim_summary:   Dict[str, Any] = {}
+        if run_id:
+            snap_path = os.path.join(PROFILES_ROOT, profile, "reports", run_id,
+                                     "raw_snapshot_accounts.json")
+            if os.path.isfile(snap_path):
+                with open(snap_path) as f:
+                    snap = json.load(f)
+                sim_portfolio = snap.get("portfolio", {})
+                sim_summary   = snap.get("summary", {})
+
+        result = optimize_roth_conversion_full(
+            person_cfg=person_cfg,
+            simulation_summary=sim_summary,
+            simulation_portfolio=sim_portfolio,
+            withdrawals={},
+        )
+        return {"ok": True, "roth_optimizer": result}
+    except Exception as e:
+        logger.exception("roth-optimize failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/reports/{profile}")
 def list_reports_profile(profile: str):
     rdir = _profile_reports_dir(profile)

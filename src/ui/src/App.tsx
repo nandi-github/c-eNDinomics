@@ -215,6 +215,7 @@ type RothOptimizerResult = {
   recommended_reason: string;
   year_by_year_schedule: RothScheduleRow[];
   conversion_window_years: number;
+  years_to_rmd: number;
   warnings: string[];
   filing_used: string;
   error?: string;
@@ -378,6 +379,15 @@ const App: React.FC = () => {
   const [showInsights, setShowInsights] = useState(false);
   const [showPortfolioAnalysis, setShowPortfolioAnalysis] = useState(false);
   const [showRothSchedule, setShowRothSchedule] = useState(false);
+  const [showRothInsights, setShowRothInsights] = useState(false);
+  const [capeConfig, setCapeConfig] = useState<{
+    cape_current: number;
+    cape_historical_mean: number;
+    inflation_assumption: number;
+  } | null>(null);
+  const [rothOptStatus, setRothOptStatus] = useState<"idle" | "running" | "done" | "error">("idle");
+  const [rothOptResult, setRothOptResult] = useState<RothOptimizerResult | null>(null);
+  const [rothOptError, setRothOptError] = useState("");
   const [showHelp, setShowHelp] = useState(false);
   const [showDrawdown, setShowDrawdown] = useState(false);
 
@@ -392,6 +402,17 @@ const App: React.FC = () => {
         }
       })
       .catch(() => {});
+    // Fetch CAPE config for live scenario band labels
+    apiGet<any>("/profile-config/default/cape_config.json")
+      .then(res => {
+        const d = res?.content ? JSON.parse(res.content) : res;
+        setCapeConfig({
+          cape_current:          d?.cape_current ?? 35,
+          cape_historical_mean:  d?.cape_historical_mean ?? 17,
+          inflation_assumption:  d?.adjustment_config?.inflation_assumption ?? 0.035,
+        });
+      })
+      .catch(() => setCapeConfig({ cape_current: 35, cape_historical_mean: 17, inflation_assumption: 0.035 }));
   }, []);
 
   useEffect(() => {
@@ -618,6 +639,31 @@ const App: React.FC = () => {
     }
   };
 
+  const runRothOptimizer = async () => {
+    if (!selectedProfile) return;
+    setRothOptStatus("running");
+    setRothOptError("");
+    setRothOptResult(null);
+    try {
+      // If there's a current run loaded, pass it so optimizer uses projected balances
+      const body: Record<string, any> = {
+        profile: selectedProfile,
+        state: runState,
+        filing: runFiling,
+      };
+      if (selectedRun) body.run_id = selectedRun;
+      const res = await apiPost<{ ok: boolean; roth_optimizer: RothOptimizerResult; error?: string }>(
+        "/roth-optimize", body
+      );
+      if (!res.ok || res.error) throw new Error(res.error || "Optimizer failed");
+      setRothOptResult(res.roth_optimizer);
+      setRothOptStatus("done");
+    } catch (e: any) {
+      setRothOptStatus("error");
+      setRothOptError(String(e?.message || e));
+    }
+  };
+
   const loadSnapshot = async (profile: string, runId: string) => {
     setSnapshot(null);
     setResultsError("");
@@ -836,6 +882,7 @@ const App: React.FC = () => {
               "income.json",
               "inflation_yearly.json",
               "shocks_yearly.json",
+              "cape_config.json",
             ].map(fname => (
               <a
                 key={fname}
@@ -856,6 +903,8 @@ const App: React.FC = () => {
 
           <div style={{ marginTop: 16, fontSize: 11, color: "#9ca3af", borderTop: "1px solid #e5e7eb", paddingTop: 10 }}>
             <strong>Pre-59.5 rule:</strong> ALL withdrawals before age 59.5 are automatically sourced from Brokerage only — IRA and Roth are blocked (IRS 10% early withdrawal penalty). The simulator enforces this hard gate.
+            &nbsp;·&nbsp;
+            <strong>Roth conversion funding:</strong> the conversion itself moves TRAD IRA → Roth (no cash moves). The <em>tax bill</em> is paid from the account set in <code>roth_conversion_policy.tax_payment_source</code> (default: <code>"BROKERAGE"</code>). Set to a specific account name like <code>"BROKERAGE-2"</code> to control which account pays. Using brokerage preserves the full Roth conversion amount and is optimal when you have enough taxable assets.
             &nbsp;·&nbsp;
             <strong>Age ranges are exclusive:</strong> use "47-64" and "65-74" — not "47-65" and "65-74". Overlapping ranges raise a validation error.
             &nbsp;·&nbsp;
@@ -1253,6 +1302,7 @@ const App: React.FC = () => {
           {runStatus === "error" && (
             <div className="error">Run failed: {runError}</div>
           )}
+
         </section>
       )}
 
@@ -1269,6 +1319,146 @@ const App: React.FC = () => {
               <span>Signal computation coming — Phase 2</span>
             </div>
           </div>
+
+          {/* ── Option C — Persistent Roth Tax Recommendations ────────── */}
+          {(() => {
+            // Pull roth_optimizer from the last loaded snapshot (Results tab)
+            // or from a standalone run (Simulation tab Option B)
+            const R = rothOptResult ?? snapshot?.roth_optimizer ?? null;
+            const convEnabled = snapshot?.person?.roth_conversion_policy?.enabled;
+
+            if (!R && !convEnabled) return (
+              <section className="results-section">
+                <h3>Roth Conversion Recommendations</h3>
+                <div style={{ fontSize: 13, color: "#6b7280" }}>
+                  Run a simulation on the Test profile (Roth conversions enabled) or use
+                  "Run Roth Optimizer" on the Simulation tab to see persistent recommendations here.
+                </div>
+              </section>
+            );
+
+            if (!R) return (
+              <section className="results-section">
+                <h3>Roth Conversion Recommendations</h3>
+                <div style={{ fontSize: 13, color: "#6b7280" }}>
+                  Use "Run Roth Optimizer" on the Simulation tab to populate recommendations,
+                  or load a run from the Results tab.
+                </div>
+              </section>
+            );
+
+            const sevColor = R.timebomb_severity === "CRITICAL" ? "#b91c1c"
+              : R.timebomb_severity === "SEVERE" ? "#b45309"
+              : R.timebomb_severity === "MODERATE" ? "#1d4ed8" : "#15803d";
+            const rec = R.recommended_strategy as keyof typeof R.strategies;
+            const fmtM = (v: number) => v >= 1e6 ? `$${(v/1e6).toFixed(1)}M` : `$${(v/1000).toFixed(0)}K`;
+
+            // Urgency: how many years until IRMAA kicks in (age 63)?
+            const currentAge = snapshot?.person?.current_age
+              ? parseFloat(String(snapshot.person.current_age))
+              : null;
+            const yearsToIRMAA = currentAge ? Math.max(0, 63 - currentAge) : null;
+            const urgency = yearsToIRMAA !== null
+              ? yearsToIRMAA <= 2 ? { label: "ACT NOW", color: "#b91c1c", bg: "#fce4d6" }
+              : yearsToIRMAA <= 5 ? { label: "ACT SOON", color: "#b45309", bg: "#fff2cc" }
+              : { label: "ON TRACK", color: "#15803d", bg: "#d5e8d4" }
+              : null;
+
+            return (
+              <section className="results-section">
+                <h3 style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  Roth Conversion Recommendations
+                  <span style={{
+                    background: sevColor + "18", color: sevColor,
+                    borderRadius: 999, padding: "2px 10px", fontSize: "0.68em", fontWeight: 700
+                  }}>
+                    IRA Timebomb: {R.timebomb_severity}
+                  </span>
+                  {urgency && (
+                    <span style={{
+                      background: urgency.bg, color: urgency.color,
+                      borderRadius: 999, padding: "2px 10px", fontSize: "0.68em", fontWeight: 700
+                    }}>
+                      {urgency.label}
+                    </span>
+                  )}
+                </h3>
+
+                {/* Key metrics row */}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10, marginBottom: 14 }}>
+                  {[
+                    { label: "Recommended strategy", value: `${rec} (${R.strategies[rec]?.bracket_filled})`, color: sevColor, bg: sevColor + "10" },
+                    { label: "Annual conversion", value: fmtM(R.strategies[rec]?.annual_conversion ?? 0), color: "#1e40af", bg: "#dbeafe" },
+                    { label: "Projected RMD yr 1", value: `${fmtM(R.projected_rmd_year1)}/yr at ${R.rmd_start_age}`, color: "#374151", bg: "#f3f4f6" },
+                    { label: "Heir savings (high)", value: fmtM(R.savings_matrix?.[rec]?.heir_high ?? 0), color: "#15803d", bg: "#d5e8d4" },
+                  ].map(({ label, value, color, bg }) => (
+                    <div key={label} style={{ background: bg, borderRadius: 8, padding: "10px 12px" }}>
+                      <div style={{ fontSize: 11, color, fontWeight: 600, marginBottom: 3 }}>{label}</div>
+                      <div style={{ fontSize: 16, fontWeight: 700, color }}>{value}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* BETR signal */}
+                <div style={{
+                  padding: "8px 12px", borderRadius: 6, marginBottom: 10,
+                  background: R.current_marginal_rate < R.betr_self_mfj ? "#f0fdf4" : "#fef2f2",
+                  border: `1px solid ${R.current_marginal_rate < R.betr_self_mfj ? "#86efac" : "#fca5a5"}`,
+                  fontSize: 12, color: "#374151",
+                }}>
+                  <strong>BETR signal:</strong>{" "}
+                  Current rate {(R.current_marginal_rate*100).toFixed(0)}% vs BETR {(R.betr_self_mfj*100).toFixed(1)}% —{" "}
+                  {R.current_marginal_rate < R.betr_self_mfj
+                    ? <span style={{ color: "#15803d", fontWeight: 600 }}>✓ Convert now is optimal</span>
+                    : <span style={{ color: "#b91c1c", fontWeight: 600 }}>✗ Deferring may be better</span>}
+                  {" · "}Future RMD rate: {(R.future_rate_self_mfj*100).toFixed(0)}%
+                  {yearsToIRMAA !== null && (
+                    <span style={{ marginLeft: 12, color: "#6b7280" }}>
+                      · IRMAA guard: {yearsToIRMAA === 0 ? "active now" : `${yearsToIRMAA.toFixed(0)}yr away`}
+                    </span>
+                  )}
+                </div>
+
+                {/* IRMAA notes */}
+                {R.strategies[rec]?.irmaa_notes?.length > 0 && (
+                  <div style={{ fontSize: 12, color: "#7a5c00", background: "#fff2cc",
+                    borderRadius: 6, padding: "6px 12px", marginBottom: 10,
+                    border: "1px solid #f0c040" }}>
+                    <strong>IRMAA:</strong> {R.strategies[rec].irmaa_notes[0]}
+                  </div>
+                )}
+
+                {/* Savings comparison — all 4 strategies */}
+                <div style={{ fontSize: 12, fontWeight: 600, color: "#374151", marginBottom: 6 }}>
+                  Lifetime savings comparison (self MFJ scenario)
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+                  {(["conservative","balanced","aggressive","maximum"] as const).map(strat => {
+                    const isRec = strat === rec;
+                    const sav = R.savings_matrix?.[strat]?.self_mfj ?? 0;
+                    return (
+                      <div key={strat} style={{
+                        flex: "1 1 100px", textAlign: "center", padding: "8px 10px",
+                        borderRadius: 6, border: `2px solid ${isRec ? sevColor : "#e5e7eb"}`,
+                        background: isRec ? sevColor + "0e" : "#fafafa",
+                      }}>
+                        {isRec && <div style={{ fontSize: 9, color: sevColor, fontWeight: 700, marginBottom: 2 }}>★ REC</div>}
+                        <div style={{ fontSize: 11, color: "#6b7280", textTransform: "capitalize" }}>{strat}</div>
+                        <div style={{ fontSize: 15, fontWeight: 700, color: sav > 0 ? "#15803d" : "#b91c1c" }}>
+                          {sav > 0 ? "+" : ""}{fmtM(sav)}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div style={{ fontSize: 11, color: "#9ca3af" }}>
+                  Data from {rothOptResult ? "standalone optimizer run" : "last simulation snapshot"}.
+                  Use "Run Roth Optimizer" on the Simulation tab to refresh with latest profile data.
+                </div>
+              </section>
+            );
+          })()}
           <section className="results-section">
             <h3>Market Signals</h3>
             <div style={{ fontSize: 13, color: "#6b7280" }}>
@@ -1543,12 +1733,19 @@ const App: React.FC = () => {
 
                 // Scenario band growth rates (nominal, matching the simulation's inflation assumption ~3.5%)
                 // Base case is the actual Monte Carlo median — others are simple compound lines
-                const infl = 0.035;
+                // Live CAPE-derived rates — computed from cape_config.json
+                const _cape = capeConfig?.cape_current ?? 35;
+                const _mean = capeConfig?.cape_historical_mean ?? 17;
+                const infl  = capeConfig?.inflation_assumption ?? 0.035;
+                const _capeNom = Math.round((1/_cape + infl) * 1000) / 1000;
+                const _histNom = Math.round((1/_mean + infl) * 1000) / 1000;
+                const _pessNom = Math.max(0.02, Math.round((_capeNom - 0.025) * 1000) / 1000);
+                const pct = (r: number) => `${(r*100).toFixed(1)}%`;
                 const scenarios = [
-                  { label: "Optimistic (historical avg ~10% nominal)", rate: 0.10,  color: "#16a34a", dash: "4 3" },
-                  { label: "Base case (CAPE-adjusted ~7.4%)",          rate: null,   color: "#2563eb", dash: "" },    // actual median
-                  { label: "Conservative (CAPE-implied ~6%)",          rate: 0.06,  color: "#f59e0b", dash: "4 3" },
-                  { label: "Pessimistic (GMO view ~4% nominal)",        rate: 0.04,  color: "#ef4444", dash: "4 3" },
+                  { label: `Optimistic (hist avg ${pct(_histNom)})`,          rate: _histNom, color: "#16a34a", dash: "4 3" },
+                  { label: "Base (sim median)",                                rate: null,     color: "#2563eb", dash: "" },
+                  { label: `Conservative (CAPE ${_cape} → ${pct(_capeNom)})`, rate: _capeNom, color: "#f59e0b", dash: "4 3" },
+                  { label: `Pessimistic (stressed ${pct(_pessNom)})`,          rate: _pessNom, color: "#ef4444", dash: "4 3" },
                 ];
 
                 const compoundLine = (rate: number) =>
@@ -1560,7 +1757,7 @@ const App: React.FC = () => {
                 const cH = H - PAD.t - PAD.b;
                 const n  = years.length;
 
-                const allVals = [...median, ...p90, ...compoundLine(0.10)];
+                const allVals = [...median, ...p90, ...compoundLine(_histNom)];
                 const maxV = Math.max(...allVals) * 1.05;
                 const minV = 0;
 
@@ -1654,7 +1851,7 @@ const App: React.FC = () => {
 
                     <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 4 }}>
                       Shaded band = middle 80% of simulation paths (floor to ceiling range).
-                      CAPE 35 implies ~2.8% 10yr real return; optimistic assumes long-run historical mean holds.
+                      {`CAPE ${_cape.toFixed(0)} implies ~${((1/_cape)*100).toFixed(1)}% 10yr real return; optimistic assumes historical mean (CAPE ${_mean.toFixed(0)}) holds.`}
                     </div>
                   </section>
                 );
@@ -2163,7 +2360,7 @@ const App: React.FC = () => {
               })()}
 
 
-              {/* ── Roth Conversion Optimizer ─────────────────────────────────── */}
+              {/* ── Roth Conversion Insights ─────────────────────────────────── */}
               {(() => {
                 const R = snapshot.roth_optimizer;
                 const convEnabled = snapshot.person?.roth_conversion_policy?.enabled;
@@ -2171,7 +2368,7 @@ const App: React.FC = () => {
                 // Not enabled — show nudge
                 if (!convEnabled && R === undefined) return (
                   <section className="results-section">
-                    <h3>Roth Conversion Optimizer</h3>
+                    <h3>Roth Conversion Insights</h3>
                     <div style={{ fontSize: 13, color: "#6b7280", padding: "8px 0" }}>
                       Enable Roth conversions in <code>person.json</code> (set{" "}
                       <code>roth_conversion_policy.enabled: true</code>) to see optimizer recommendations.
@@ -2181,7 +2378,7 @@ const App: React.FC = () => {
 
                 if (!R || R.error) return (
                   <section className="results-section">
-                    <h3>Roth Conversion Optimizer</h3>
+                    <h3>Roth Conversion Insights</h3>
                     <div style={{ fontSize: 13, color: "#b91c1c", padding: "8px 0" }}>
                       {R?.error ? `Optimizer error: ${R.error}` : "Optimizer data not available — re-run simulation."}
                     </div>
@@ -2207,8 +2404,15 @@ const App: React.FC = () => {
 
                 return (
                   <section className="results-section">
-                    <h3 style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
-                      Roth Conversion Optimizer
+                    <h3
+                      style={{ display: "flex", alignItems: "center", gap: "0.5rem",
+                        flexWrap: "wrap", cursor: "pointer", userSelect: "none" }}
+                      onClick={() => setShowRothInsights(v => !v)}
+                    >
+                      <span style={{ fontSize: "0.8em", opacity: 0.6 }}>
+                        {showRothInsights ? "▼" : "▶"}
+                      </span>
+                      Roth Conversion Insights
                       <span style={{
                         background: sevBg, color: sevColor,
                         borderRadius: 999, padding: "2px 10px",
@@ -2216,52 +2420,193 @@ const App: React.FC = () => {
                       }}>
                         IRA Timebomb: {R.timebomb_severity}
                       </span>
+                      {!showRothInsights && (
+                        <span style={{ fontSize: "0.72em", fontWeight: 400, color: "#9ca3af" }}>
+                          ★ {stratLabels[rec] || rec} · {fmtM(R.strategies[rec]?.annual_conversion ?? 0)}/yr · click to expand
+                        </span>
+                      )}
                     </h3>
 
-                    {/* Timebomb callout */}
+                    {showRothInsights && (<>
+                    {/* ── Current Situation ─────────────────────────────── */}
                     <div style={{
-                      border: `1px solid ${sevColor}44`,
-                      borderLeft: `4px solid ${sevColor}`,
-                      borderRadius: 6, background: sevBg + "88",
-                      padding: "8px 14px", marginBottom: 14, fontSize: 12,
+                      border: `1px solid ${sevColor}33`,
+                      borderRadius: 8, marginBottom: 16,
+                      overflow: "hidden",
                     }}>
-                      <strong style={{ color: sevColor }}>Projected RMD at age {R.rmd_start_age}: </strong>
-                      <strong>~{fmtM(R.projected_rmd_year1)}/yr</strong>
-                      {" — "}
-                      TRAD IRA projected to {fmtM(R.projected_trad_ira_at_rmd)} at age {R.rmd_start_age} •{" "}
-                      Current rate: {(R.current_marginal_rate * 100).toFixed(0)}% •{" "}
-                      Future rate: {(R.future_rate_self_mfj * 100).toFixed(0)}% •{" "}
-                      BETR: {(R.betr_self_mfj * 100).toFixed(1)}%
-                      {R.current_marginal_rate < R.betr_self_mfj
-                        ? <span style={{ color: "#15803d", marginLeft: 8, fontWeight: 600 }}>✓ Convert now is optimal</span>
-                        : <span style={{ color: "#b91c1c", marginLeft: 8, fontWeight: 600 }}>✗ Deferring may be better</span>
-                      }
-                    </div>
-
-                    {/* Headline cards */}
-                    <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
-                      {[
-                        { label: "Recommended", value: stratLabels[rec] || rec, sub: "strategy", color: sevColor, bg: sevBg },
-                        { label: "Annual conversion", value: fmtM(R.strategies[rec]?.annual_conversion ?? 0), sub: "recommended strategy", color: "#1e40af", bg: "#dbeafe" },
-                        { label: "Tax cost yr 1", value: fmtM(R.strategies[rec]?.tax_cost_year1 ?? 0), sub: `at ${((R.strategies[rec]?.effective_rate ?? 0)*100).toFixed(1)}% eff. rate`, color: "#374151", bg: "#f3f4f6" },
-                        { label: "Heir savings (high)", value: fmtM(R.savings_matrix[rec]?.heir_high ?? 0), sub: "10yr liquidation avoided", color: "#15803d", bg: "#d5e8d4" },
-                      ].map(({ label, value, sub, color, bg }) => (
-                        <div key={label} style={{
-                          flex: "1 1 160px", background: bg,
-                          borderRadius: 8, padding: "10px 14px",
-                          border: `1px solid ${color}33`,
-                        }}>
-                          <div style={{ fontSize: 11, color, fontWeight: 600, marginBottom: 2 }}>{label}</div>
-                          <div style={{ fontSize: 20, fontWeight: 700, color, lineHeight: 1.2 }}>{value}</div>
-                          <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{sub}</div>
+                      <div style={{
+                        background: sevBg, padding: "8px 14px",
+                        borderBottom: `1px solid ${sevColor}22`,
+                        display: "flex", alignItems: "center", gap: 10,
+                      }}>
+                        <span style={{ fontWeight: 700, fontSize: 13, color: sevColor }}>Current Situation</span>
+                        <span style={{ fontSize: 12, color: "#6b7280" }}>— what happens if you do nothing</span>
+                      </div>
+                      <div style={{ padding: "10px 14px" }}>
+                        {/* Key metrics */}
+                        <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 10, fontSize: 12 }}>
+                          <span><strong>TRAD IRA at age {R.rmd_start_age}:</strong> {fmtM(R.projected_trad_ira_at_rmd)}</span>
+                          <span>→</span>
+                          <span><strong style={{ color: sevColor }}>Forced RMD: {fmtM(R.projected_rmd_year1)}/yr</strong></span>
                         </div>
-                      ))}
+                        <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 12, marginBottom: 10 }}>
+                          <span><strong>Current marginal rate:</strong> {(R.current_marginal_rate*100).toFixed(0)}%</span>
+                          <span><strong>Future RMD rate:</strong> {(R.future_rate_self_mfj*100).toFixed(0)}%</span>
+                          <span><strong>BETR:</strong> {(R.betr_self_mfj*100).toFixed(1)}%</span>
+                          <span style={{ color: R.current_marginal_rate < R.betr_self_mfj ? "#15803d" : "#b91c1c", fontWeight: 600 }}>
+                            {R.current_marginal_rate < R.betr_self_mfj ? "✓ Converting now is optimal" : "✗ Deferring may be better"}
+                          </span>
+                        </div>
+                        {/* Situation insights */}
+                        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                          {[
+                            { ok: false, text: `IRA timebomb ${R.timebomb_severity}: forced RMDs of ${fmtM(R.projected_rmd_year1)}/yr will push into ${(R.future_rate_self_mfj*100).toFixed(0)}% bracket regardless of other choices` },
+                            { ok: false, text: `High-earning heirs face ${(R.future_rate_heir_high*100).toFixed(0)}% on 10-year forced liquidation (SECURE Act 2.0)` },
+                            { ok: true,  text: `${R.conversion_window_years}-year conversion window available before RMD start — ${R.years_to_rmd} years of clean runway` },
+                            { ok: R.betr_self_mfj > R.current_marginal_rate,
+                              text: `BETR ${(R.betr_self_mfj*100).toFixed(1)}% is ${R.betr_self_mfj > R.current_marginal_rate ? `${((R.betr_self_mfj - R.current_marginal_rate)*100).toFixed(0)}pp above current rate — strong convert signal` : "below current rate — deferring is better"}` },
+                          ].map((item, i) => (
+                            <div key={i} style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "flex-start" }}>
+                              <span style={{ color: item.ok ? "#15803d" : sevColor, marginTop: 1, flexShrink: 0 }}>
+                                {item.ok ? "✓" : "⚠"}
+                              </span>
+                              <span style={{ color: "#374151" }}>{item.text}</span>
+                            </div>
+                          ))}
+                          {R.warnings.map((w, i) => (
+                            <div key={`w${i}`} style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "flex-start" }}>
+                              <span style={{ color: "#b91c1c", flexShrink: 0 }}>⚠</span>
+                              <span style={{ color: "#374151" }}>{w}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
                     </div>
 
-                    {/* Rationale */}
-                    <div style={{ fontSize: 12, color: "#374151", marginBottom: 14, padding: "8px 12px",
-                      background: "#f8faff", borderRadius: 6, border: "1px solid #e0e7ff" }}>
-                      <strong>Recommendation:</strong> {R.recommended_reason}
+                    {/* ── Recommendation ────────────────────────────────── */}
+                    <div style={{
+                      border: `1px solid #1d4ed833`,
+                      borderRadius: 8, marginBottom: 16, overflow: "hidden",
+                    }}>
+                      <div style={{
+                        background: "#eff6ff", padding: "8px 14px",
+                        borderBottom: "1px solid #bfdbfe",
+                        display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+                      }}>
+                        <span style={{ fontWeight: 700, fontSize: 13, color: "#1e40af" }}>
+                          ★ Recommendation — {stratLabels[rec] || rec}
+                        </span>
+                        <span style={{ fontSize: 12, color: "#6b7280" }}>
+                          optimized for your current profile
+                        </span>
+                      </div>
+                      <div style={{ padding: "10px 14px" }}>
+                        {/* Key metrics */}
+                        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+                          {[
+                            { label: "Annual conversion", value: fmtM(R.strategies[rec]?.annual_conversion ?? 0), sub: `${R.strategies[rec]?.bracket_filled ?? ""} bracket`, color: "#1e40af", bg: "#dbeafe" },
+                            { label: "Tax cost yr 1",     value: fmtM(R.strategies[rec]?.tax_cost_year1 ?? 0),   sub: `${((R.strategies[rec]?.effective_rate ?? 0)*100).toFixed(1)}% effective rate`, color: "#374151", bg: "#f3f4f6" },
+                            { label: "Self savings",      value: `+${fmtM(R.savings_matrix[rec]?.self_mfj ?? 0)}`,  sub: "vs doing nothing", color: "#15803d", bg: "#d5e8d4" },
+                            { label: "Heir savings",      value: `+${fmtM(R.savings_matrix[rec]?.heir_high ?? 0)}`, sub: "10yr liquidation avoided", color: "#15803d", bg: "#d5e8d4" },
+                          ].map(({ label, value, sub, color, bg }) => (
+                            <div key={label} style={{ flex: "1 1 130px", background: bg,
+                              borderRadius: 8, padding: "8px 12px", border: `1px solid ${color}33` }}>
+                              <div style={{ fontSize: 10, color, fontWeight: 600, marginBottom: 2 }}>{label}</div>
+                              <div style={{ fontSize: 18, fontWeight: 700, color, lineHeight: 1.2 }}>{value}</div>
+                              <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2 }}>{sub}</div>
+                            </div>
+                          ))}
+                        </div>
+
+                        {/* Why this strategy — contextual insights */}
+                        <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 12 }}>
+                          <div style={{ fontSize: 12, fontWeight: 600, color: "#374151", marginBottom: 4 }}>
+                            Why {stratLabels[rec] || rec}:
+                          </div>
+                          <div style={{ fontSize: 12, color: "#374151", padding: "6px 10px",
+                            background: "#f8faff", borderRadius: 6, border: "1px solid #e0e7ff",
+                            marginBottom: 6 }}>
+                            {R.recommended_reason}
+                          </div>
+                          {/* Why not the others */}
+                          {strategies.filter(s => s !== rec).map(strat => {
+                            const sav      = R.savings_matrix[strat]?.self_mfj ?? 0;
+                            const recSav   = R.savings_matrix[rec]?.self_mfj ?? 0;
+                            const diff     = recSav - sav;
+                            const irmaaHit = (R.strategies[strat]?.irmaa_annual_delta ?? 0) > 0;
+                            const note     = strat === "maximum"
+                              ? `${irmaaHit ? `triggers IRMAA (+${fmtM(R.strategies[strat]?.irmaa_annual_delta ?? 0)}/yr Medicare premium), ` : ""}leaves ${fmtM(Math.abs(sav - recSav))} ${sav > recSav ? "more" : "less"} than ${rec}`
+                              : sav < recSav
+                                ? `leaves ${fmtM(diff)} on the table vs ${rec}`
+                                : `saves ${fmtM(sav - recSav)} more but at higher tax cost/yr`;
+                            return (
+                              <div key={strat} style={{ fontSize: 12, display: "flex", gap: 6 }}>
+                                <span style={{ color: "#9ca3af", flexShrink: 0 }}>↳</span>
+                                <span style={{ color: "#6b7280" }}>
+                                  <strong style={{ color: "#374151" }}>{stratLabels[strat] || strat}:</strong> {note}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {/* IRMAA notes */}
+                        {R.strategies[rec]?.irmaa_notes?.length > 0 && (
+                          <div style={{ fontSize: 12, color: "#7a5c00", background: "#fff2cc",
+                            borderRadius: 6, padding: "6px 10px", marginBottom: 10,
+                            border: "1px solid #f0c040" }}>
+                            <strong>IRMAA:</strong> {R.strategies[rec].irmaa_notes[0]}
+                          </div>
+                        )}
+
+                        {/* Apply button — contextual label */}
+                        <div style={{ display: "flex", alignItems: "center", gap: 12,
+                          paddingTop: 10, borderTop: "1px solid #e5e7eb", flexWrap: "wrap" }}>
+                          <button
+                            onClick={async () => {
+                              if (!selectedProfile) return;
+                              try {
+                                const cfg = await apiGet<any>(`/profile-config/${encodeURIComponent(selectedProfile)}/person.json`);
+                                const person = cfg.content ? JSON.parse(cfg.content) : {};
+                                const strat = R.strategies[rec];
+                                const conv_k = Math.round((strat?.annual_conversion ?? 0) / 1000);
+                                person.roth_conversion_policy = {
+                                  ...(person.roth_conversion_policy || {}),
+                                  enabled: true,
+                                  recommended_strategy: rec,
+                                  annual_conversion_k: conv_k,
+                                  _optimizer_updated: new Date().toISOString().slice(0,10),
+                                };
+                                await apiPost("/profile-config", {
+                                  profile: selectedProfile,
+                                  name: "person.json",
+                                  content: JSON.stringify(person, null, 2),
+                                });
+                                alert(`Saved: ${stratLabels[rec] || rec} ($${conv_k}K/yr) written to ${selectedProfile}/person.json. Re-run simulation to see updated projections.`);
+                              } catch (e: any) {
+                                alert("Save failed: " + String(e?.message || e));
+                              }
+                            }}
+                            style={{
+                              background: "#1d4ed8", color: "#fff",
+                              border: "none", borderRadius: 6,
+                              padding: "6px 16px", cursor: "pointer",
+                              fontWeight: 600, fontSize: 13,
+                            }}
+                          >
+                            Apply {stratLabels[rec] || rec} to profile
+                          </button>
+                          <span style={{ fontSize: 11, color: "#9ca3af" }}>
+                            Updates roth_conversion_policy in person.json · re-run simulation to see projections
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* ── Source note ─────────────────────────────────── */}
+                    <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 4 }}>
+                      Analysis computed from {selectedRun ?? "latest simulation run"}.
+                      To update, re-run the simulation with your current profile settings.
                     </div>
 
                     {/* 4×4 Savings Matrix */}
@@ -2379,6 +2724,7 @@ const App: React.FC = () => {
                         </div>
                       )}
                     </div>
+                    </>)}
                   </section>
                 );
               })()}
