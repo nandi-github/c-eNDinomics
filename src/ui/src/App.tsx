@@ -170,6 +170,56 @@ type PortfolioAnalysis = {
   n_accounts: number; n_tickers: number;
 };
 
+// ── Roth Optimizer types ─────────────────────────────────────────────────────
+type RothScenario = {
+  future_rate: number;
+  betr: number;
+  convert_makes_sense: boolean;
+  lifetime_savings: number;
+  description: string;
+};
+type RothStrategy = {
+  annual_conversion: number;
+  bracket_filled: string;
+  effective_rate: number;
+  tax_cost_year1: number;
+  irmaa_annual_delta: number;
+  irmaa_notes: string[];
+  betr_primary: number;
+  scenarios: { self_mfj: RothScenario; self_survivor: RothScenario; heir_moderate: RothScenario; heir_high: RothScenario; };
+};
+type RothScheduleRow = {
+  year: number; age: number; conversion: number; tax_cost: number;
+  effective_rate: number; irmaa_delta: number;
+  cumulative_converted: number; cumulative_tax: number;
+};
+type RothOptimizerResult = {
+  timebomb_severity: string;
+  projected_trad_ira_at_rmd: number;
+  projected_rmd_year1: number;
+  rmd_start_age: number;
+  years_to_rmd: number;
+  projected_ira_at_death: number;
+  current_marginal_rate: number;
+  future_rate_self_mfj: number;
+  future_rate_survivor: number;
+  future_rate_heir_moderate: number;
+  future_rate_heir_high: number;
+  betr_self_mfj: number;
+  betr_survivor: number;
+  betr_heir_moderate: number;
+  betr_heir_high: number;
+  strategies: { conservative: RothStrategy; balanced: RothStrategy; aggressive: RothStrategy; maximum: RothStrategy; };
+  savings_matrix: Record<string, Record<string, number>>;
+  recommended_strategy: string;
+  recommended_reason: string;
+  year_by_year_schedule: RothScheduleRow[];
+  conversion_window_years: number;
+  warnings: string[];
+  filing_used: string;
+  error?: string;
+};
+
 type Snapshot = {
   years: number[];
   portfolio: SnapshotPortfolio;
@@ -186,6 +236,7 @@ type Snapshot = {
   n_years?: number;
   meta?: Record<string, any>;
   portfolio_analysis?: PortfolioAnalysis;
+  roth_optimizer?: RothOptimizerResult | null;
 };
 
 type EndingBalance = {
@@ -326,6 +377,8 @@ const App: React.FC = () => {
   const [aggView, setAggView] = useState<"none" | "current" | "future">("none");
   const [showInsights, setShowInsights] = useState(false);
   const [showPortfolioAnalysis, setShowPortfolioAnalysis] = useState(false);
+  const [showRothSchedule, setShowRothSchedule] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
   const [showDrawdown, setShowDrawdown] = useState(false);
 
   useEffect(() => {
@@ -695,10 +748,121 @@ const App: React.FC = () => {
             Results
           </button>
         </nav>
-        <a href="/help.html" className="help-link">
+        <button
+          className="help-link"
+          onClick={() => setShowHelp(v => !v)}
+          style={{ background: "none", border: "none", cursor: "pointer" }}
+        >
           Help
-        </a>
+        </button>
       </header>
+
+      {/* ── Help Panel ──────────────────────────────────────────────────── */}
+      {showHelp && (
+        <div style={{
+          margin: "0 0 16px 0",
+          background: "#f8faff",
+          border: "1px solid #c7d7f5",
+          borderRadius: 10,
+          padding: "20px 24px",
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+            <h2 style={{ margin: 0, fontSize: 18 }}>eNDinomics Help</h2>
+            <button onClick={() => setShowHelp(false)}
+              style={{ background: "none", border: "none", cursor: "pointer", fontSize: 20, color: "#6b7280" }}>✕</button>
+          </div>
+
+          {/* Config formats */}
+          <h3 style={{ fontSize: 14, color: "#1e40af", marginBottom: 8 }}>Withdrawal Schedule — Age-Based Format</h3>
+          <p style={{ fontSize: 13, color: "#374151", margin: "0 0 8px" }}>
+            Use <strong>exclusive, non-overlapping age ranges</strong>. The loader converts ages to simulation
+            years using <code>current_age</code> from person.json. Overlapping ranges are a validation error.
+          </p>
+          <pre style={{ fontSize: 12, background: "#1e293b", color: "#e2e8f0",
+            borderRadius: 6, padding: "10px 14px", margin: "0 0 8px", overflowX: "auto" }}>{
+`{
+  "floor_k": 100,          // global minimum in any market condition
+  "schedule": [
+    { "ages": "47-64", "amount_k": 150, "base_k": 100 },  // working years
+    { "ages": "65-74", "amount_k": 200, "base_k": 140 },  // retirement gap
+    { "ages": "75-95", "amount_k": 250, "base_k": 180 }   // RMD era
+  ]
+}`
+          }</pre>
+          <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 16, lineHeight: 1.7 }}>
+            <strong>amount_k</strong> — target take-home per year in today's $ (inflation-adjusted) ·
+            <strong> base_k</strong> — minimum acceptable spend if markets are bad (per life stage) ·
+            <strong> floor_k</strong> — absolute floor across all conditions ·
+            <strong> Validation:</strong> overlapping ranges, reversed ranges, and base_k &gt; amount_k all raise errors
+          </div>
+
+          <h3 style={{ fontSize: 14, color: "#1e40af", marginBottom: 8 }}>Simulation Modes</h3>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 16 }}>
+            {[
+              { mode: "🔄 Automatic", desc: "Glide path — shifts from growth to preservation as retirement approaches. investment_w = 0.85 at age 46, 0.0 at retirement." },
+              { mode: "📈 Investment-first", desc: "Growth maximizing. Success measured against spending floor only. CAGR is the primary metric." },
+              { mode: "🛡 Retirement-first", desc: "Survival probability maximizing. Success measured against full plan. Sequence risk highlighted." },
+              { mode: "⚖ Balanced", desc: "Equal weight on growth and survival. 50/50 blend of investment and retirement objectives." },
+            ].map(({ mode, desc }) => (
+              <div key={mode} style={{ background: "#fff", border: "1px solid #e0e7ff",
+                borderRadius: 6, padding: "8px 12px", fontSize: 12 }}>
+                <div style={{ fontWeight: 600, marginBottom: 3 }}>{mode}</div>
+                <div style={{ color: "#6b7280" }}>{desc}</div>
+              </div>
+            ))}
+          </div>
+
+          <h3 style={{ fontSize: 14, color: "#1e40af", marginBottom: 8 }}>Roth Optimizer — Reading the BETR</h3>
+          <p style={{ fontSize: 13, color: "#374151", margin: "0 0 6px" }}>
+            <strong>BETR (Break-Even Tax Rate)</strong> = the highest current marginal rate at which converting still beats deferring.
+            Convert when: <strong>current rate &lt; BETR</strong>.
+            BETR &gt; future rate because Roth tax-free compounding adds value beyond the simple rate comparison.
+          </p>
+          <div style={{ fontSize: 12, background: "#f0fdf4", border: "1px solid #bbf7d0",
+            borderRadius: 6, padding: "8px 12px", marginBottom: 16 }}>
+            Example: Current rate 22% · Future RMD rate 37% · BETR 40.1% (29yr window) →
+            <strong style={{ color: "#15803d" }}> Convert now ✓</strong> — you pay 22% today vs 37%+ forced later.
+          </div>
+
+          <h3 style={{ fontSize: 14, color: "#1e40af", marginBottom: 8 }}>Download Template Config Files</h3>
+          <p style={{ fontSize: 12, color: "#6b7280", margin: "0 0 10px" }}>
+            These are the default profile config files. Copy and edit for your own profile.
+          </p>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {[
+              "person.json",
+              "withdrawal_schedule.json",
+              "allocation_yearly.json",
+              "income.json",
+              "inflation_yearly.json",
+              "shocks_yearly.json",
+            ].map(fname => (
+              <a
+                key={fname}
+                href={`/template/${encodeURIComponent(fname)}`}
+                download={fname}
+                style={{
+                  display: "inline-flex", alignItems: "center", gap: 5,
+                  background: "#eff6ff", color: "#1d4ed8",
+                  border: "1px solid #bfdbfe", borderRadius: 6,
+                  padding: "5px 12px", fontSize: 12, textDecoration: "none",
+                  fontWeight: 500,
+                }}
+              >
+                📥 {fname}
+              </a>
+            ))}
+          </div>
+
+          <div style={{ marginTop: 16, fontSize: 11, color: "#9ca3af", borderTop: "1px solid #e5e7eb", paddingTop: 10 }}>
+            <strong>Pre-59.5 rule:</strong> ALL withdrawals before age 59.5 are automatically sourced from Brokerage only — IRA and Roth are blocked (IRS 10% early withdrawal penalty). The simulator enforces this hard gate.
+            &nbsp;·&nbsp;
+            <strong>Age ranges are exclusive:</strong> use "47-64" and "65-74" — not "47-65" and "65-74". Overlapping ranges raise a validation error.
+            &nbsp;·&nbsp;
+            <strong>income.json</strong> is for income <em>outside</em> your portfolio (salary, rental, SS). Do not enter dividends, RMDs, or conversion amounts — those are computed automatically.
+          </div>
+        </div>
+      )}
 
       {tab === "configure" && (
         <section className="panel">
@@ -1994,6 +2158,227 @@ const App: React.FC = () => {
                       </tbody>
                     </table>
                     </>)}
+                  </section>
+                );
+              })()}
+
+
+              {/* ── Roth Conversion Optimizer ─────────────────────────────────── */}
+              {(() => {
+                const R = snapshot.roth_optimizer;
+                const convEnabled = snapshot.person?.roth_conversion_policy?.enabled;
+
+                // Not enabled — show nudge
+                if (!convEnabled && R === undefined) return (
+                  <section className="results-section">
+                    <h3>Roth Conversion Optimizer</h3>
+                    <div style={{ fontSize: 13, color: "#6b7280", padding: "8px 0" }}>
+                      Enable Roth conversions in <code>person.json</code> (set{" "}
+                      <code>roth_conversion_policy.enabled: true</code>) to see optimizer recommendations.
+                    </div>
+                  </section>
+                );
+
+                if (!R || R.error) return (
+                  <section className="results-section">
+                    <h3>Roth Conversion Optimizer</h3>
+                    <div style={{ fontSize: 13, color: "#b91c1c", padding: "8px 0" }}>
+                      {R?.error ? `Optimizer error: ${R.error}` : "Optimizer data not available — re-run simulation."}
+                    </div>
+                  </section>
+                );
+
+                const sevColor = R.timebomb_severity === "CRITICAL" ? "#b91c1c"
+                  : R.timebomb_severity === "SEVERE"   ? "#b45309"
+                  : R.timebomb_severity === "MODERATE" ? "#1d4ed8"
+                  : "#15803d";
+                const sevBg = R.timebomb_severity === "CRITICAL" ? "#fce4d6"
+                  : R.timebomb_severity === "SEVERE"   ? "#fff2cc"
+                  : R.timebomb_severity === "MODERATE" ? "#dbeafe"
+                  : "#d5e8d4";
+
+                const strategies = ["conservative", "balanced", "aggressive", "maximum"] as const;
+                const scenarios  = ["self_mfj", "self_survivor", "heir_moderate", "heir_high"] as const;
+                const scLabels   = { self_mfj: "Self (MFJ)", self_survivor: "Survivor", heir_moderate: "Heir Moderate", heir_high: "Heir High" };
+                const stratLabels = { conservative: "Conservative (22%)", balanced: "Balanced (24%)", aggressive: "Aggressive (32%)", maximum: "Maximum (37%)" };
+                const rec = R.recommended_strategy as typeof strategies[number];
+
+                const fmtM = (v: number) => v >= 1e6 ? `$${(v/1e6).toFixed(1)}M` : v >= 1000 ? `$${(v/1000).toFixed(0)}K` : `$${v.toFixed(0)}`;
+
+                return (
+                  <section className="results-section">
+                    <h3 style={{ display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" }}>
+                      Roth Conversion Optimizer
+                      <span style={{
+                        background: sevBg, color: sevColor,
+                        borderRadius: 999, padding: "2px 10px",
+                        fontSize: "0.68em", fontWeight: 700,
+                      }}>
+                        IRA Timebomb: {R.timebomb_severity}
+                      </span>
+                    </h3>
+
+                    {/* Timebomb callout */}
+                    <div style={{
+                      border: `1px solid ${sevColor}44`,
+                      borderLeft: `4px solid ${sevColor}`,
+                      borderRadius: 6, background: sevBg + "88",
+                      padding: "8px 14px", marginBottom: 14, fontSize: 12,
+                    }}>
+                      <strong style={{ color: sevColor }}>Projected RMD at age {R.rmd_start_age}: </strong>
+                      <strong>~{fmtM(R.projected_rmd_year1)}/yr</strong>
+                      {" — "}
+                      TRAD IRA projected to {fmtM(R.projected_trad_ira_at_rmd)} at age {R.rmd_start_age} •{" "}
+                      Current rate: {(R.current_marginal_rate * 100).toFixed(0)}% •{" "}
+                      Future rate: {(R.future_rate_self_mfj * 100).toFixed(0)}% •{" "}
+                      BETR: {(R.betr_self_mfj * 100).toFixed(1)}%
+                      {R.current_marginal_rate < R.betr_self_mfj
+                        ? <span style={{ color: "#15803d", marginLeft: 8, fontWeight: 600 }}>✓ Convert now is optimal</span>
+                        : <span style={{ color: "#b91c1c", marginLeft: 8, fontWeight: 600 }}>✗ Deferring may be better</span>
+                      }
+                    </div>
+
+                    {/* Headline cards */}
+                    <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 16 }}>
+                      {[
+                        { label: "Recommended", value: stratLabels[rec] || rec, sub: "strategy", color: sevColor, bg: sevBg },
+                        { label: "Annual conversion", value: fmtM(R.strategies[rec]?.annual_conversion ?? 0), sub: "recommended strategy", color: "#1e40af", bg: "#dbeafe" },
+                        { label: "Tax cost yr 1", value: fmtM(R.strategies[rec]?.tax_cost_year1 ?? 0), sub: `at ${((R.strategies[rec]?.effective_rate ?? 0)*100).toFixed(1)}% eff. rate`, color: "#374151", bg: "#f3f4f6" },
+                        { label: "Heir savings (high)", value: fmtM(R.savings_matrix[rec]?.heir_high ?? 0), sub: "10yr liquidation avoided", color: "#15803d", bg: "#d5e8d4" },
+                      ].map(({ label, value, sub, color, bg }) => (
+                        <div key={label} style={{
+                          flex: "1 1 160px", background: bg,
+                          borderRadius: 8, padding: "10px 14px",
+                          border: `1px solid ${color}33`,
+                        }}>
+                          <div style={{ fontSize: 11, color, fontWeight: 600, marginBottom: 2 }}>{label}</div>
+                          <div style={{ fontSize: 20, fontWeight: 700, color, lineHeight: 1.2 }}>{value}</div>
+                          <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{sub}</div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Rationale */}
+                    <div style={{ fontSize: 12, color: "#374151", marginBottom: 14, padding: "8px 12px",
+                      background: "#f8faff", borderRadius: 6, border: "1px solid #e0e7ff" }}>
+                      <strong>Recommendation:</strong> {R.recommended_reason}
+                    </div>
+
+                    {/* 4×4 Savings Matrix */}
+                    <div style={{ marginBottom: 16, overflowX: "auto" }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: "#374151", marginBottom: 6 }}>
+                        Lifetime Tax Savings — 4 Strategies × 4 Scenarios
+                      </div>
+                      <table className="table" style={{ fontSize: 12, minWidth: 560 }}>
+                        <thead>
+                          <tr>
+                            <th>Strategy</th>
+                            <th>Convert/yr</th>
+                            {scenarios.map(sc => <th key={sc}>{scLabels[sc]}</th>)}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {strategies.map(strat => {
+                            const s = R.strategies[strat];
+                            const isRec = strat === rec;
+                            return (
+                              <tr key={strat} style={{
+                                background: isRec ? sevBg + "66" : undefined,
+                                fontWeight: isRec ? 600 : 400,
+                              }}>
+                                <td>
+                                  {isRec && <span style={{ color: sevColor, marginRight: 4 }}>★</span>}
+                                  {stratLabels[strat]}
+                                </td>
+                                <td>{fmtM(s?.annual_conversion ?? 0)}</td>
+                                {scenarios.map(sc => {
+                                  const sav = R.savings_matrix[strat]?.[sc] ?? 0;
+                                  const makes_sense = s?.scenarios[sc]?.convert_makes_sense;
+                                  return (
+                                    <td key={sc} style={{ color: sav > 0 ? "#15803d" : "#b91c1c" }}>
+                                      {sav > 0 ? "+" : ""}{fmtM(sav)}
+                                      {makes_sense === false && (
+                                        <span style={{ color: "#9ca3af", fontSize: 10, marginLeft: 3 }}>⚠</span>
+                                      )}
+                                    </td>
+                                  );
+                                })}
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                      <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 4 }}>
+                        Heir scenarios assume equal 10-year forced liquidation (SECURE Act 2.0).
+                        Survivor scenario uses single-filer brackets. ⚠ = BETR suggests deferring may be better.
+                      </div>
+                    </div>
+
+                    {/* IRMAA notes */}
+                    {R.strategies[rec]?.irmaa_notes?.length > 0 && (
+                      <div style={{ fontSize: 12, color: "#7a5c00", background: "#fff2cc",
+                        borderRadius: 6, padding: "6px 12px", marginBottom: 12,
+                        border: "1px solid #f0c040" }}>
+                        <strong>IRMAA:</strong>{" "}
+                        {R.strategies[rec].irmaa_notes[0]}
+                      </div>
+                    )}
+
+                    {/* Warnings */}
+                    {R.warnings.map((w, i) => (
+                      <div key={i} style={{ fontSize: 12, color: "#b91c1c", background: "#fce4d6",
+                        borderRadius: 6, padding: "6px 12px", marginBottom: 8,
+                        border: "1px solid #f4b8a8" }}>
+                        ⚠ {w}
+                      </div>
+                    ))}
+
+                    {/* Year-by-year schedule */}
+                    <div>
+                      <h4
+                        style={{ cursor: "pointer", userSelect: "none", fontSize: 13,
+                          display: "flex", alignItems: "center", gap: "0.4rem", marginBottom: 6 }}
+                        onClick={() => setShowRothSchedule(v => !v)}
+                      >
+                        <span style={{ fontSize: "0.8em", opacity: 0.6 }}>{showRothSchedule ? "▼" : "▶"}</span>
+                        Year-by-Year Schedule — {stratLabels[rec] || rec}
+                        {!showRothSchedule && (
+                          <span style={{ fontSize: "0.75em", fontWeight: 400, color: "#9ca3af" }}>
+                            click to expand
+                          </span>
+                        )}
+                      </h4>
+                      {showRothSchedule && (
+                        <div style={{ overflowX: "auto" }}>
+                          <table className="table" style={{ fontSize: 12 }}>
+                            <thead>
+                              <tr>
+                                <th>Yr</th><th>Age</th><th>Convert</th>
+                                <th>Tax Cost</th><th>Eff. Rate</th>
+                                <th>IRMAA Δ</th><th>Cumul. Converted</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {R.year_by_year_schedule.map(row => (
+                                <tr key={row.year} style={{
+                                  background: row.irmaa_delta > 0 ? "#fff9e6" : undefined
+                                }}>
+                                  <td>{row.year}</td>
+                                  <td>{row.age}</td>
+                                  <td>{fmtM(row.conversion)}</td>
+                                  <td>{fmtM(row.tax_cost)}</td>
+                                  <td>{(row.effective_rate * 100).toFixed(1)}%</td>
+                                  <td style={{ color: row.irmaa_delta > 0 ? "#b45309" : "#6b7280" }}>
+                                    {row.irmaa_delta > 0 ? `+${fmtM(row.irmaa_delta)}` : "—"}
+                                  </td>
+                                  <td>{fmtM(row.cumulative_converted)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
                   </section>
                 );
               })()}

@@ -366,6 +366,32 @@ def get_profile_config(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/template/{name}")
+def download_template(name: str = Path(..., description="Config filename e.g. person.json")):
+    """Return a default profile config file as a downloadable attachment."""
+    # Sanitize — only allow known config filenames
+    allowed = {
+        "person.json", "withdrawal_schedule.json", "allocation_yearly.json",
+        "income.json", "inflation_yearly.json", "shocks_yearly.json",
+        "economic.json",
+    }
+    if name not in allowed:
+        raise HTTPException(status_code=400, detail=f"Unknown template file: {name}")
+    path = _profile_json_path("default", name)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail=f"{name} not found in default profile")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            content = f.read()
+        return Response(
+            content=content,
+            media_type="application/json",
+            headers={"Content-Disposition": f'attachment; filename="{name}"'},
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/profile-config")
 def save_profile_json(payload: Dict[str, Any] = Body(...)):
     profile = str(payload.get("profile", "")).strip()
@@ -611,9 +637,20 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
             json.dump(base_e, f, indent=2)
         economic_path_effective = economic_override_path
 
-    # 6) Load configs
-    tax_cfg = load_tax_unified(tax_path, state=state, filing=filing)
-    sched_arr, sched_base = load_sched(withdraw_path_effective)
+    # 6) Load configs — load person first so current_age is available for schedule parsing
+    tax_cfg    = load_tax_unified(tax_path, state=state, filing=filing)
+    person_cfg = load_person(person_path)
+
+    # Extract current_age for age-based withdrawal schedule conversion
+    _sched_current_age = float(person_cfg.get("current_age") or 0.0) if person_cfg else 0.0
+    _sched_target_age  = float(person_cfg.get("target_age") or
+                               person_cfg.get("assumed_death_age") or 95.0) if person_cfg else 95.0
+    _sched_n_years = max(10, min(60, int(_sched_target_age - _sched_current_age)))
+    sched_arr, sched_base = load_sched(
+        withdraw_path_effective,
+        current_age=_sched_current_age,
+        max_years=_sched_n_years,
+    )
     # Derive scalar floor_k for legacy run_accounts path
     floor_k = float(sched_base.min()) if sched_base is not None and sched_base.size > 0 else 0.0
 
@@ -668,13 +705,8 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
     # except Exception as _e:
     #     print(f"[run] assets refresh skipped: {_e}")
 
-    person_cfg = load_person(person_path)
+    # person_cfg already loaded above (moved before load_sched for current_age)
     print("[DEBUG api] person_cfg.rmd_policy:", person_cfg.get("rmd_policy") if person_cfg else None)
-
-    # Inject UI-selected simulation_mode into person_cfg so simulator_new.py
-    # reads the correct value. The UI selection always wins over person.json default.
-    if person_cfg is not None:
-        person_cfg["simulation_mode"] = simulation_mode
 
     # Dynamic simulation years: target_age - current_age (default target=95, min 10, max 60)
     _current_age = int((person_cfg or {}).get("current_age", 55))
@@ -900,6 +932,9 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
 
         withdraw_seq_per_year = seq_good_per_year
 
+        # Inject UI-selected simulation_mode into person_cfg
+        person_cfg["simulation_mode"] = simulation_mode
+
         res = run_accounts_new(
             paths=paths,
             spy=steps_per_year,
@@ -972,10 +1007,10 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
         "shocks_mode": raw_shocks_mode,
         "flags": {
             "ignore_withdrawals": bool(ignore_withdrawals),
-            "ignore_rmds":        bool(ignore_rmds),
+            "ignore_rmds": bool(ignore_rmds),
             "ignore_conversions": bool(ignore_conversions),
-            "ignore_taxes":       bool(ignore_taxes),
-            "simulation_mode":    simulation_mode,
+            "ignore_taxes": bool(ignore_taxes),
+            "simulation_mode": simulation_mode,
         },
     }
 
@@ -995,6 +1030,40 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
     except Exception:
         ending_balances_pre = []
     res["ending_balances"] = ending_balances_pre
+
+    # 9a-income) Inject income.json year-1 estimates into person_cfg for optimizer
+    try:
+        _ic = income_cfg if isinstance(income_cfg, dict) else {}
+        def _yr1(entries):
+            for e in (entries or []):
+                rng = str(e.get("years","")).strip()
+                if rng.startswith("1-") or rng == "1":
+                    return float(e.get("amount_nom", 0) or 0)
+            return 0.0
+        person_cfg["income_data"] = {
+            "w2_yr1":       _yr1(_ic.get("w2", [])),
+            "rental_yr1":   _yr1(_ic.get("rental", [])),
+            "ordinary_yr1": _yr1(_ic.get("ordinary_other", [])),
+        }
+    except Exception:
+        pass
+
+    # 9a-roth) Run Roth optimizer inline — attaches to snapshot
+    roth_policy = (person_cfg.get("roth_conversion_policy") or {})
+    if bool(roth_policy.get("enabled", False)):
+        try:
+            from roth_optimizer import optimize_roth_conversion_full
+            res["roth_optimizer"] = optimize_roth_conversion_full(
+                person_cfg=person_cfg,
+                simulation_summary=res.get("summary", {}),
+                simulation_portfolio=res.get("portfolio", {}),
+                withdrawals=res.get("withdrawals", {}),
+            )
+        except Exception as _roth_exc:
+            logger.warning("Roth optimizer failed (non-fatal): %s", _roth_exc)
+            res["roth_optimizer"] = {"error": str(_roth_exc)}
+    else:
+        res["roth_optimizer"] = None
 
     # 9b) Snapshot + run_meta (now includes ending_balances)
     save_raw_snapshot_accounts(

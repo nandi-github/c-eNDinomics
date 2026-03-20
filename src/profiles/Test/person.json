@@ -23,7 +23,10 @@
         "birth_year": 2001,
         "share_percent": 50,
         "eligible_designated_beneficiary": false,
-        "per_stirpes": true
+        "per_stirpes": true,
+        "estimated_income_moderate": 150000,
+        "estimated_income_high": 300000,
+        "filing_status": "MFJ"
       },
       {
         "name": "Child B",
@@ -31,7 +34,10 @@
         "birth_year": 2005,
         "share_percent": 50,
         "eligible_designated_beneficiary": false,
-        "per_stirpes": true
+        "per_stirpes": true,
+        "estimated_income_moderate": 150000,
+        "estimated_income_high": 300000,
+        "filing_status": "MFJ"
       }
     ]
   },
@@ -65,7 +71,8 @@
       "contingent": "Inherit only if all primary beneficiaries predecease. share_percent must sum to 100.",
       "relationship_options": "Options: 'spouse', 'child', 'sibling', 'parent', 'non-designated', 'trust', 'estate'",
       "eligible_designated_beneficiary": "true = can use own life expectancy for inherited IRA RMDs (applies to: surviving spouse, disabled/chronically ill, minor child until majority, beneficiary within 10 years of owner's age). false = 10-year rule applies \u2014 full account must be distributed within 10 years.",
-      "per_stirpes": "true = if this beneficiary predeceases, their share passes to their descendants rather than being redistributed to surviving beneficiaries."
+      "per_stirpes": "true = if this beneficiary predeceases, their share passes to their descendants rather than being redistributed to surviving beneficiaries.",
+      "estimated_income_fields": "estimated_income_moderate and estimated_income_high: heir's income for BETR scenario modeling. Used by roth_optimizer.py to compute 10-year forced liquidation rate. Moderate = typical early-career earnings; High = high-earner scenario."
     },
     "rmd_policy": {
       "extra_handling_options": "What to do with RMD amounts above what is needed for living expenses. 'reinvest_in_brokerage' = park surplus in taxable brokerage (still taxable as ordinary income that year, but then invested). 'spend' = treat as extra cash income. 'hold_cash' = keep as uninvested cash reserve."
@@ -84,8 +91,20 @@
     "runtime_overrides_note": "Fields 'state', 'filing_status', and 'rmd_table' can be overridden at runtime from the Run panel without editing this file. Runtime overrides are ephemeral \u2014 they apply to that run only and are recorded in the run's result metadata so you always know which parameters produced which results.",
     "target_age": "Final simulation age (inclusive). n_years = target_age - current_age. Clamped to 10-60 year range. Replaces assumed_death_age for simulation length control.",
     "simulation_mode": "Controls the objective function and dashboard. Options: 'automatic' (default \u2014 glide path shifts from investment-heavy to retirement-heavy as you approach retirement_age), 'investment' (growth maximizing, retirement as constraint), 'retirement' (survival probability maximizing), 'balanced' (equal weight on both objectives). In automatic mode the blend recomputes on every run based on current_age vs retirement_age.",
-    "retirement_age": "Target retirement age used by automatic simulation_mode to compute the investment/retirement objective blend. Also used for Roth conversion window planning and RMD gap analysis."
+    "retirement_age": "Target retirement age used by automatic simulation_mode to compute the investment/retirement objective blend. Also used for Roth conversion window planning and RMD gap analysis.",
+    "roth_optimizer_config": {
+      "include_survivor_scenario": "true = model single-filer bracket cliff when spouse predeceases. Uses spouse.birth_year to compute survivor age.",
+      "include_heir_scenario": "true = model 10-year forced liquidation for non-spouse beneficiaries (SECURE Act 2.0). Uses beneficiaries.contingent for heir income profiles.",
+      "irmaa_sensitivity": "low = IRMAA flagged but does not tip recommendation (appropriate when IRA timebomb savings dwarf IRMAA cost). high = IRMAA cliff treated as near-hard constraint (appropriate for moderate IRA).",
+      "window_years": "Number of years in the conversion window. Defaults to min(29, 75 - current_age). Conversions run for this many years starting from current_age."
+    }
   },
   "simulation_mode": "automatic",
-  "retirement_age": 65
+  "retirement_age": 65,
+  "roth_optimizer_config": {
+    "include_survivor_scenario": true,
+    "include_heir_scenario": true,
+    "irmaa_sensitivity": "low",
+    "window_years": 29
+  }
 }

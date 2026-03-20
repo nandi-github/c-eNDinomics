@@ -161,6 +161,10 @@ def save_raw_snapshot_accounts(
     if "ending_balances" in res:
         snapshot["ending_balances"] = res["ending_balances"]
 
+    # Roth optimizer output — persisted so Results tab can display without re-running
+    if "roth_optimizer" in res:
+        snapshot["roth_optimizer"] = res["roth_optimizer"]
+
     # Input paths (useful for debugging / UI links)
     if input_paths is not None:
         snapshot["input_paths"] = dict(input_paths)

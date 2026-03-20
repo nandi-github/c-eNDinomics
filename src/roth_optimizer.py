@@ -1,465 +1,672 @@
 # filename: roth_optimizer.py
 """
-Roth Conversion Optimizer
-=========================
-Computes the optimal annual Roth conversion schedule to minimize
-lifetime federal tax burden for the target user profile:
-  - Large TRAD IRA balance (the RMD timebomb)
-  - Retirement income gap window between retirement and RMD start
-  - Goal: pre-pay taxes at lower bracket rates before RMDs force higher rates
+Roth Conversion Optimizer — Full BETR 2-Pass Implementation
 
-Design
-------
-The optimizer does NOT run a Monte Carlo. It works on a single deterministic
-projection of TRAD IRA growth to find the annually-optimal bracket fill.
+Architecture:
+  1. IRA Timebomb Severity Classifier   — uses simulation projected IRA balance at RMD age
+  2. Break-Even Tax Rate (BETR) 2-Pass  — current marginal rate vs projected future rate
+  3. Four Named Strategies              — conservative / balanced / aggressive / maximum
+  4. Four Scenarios per Strategy        — self MFJ / self survivor / heir moderate / heir high
+  5. IRMAA Guard at Age 63              — 2-year Medicare lookback; flags but doesn't block for large IRA
+  6. Year-by-year schedule              — per strategy, per conversion year
 
-Key insight: The window between retirement (income stops) and RMD start
-(age 73 or 75) is the prime Roth conversion window — ordinary income is
-low so the effective rate on conversions is also low.
-
-Output
-------
-  {
-    "optimal_annual_conversion":    float,    # recommended $ to convert each year
-    "bracket_to_fill":              str,       # e.g. "22%"
-    "estimated_rmd_reduction":      float,    # how much lower RMDs will be at RMD start
-    "estimated_lifetime_tax_savings": float,  # vs doing nothing, in today's $
-    "year_by_year_schedule":        List[dict],
-    "warnings":                     List[str],  # IRMAA, NIIT triggers
-    "do_nothing_rmd_at_start":      float,    # RMD in first year without conversions
-    "optimized_rmd_at_start":       float,    # RMD in first year with conversions
-    "window_years_available":       int,      # years in the prime conversion window
-  }
-
-Usage
------
-    from roth_optimizer import optimize_roth_conversion
-    from loaders import load_tax_unified
-
-    tax_cfg = load_tax_unified(tax_path, state="California", filing="MFJ")
-    result  = optimize_roth_conversion(
-        trad_ira_balance = 4_800_000,
-        current_age      = 46,
-        retirement_age   = 65,
-        rmd_start_age    = 75,
-        target_death_age = 95,
-        annual_growth_rate = 0.074,
-        current_income   = 0,
-        filing_status    = "MFJ",
-        state            = "California",
-        existing_roth_policy = {},
-        tax_cfg          = tax_cfg,
-    )
+Key design decisions:
+  - Uses simulation's Monte Carlo median projected IRA balance at RMD age (not compound assumption)
+  - IRMAA guard at 63 (not 65) — conversion in yr N affects Medicare premiums at yr N+2
+  - Four strategies are a menu, not a mandate — user picks based on IRMAA sensitivity and liquidity
+  - irmaa_sensitivity in roth_optimizer_config controls whether IRMAA tips recommendation
+  - Survivor scenario uses single-filer brackets from spouse expected longevity
+  - Heir scenario uses 10-year forced liquidation rule (SECURE Act 2.0) for non-spouse beneficiaries
+  - person.json beneficiaries.contingent drives heir profiles
 """
 
-from __future__ import annotations
-
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
-# IRMAA income thresholds (2026, MFJ) — 2-year lookback
-# Surcharges apply to Medicare Part B/D premiums
-_IRMAA_TIERS_MFJ = [
-    194_000,   # Tier 1 threshold
-    246_000,   # Tier 2 threshold
-    306_000,   # Tier 3 threshold
-    750_000,   # Tier 4 threshold
-]
-_IRMAA_TIERS_SINGLE = [
-    97_000,
-    123_000,
-    153_000,
-    183_000,
-    500_000,
+# ── 2025/2026 Federal Tax Brackets ───────────────────────────────────────────
+# Mirrors taxes_states_mfj_single.json. Embedded to avoid path dependencies.
+
+FED_BRACKETS_MFJ = [
+    (23_850,   0.10),
+    (96_950,   0.12),
+    (206_700,  0.22),
+    (394_600,  0.24),
+    (501_050,  0.32),
+    (751_600,  0.35),
+    (None,     0.37),
 ]
 
-# NIIT threshold (2026)
-_NIIT_THRESHOLD_MFJ    = 250_000
-_NIIT_THRESHOLD_SINGLE = 200_000
+FED_BRACKETS_SINGLE = [
+    (11_925,   0.10),
+    (48_475,   0.12),
+    (103_350,  0.22),
+    (197_300,  0.24),
+    (250_525,  0.32),
+    (626_350,  0.35),
+    (None,     0.37),
+]
+
+STD_DED_MFJ    = 31_500.0
+STD_DED_SINGLE = 15_750.0
+
+NIIT_RATE          = 0.038
+NIIT_THRESH_MFJ    = 250_000.0
+NIIT_THRESH_SINGLE = 200_000.0
+
+# IRMAA 2025/2026 MFJ MAGI thresholds — monthly per-person surcharge
+IRMAA_TIERS_MFJ = [
+    (212_000,  0.0),
+    (266_000,  70.90),
+    (334_000,  177.90),
+    (402_000,  284.60),
+    (750_000,  391.30),
+    (None,     419.30),
+]
+
+IRMAA_TIERS_SINGLE = [
+    (106_000,  0.0),
+    (133_000,  70.90),
+    (167_000,  177.90),
+    (201_000,  284.60),
+    (375_000,  391.30),
+    (None,     419.30),
+]
+
+# RMD Uniform Lifetime Table — key ages
+RMD_FACTORS = {
+    73: 26.5, 74: 25.5, 75: 24.6, 76: 23.7, 77: 22.9,
+    78: 22.0, 79: 21.1, 80: 20.2, 81: 19.4, 82: 18.5,
+    83: 17.7, 84: 16.8, 85: 16.0, 86: 15.2, 87: 14.4,
+    88: 13.7, 89: 12.9, 90: 12.2,
+}
+
+STRATEGY_TARGETS = {
+    "conservative": 0.22,
+    "balanced":     0.24,
+    "aggressive":   0.32,
+    "maximum":      0.37,
+}
 
 
-# ---------------------------------------------------------------------------
-# Tax helpers
-# ---------------------------------------------------------------------------
+# ── Bracket Utilities ─────────────────────────────────────────────────────────
 
-def _calc_marginal_rate(
-    income: float,
-    brackets: List[Dict[str, Any]],
-    std_ded: float,
+def _brackets(filing: str) -> list:
+    return FED_BRACKETS_MFJ if filing == "MFJ" else FED_BRACKETS_SINGLE
+
+
+def marginal_rate(taxable_income: float, filing: str = "MFJ") -> float:
+    """Marginal federal rate on the last dollar at taxable_income."""
+    for top, rate in _brackets(filing):
+        if top is None or taxable_income <= top:
+            return rate
+    return 0.37
+
+
+def effective_rate_on_conversion(
+    existing_taxable: float,
+    conversion: float,
+    filing: str = "MFJ",
 ) -> float:
-    """Return the marginal tax rate at income (post-standard-deduction)."""
-    taxable = max(0.0, income - std_ded)
-    for br in sorted(brackets, key=lambda b: float(b.get("up_to") or 1e15)):
-        cap = br.get("up_to")
-        if cap is None or taxable <= float(cap):
-            return float(br.get("rate", 0.0))
-    return float(brackets[-1].get("rate", 0.0)) if brackets else 0.0
-
-
-def _calc_bracket_ceiling(
-    income: float,
-    brackets: List[Dict[str, Any]],
-    std_ded: float,
-) -> Optional[float]:
-    """
-    Return the ceiling of the bracket income currently sits in.
-    None = top bracket (no ceiling).
-    Returns the gross income ceiling (before standard deduction subtraction).
-    """
-    taxable = max(0.0, income - std_ded)
-    for br in sorted(brackets, key=lambda b: float(b.get("up_to") or 1e15)):
-        cap = br.get("up_to")
-        if cap is None:
-            return None
-        if taxable <= float(cap):
-            # ceiling in gross terms
-            return float(cap) + std_ded
-    return None
-
-
-def _calc_tax_on_amount(
-    amount: float,
-    income_before: float,
-    brackets: List[Dict[str, Any]],
-    std_ded: float,
-) -> float:
-    """
-    Marginal tax on `amount` stacked on top of `income_before`.
-    Uses progressive bracket math.
-    """
-    if amount <= 0:
+    """Average effective rate across conversion amount stacked on existing_taxable income."""
+    if conversion <= 0:
         return 0.0
-    taxable_before = max(0.0, income_before - std_ded)
-    taxable_after  = max(0.0, income_before + amount - std_ded)
-    tax_before = _tax_progressive(taxable_before, brackets)
-    tax_after  = _tax_progressive(taxable_after, brackets)
-    return max(0.0, tax_after - tax_before)
-
-
-def _tax_progressive(taxable: float, brackets: List[Dict[str, Any]]) -> float:
-    """Total tax on taxable income (post-deduction)."""
-    tax = 0.0
-    prev = 0.0
-    for br in sorted(brackets, key=lambda b: float(b.get("up_to") or 1e15)):
-        cap  = br.get("up_to")
-        rate = float(br.get("rate", 0.0))
-        if cap is None:
-            tax += max(0.0, taxable - prev) * rate
+    total_tax = 0.0
+    remaining = conversion
+    cursor = existing_taxable
+    prev_top = 0.0
+    for top, rate in _brackets(filing):
+        if remaining <= 0:
             break
-        band = max(0.0, min(taxable, float(cap)) - prev)
-        tax += band * rate
-        prev = float(cap)
-        if taxable <= float(cap):
-            break
-    return tax
+        ceiling = top if top is not None else cursor + remaining + 1e9
+        room_in_bracket = max(0.0, ceiling - max(cursor, prev_top))
+        taxable_here = min(remaining, max(0.0, ceiling - cursor))
+        if taxable_here > 0:
+            total_tax += taxable_here * rate
+            remaining -= taxable_here
+            cursor += taxable_here
+        prev_top = ceiling if top is not None else 0.0
+    return total_tax / conversion
 
 
-# ---------------------------------------------------------------------------
-# IRMAA / NIIT guard helpers
-# ---------------------------------------------------------------------------
-
-def _irmaa_nearest_tier(income: float, filing_status: str) -> Optional[float]:
-    """
-    Return the nearest IRMAA tier above current income (2-year lookback warning).
-    None if already above all tiers.
-    """
-    tiers = _IRMAA_TIERS_MFJ if filing_status.upper() in ("MFJ", "MFS") else _IRMAA_TIERS_SINGLE
-    for t in sorted(tiers):
-        if income < t:
-            return float(t)
+def bracket_top(target_rate: float, filing: str = "MFJ") -> Optional[float]:
+    for top, rate in _brackets(filing):
+        if rate == target_rate:
+            return top
     return None
 
 
-def _niit_threshold(filing_status: str) -> float:
-    return float(
-        _NIIT_THRESHOLD_MFJ
-        if filing_status.upper() in ("MFJ",)
-        else _NIIT_THRESHOLD_SINGLE
-    )
+def compute_strategy_conversion(
+    strategy: str,
+    current_taxable: float,
+    filing: str = "MFJ",
+) -> Tuple[float, float]:
+    """Compute (conversion_amount, effective_rate) for a given strategy."""
+    target_rate = STRATEGY_TARGETS[strategy]
+    top = bracket_top(target_rate, filing)
+    headroom = max(0.0, (top if top is not None else 2_000_000.0) - current_taxable)
+    if headroom <= 0:
+        return 0.0, target_rate
+    eff = effective_rate_on_conversion(current_taxable, headroom, filing)
+    return headroom, eff
 
 
-# ---------------------------------------------------------------------------
-# Core optimizer
-# ---------------------------------------------------------------------------
+# ── IRMAA Utilities ───────────────────────────────────────────────────────────
 
-def optimize_roth_conversion(
-    trad_ira_balance: float,
-    current_age: int,
-    retirement_age: int,
-    rmd_start_age: int,
-    target_death_age: int,
-    annual_growth_rate: float,
-    current_income: float,
-    filing_status: str,
-    state: str,
-    existing_roth_policy: Dict[str, Any],
-    tax_cfg: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+def irmaa_annual(magi: float, filing: str = "MFJ", covered: int = 2) -> float:
+    """Annual IRMAA surcharge for magi (both persons if covered=2)."""
+    tiers = IRMAA_TIERS_MFJ if filing == "MFJ" else IRMAA_TIERS_SINGLE
+    monthly = 0.0
+    for top, m in tiers:
+        if top is None or magi <= top:
+            monthly = m
+            break
+    return monthly * 12 * covered
+
+
+def irmaa_cliff_info(current_magi: float, filing: str = "MFJ") -> Tuple[float, int]:
+    """(headroom_to_next_tier, current_tier_index)."""
+    tiers = IRMAA_TIERS_MFJ if filing == "MFJ" else IRMAA_TIERS_SINGLE
+    for i, (top, _) in enumerate(tiers):
+        if top is None or current_magi <= top:
+            return (0.0 if top is None else top - current_magi, i)
+    return (0.0, len(tiers) - 1)
+
+
+# ── Timebomb Classifier ───────────────────────────────────────────────────────
+
+def classify_ira_timebomb(
+    projected_trad_ira_at_rmd: float,
+    rmd_age: float = 73.0,
+) -> Tuple[str, float]:
+    """Returns (severity, projected_rmd_year1)."""
+    factor = RMD_FACTORS.get(int(rmd_age), 26.5)
+    rmd_y1 = projected_trad_ira_at_rmd / factor if factor > 0 else 0.0
+    if rmd_y1 > 500_000:   sev = "CRITICAL"
+    elif rmd_y1 > 200_000: sev = "SEVERE"
+    elif rmd_y1 > 100_000: sev = "MODERATE"
+    else:                   sev = "MANAGEABLE"
+    return sev, rmd_y1
+
+
+# ── BETR ──────────────────────────────────────────────────────────────────────
+
+def compute_betr(future_rate: float, after_tax_return: float, years: float) -> float:
     """
-    Compute the optimal annual Roth conversion schedule.
+    Break-Even Tax Rate (BETR): the threshold current rate below which converting is beneficial.
 
-    Parameters
-    ----------
-    trad_ira_balance    : current TRAD IRA balance ($)
-    current_age         : primary owner's current age
-    retirement_age      : age when W2/earned income stops
-    rmd_start_age       : age when RMDs begin (73 or 75 per SECURE 2.0)
-    target_death_age    : final planning age
-    annual_growth_rate  : expected nominal annual return (e.g. 0.074)
-    current_income      : annual W2 + other ordinary income (current $)
-    filing_status       : "MFJ" | "Single" | ...
-    state               : state name (for state tax)
-    existing_roth_policy: person.json roth_conversion_policy block
-    tax_cfg             : loaded tax config from load_tax_unified()
-                          If None, uses simplified federal-only estimate.
+    For the standard case (tax paid from brokerage):
+      Base BETR = future_rate (pay less now vs paying more later is the core decision)
 
-    Returns
-    -------
-    Dict with optimal schedule and lifetime tax savings estimate.
+    Adjusted upward for the Roth tax-free compounding advantage:
+      Roth avoids tax on all future growth; TRAD (or brokerage) does not.
+      This makes Roth worth slightly MORE than the simple rate comparison suggests.
+      Adjustment: +0.5% per year of horizon, capped at +20%.
+
+    Practical result:
+      BETR > future_rate for long horizons → convert is attractive even if current rate
+      is marginally higher than future_rate (Roth compounding advantage compensates).
+      Convert if: current_marginal_rate < BETR
     """
-    warnings: List[str] = []
+    if years <= 0:
+        return future_rate
+    roth_advantage = min(0.20, 0.005 * years)
+    return future_rate * (1.0 + roth_advantage)
 
-    # ── Resolve tax config ────────────────────────────────────────────────
-    if tax_cfg is None:
-        # Minimal fallback — federal brackets only (2026 MFJ approximation)
-        tax_cfg = {
-            "FED_ORD": [
-                {"up_to":  23_200, "rate": 0.10},
-                {"up_to":  94_300, "rate": 0.12},
-                {"up_to": 201_050, "rate": 0.22},
-                {"up_to": 383_900, "rate": 0.24},
-                {"up_to": 487_450, "rate": 0.32},
-                {"up_to": 731_200, "rate": 0.35},
-                {"up_to":    None, "rate": 0.37},
-            ],
-            "FED_STD_DED":  29_200 if filing_status.upper() == "MFJ" else 14_600,
-            "STATE_TYPE":   "none",
-            "STATE_ORD":    [],
-            "STATE_STD_DED": 0.0,
-            "NIIT_THRESH":  _niit_threshold(filing_status),
-            "NIIT_RATE":    0.038,
-        }
 
-    fed_brackets = tax_cfg.get("FED_ORD", [])
-    fed_std_ded  = float(tax_cfg.get("FED_STD_DED", 29_200))
-    state_type   = tax_cfg.get("STATE_TYPE", "none")
-    state_bracks = tax_cfg.get("STATE_ORD", [])
-    state_std    = float(tax_cfg.get("STATE_STD_DED", 0.0))
-    niit_thresh  = float(tax_cfg.get("NIIT_THRESH", _niit_threshold(filing_status)))
+def future_rmd_rate(
+    projected_rmd_year1: float,
+    other_income: float,
+    filing: str = "MFJ",
+) -> float:
+    """Marginal rate on RMD income stacked on other retirement income."""
+    std_ded = STD_DED_MFJ if filing == "MFJ" else STD_DED_SINGLE
+    taxable = max(0.0, other_income + projected_rmd_year1 - std_ded)
+    return marginal_rate(taxable, filing)
 
-    # ── Determine conversion window ───────────────────────────────────────
-    # Prime window: retirement_age → rmd_start_age (income is lowest)
-    # Secondary: current_age → retirement_age (if already retired)
-    prime_start = max(int(current_age), int(retirement_age))
-    prime_end   = int(rmd_start_age) - 1     # last year before RMDs force distributions
-    window_years = max(0, prime_end - prime_start + 1)
 
-    # ── Project TRAD IRA without conversions (do-nothing baseline) ───────
-    years_to_rmd  = max(0, int(rmd_start_age) - int(current_age))
-    years_total   = max(0, int(target_death_age) - int(current_age))
+def heir_forced_liquidation_rate(
+    inherited_ira: float,
+    heir_income: float,
+    heir_filing: str = "MFJ",
+    years: int = 10,
+) -> float:
+    """Marginal rate heir pays on equal 10-yr forced IRA distributions."""
+    annual_dist = inherited_ira / years
+    std_ded = STD_DED_MFJ if heir_filing == "MFJ" else STD_DED_SINGLE
+    taxable = max(0.0, heir_income + annual_dist - std_ded)
+    return marginal_rate(taxable, heir_filing)
 
-    balance_at_rmd_no_conv = float(trad_ira_balance) * (
-        (1.0 + float(annual_growth_rate)) ** years_to_rmd
-    )
-    # RMD factor at rmd_start_age (IRS Uniform Lifetime Table)
-    _rmd_factors = {
-        73: 26.5, 74: 25.5, 75: 24.6, 76: 23.7, 77: 22.9,
-        78: 22.0, 79: 21.1, 80: 20.2, 81: 19.4, 82: 18.5,
-    }
-    rmd_factor = float(_rmd_factors.get(int(rmd_start_age), 26.5))
-    do_nothing_rmd_yr1 = balance_at_rmd_no_conv / rmd_factor
 
-    # ── Determine annual conversion amount ────────────────────────────────
-    # Strategy: fill to top of current bracket, subject to guards.
-    # In the prime window, ordinary income is ~0 (retired, pre-RMD).
-    # We fill up to the top of the 22% federal bracket (or policy cap).
-    policy_rate_str = str(
-        existing_roth_policy.get("keepit_below_max_marginal_fed_rate", "fill the bracket")
-    ).strip().lower()
+# ── Savings Calculation ───────────────────────────────────────────────────────
 
-    # Determine baseline ordinary income during prime window
-    prime_income = 0.0 if current_age >= retirement_age else float(current_income)
-
-    # Bracket ceiling in the prime window
-    ceiling = _calc_bracket_ceiling(prime_income, fed_brackets, fed_std_ded)
-
-    if policy_rate_str == "fill the bracket":
-        # Fill to the top of whichever bracket we're in
-        if ceiling is not None:
-            conversion_room = max(0.0, ceiling - prime_income)
-        else:
-            conversion_room = max(0.0, 200_000.0)   # cap at $200k if top bracket
-    elif policy_rate_str.endswith("%"):
-        try:
-            target_rate = float(policy_rate_str.rstrip("%")) / 100.0
-            # Find ceiling of that specific bracket
-            for br in sorted(fed_brackets, key=lambda b: float(b.get("up_to") or 1e15)):
-                if abs(float(br.get("rate", 0.0)) - target_rate) < 1e-6:
-                    cap = br.get("up_to")
-                    ceiling = (float(cap) + fed_std_ded) if cap is not None else None
-                    break
-            conversion_room = max(0.0, (ceiling or prime_income + 200_000) - prime_income)
-        except Exception:
-            conversion_room = 100_000.0
+def pv_tax_savings(
+    annual_conversion: float,
+    eff_rate: float,
+    future_rate: float,
+    window_years: int,
+    discount_rate: float,
+) -> float:
+    """Present value of converting now vs deferring to future_rate."""
+    if annual_conversion <= 0 or future_rate <= eff_rate:
+        return 0.0
+    rate_diff = future_rate - eff_rate
+    annual_saving = annual_conversion * rate_diff
+    if discount_rate > 0:
+        pv_factor = (1 - (1 + discount_rate) ** (-window_years)) / discount_rate
     else:
-        conversion_room = 100_000.0   # sensible fallback
+        pv_factor = float(window_years)
+    return annual_saving * pv_factor
 
-    # IRMAA guard: warn if conversion would cross a tier (Medicare surcharge kicks
-    # in 2 years later — relevant when age ≥ 63 in the window)
-    irmaa_age_threshold = 63
-    irmaa_warn_age = prime_start if prime_start >= irmaa_age_threshold else irmaa_age_threshold
-    if irmaa_warn_age <= prime_end:
-        irmaa_tier = _irmaa_nearest_tier(prime_income + conversion_room, filing_status)
-        if irmaa_tier is not None and (prime_income + conversion_room) >= irmaa_tier * 0.95:
-            conversion_room = min(conversion_room, max(0.0, irmaa_tier - prime_income - 1))
-            warnings.append(
-                f"IRMAA guard: conversion capped to avoid crossing ${irmaa_tier:,.0f} "
-                f"threshold (2-year Medicare premium surcharge lookback)."
+
+# ── Portfolio Projection Helpers ──────────────────────────────────────────────
+
+def _trad_ira_at_age(
+    portfolio: Dict[str, Any],
+    years_arr: List[int],
+    current_age: float,
+    target_age: float,
+) -> float:
+    """Extract median TRAD IRA balance from simulation at target_age (current USD)."""
+    if not years_arr:
+        return 0.0
+    target_yr_idx = len(years_arr) - 1
+    for i, yr in enumerate(years_arr):
+        if current_age + yr >= target_age:
+            target_yr_idx = i
+            break
+
+    # Try per-account median levels (snapshot structure)
+    levels = portfolio.get("inv_nom_levels_med_acct") or {}
+    trad_total = 0.0
+    for acct, vals in levels.items():
+        if isinstance(vals, list) and len(vals) > target_yr_idx:
+            if "TRAD" in acct.upper() or "TRADITIONAL" in acct.upper():
+                trad_total += float(vals[target_yr_idx])
+
+    if trad_total > 0:
+        return trad_total
+
+    # Fallback: proportion of total current_median
+    median = portfolio.get("current_median") or []
+    if isinstance(median, list) and len(median) > target_yr_idx:
+        # TRAD IRA typically ~50% of total in accumulation phase
+        return float(median[target_yr_idx]) * 0.50
+    return 0.0
+
+
+def _current_income_estimate(person_cfg: Dict[str, Any]) -> float:
+    """
+    Estimate current ordinary income for bracket positioning.
+
+    Priority order:
+    1. person_cfg["estimated_annual_income"] — explicitly set by user
+    2. person_cfg["income_data"] — injected by api.py from income.json yr1 totals
+    3. Default $150K — reasonable for a high-net-worth pre-retiree
+
+    Note: dividends/gains/RMDs from portfolio accounts are NOT included here —
+    those are computed separately inside the simulator.
+    """
+    if "estimated_annual_income" in person_cfg:
+        return float(person_cfg["estimated_annual_income"])
+
+    income_data = person_cfg.get("income_data") or {}
+    if income_data:
+        total = sum(float(income_data.get(k, 0) or 0)
+                    for k in ("w2_yr1", "rental_yr1", "ordinary_yr1"))
+        if total > 0:
+            return total
+
+    return 150_000.0
+
+
+def _retirement_income_estimate(person_cfg: Dict[str, Any]) -> float:
+    """Estimate non-RMD retirement income (SS + pension)."""
+    return float(person_cfg.get("estimated_retirement_income", 60_000.0))
+
+
+# ── Year-by-Year Schedule ─────────────────────────────────────────────────────
+
+def _build_schedule(
+    strategy_name: str,
+    annual_conversion: float,
+    current_age: float,
+    retirement_age: float,
+    window_years: int,
+    current_income: float,
+    filing: str,
+) -> List[Dict[str, Any]]:
+    std_ded = STD_DED_MFJ if filing == "MFJ" else STD_DED_SINGLE
+    schedule = []
+    cum_conv = cum_tax = 0.0
+
+    for yr in range(1, window_years + 1):
+        age = current_age + yr
+        inc = current_income if age <= retirement_age else current_income * 0.10
+        taxable = max(0.0, inc - std_ded)
+
+        conv, eff = compute_strategy_conversion(strategy_name, taxable, filing)
+        # Use the fixed annual_conversion (not recomputed) for consistency
+        conv_yr = annual_conversion
+        tax_yr  = round(conv_yr * eff)
+        cum_conv += conv_yr
+        cum_tax  += tax_yr
+
+        irmaa_relevant = (age >= 63)
+        irmaa_delta = 0
+        if irmaa_relevant:
+            irmaa_delta = round(
+                irmaa_annual(inc + conv_yr, filing) - irmaa_annual(inc, filing)
             )
 
-    # NIIT guard
-    if existing_roth_policy.get("avoid_niit", False):
-        if (prime_income + conversion_room) > niit_thresh:
-            capped = max(0.0, niit_thresh - prime_income - 1)
-            if capped < conversion_room:
-                conversion_room = capped
-                warnings.append(
-                    f"NIIT guard: conversion capped at ${niit_thresh:,.0f} "
-                    f"threshold to avoid 3.8% net investment income tax."
-                )
+        schedule.append({
+            "year":               yr,
+            "age":                round(age, 1),
+            "conversion":         round(conv_yr),
+            "tax_cost":           tax_yr,
+            "effective_rate":     round(eff, 3),
+            "irmaa_delta":        irmaa_delta,
+            "cumulative_converted": round(cum_conv),
+            "cumulative_tax":     round(cum_tax),
+        })
+    return schedule
 
-    optimal_annual_conversion = max(0.0, float(conversion_room))
 
-    # Cap at what TRAD IRA will actually hold (can't convert more than balance)
-    if window_years > 0:
-        max_conv_by_balance = float(trad_ira_balance) / window_years
-        optimal_annual_conversion = min(optimal_annual_conversion, max_conv_by_balance * 2)
+# ── Recommendation Logic ──────────────────────────────────────────────────────
 
-    # ── Determine which bracket we're filling ────────────────────────────
-    bracket_rate = _calc_marginal_rate(
-        prime_income + optimal_annual_conversion / 2,
-        fed_brackets,
-        fed_std_ded,
+def _recommend(
+    severity: str,
+    strategies: Dict[str, Any],
+    irmaa_sensitivity: str,
+    current_age: float,
+) -> Tuple[str, str]:
+    severity_map = {
+        "CRITICAL":   ("aggressive", "IRA timebomb severity CRITICAL. Projected RMDs force 37% bracket. IRMAA is negligible vs bracket savings. Convert aggressively at 32% now."),
+        "SEVERE":     ("aggressive", "IRA timebomb severity SEVERE. Projected RMDs likely 32-35%. Converting to 32% now captures major bracket arbitrage."),
+        "MODERATE":   ("balanced",   "IRA timebomb severity MODERATE. Standard 24% bracket-fill converts efficiently without excess tax in any single year."),
+        "MANAGEABLE": ("conservative", "IRA timebomb severity MANAGEABLE. Conservative 22% bracket-fill reduces future RMD exposure with minimal current tax impact."),
+    }
+    base, reason = severity_map.get(severity, ("balanced", "Standard bracket-fill recommended."))
+
+    # Step down if IRMAA-sensitive and near Medicare age
+    if irmaa_sensitivity == "high" and current_age >= 61:
+        strat_data = strategies.get(base, {})
+        if strat_data.get("irmaa_annual_delta", 0) > 0:
+            downgrade = {"maximum": "aggressive", "aggressive": "balanced",
+                         "balanced": "conservative", "conservative": "conservative"}
+            orig = base
+            base = downgrade.get(base, base)
+            if base != orig:
+                reason += f" Stepped down one tier due to IRMAA sensitivity."
+
+    return base, reason
+
+
+# ── Main Entry Point ──────────────────────────────────────────────────────────
+
+def optimize_roth_conversion_full(
+    person_cfg: Dict[str, Any],
+    simulation_summary: Dict[str, Any],
+    simulation_portfolio: Dict[str, Any],
+    withdrawals: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Full BETR 2-pass Roth conversion optimizer.
+
+    person_cfg:           from person.json (includes spouse, beneficiaries)
+    simulation_summary:   res["summary"] from run_accounts_new
+    simulation_portfolio: res["portfolio"] from run_accounts_new
+    withdrawals:          res["withdrawals"] from run_accounts_new
+
+    Returns comprehensive optimization result including 4×4 savings matrix.
+    """
+    # ── Person context ────────────────────────────────────────────────────────
+    birth_year   = int(person_cfg.get("birth_year") or 1980)
+    current_year = 2026
+    ca_raw = person_cfg.get("current_age")
+    if ca_raw and str(ca_raw) != "compute":
+        current_age = float(ca_raw)
+    else:
+        current_age = float(current_year - birth_year)
+
+    filing         = str(person_cfg.get("filing_status", "MFJ"))
+    retirement_age = float(person_cfg.get("retirement_age", 65))
+    target_age     = float(person_cfg.get("target_age") or person_cfg.get("assumed_death_age") or 88)
+
+    # Spouse
+    spouse_cfg = person_cfg.get("spouse") or {}
+    spouse_byr = int(spouse_cfg.get("birth_year") or 0)
+    spouse_age = float(current_year - spouse_byr) if spouse_byr else current_age - 5.0
+
+    # Optimizer config
+    opt_cfg           = person_cfg.get("roth_optimizer_config") or {}
+    include_survivor  = bool(opt_cfg.get("include_survivor_scenario", True))
+    include_heir      = bool(opt_cfg.get("include_heir_scenario", True))
+    irmaa_sensitivity = str(opt_cfg.get("irmaa_sensitivity", "low")).lower()
+    spouse_longevity  = float(opt_cfg.get("spouse_expected_longevity",
+                                          spouse_cfg.get("expected_longevity", spouse_age + 25)))
+    window_years      = int(opt_cfg.get("window_years", min(29, max(5, int(75 - current_age)))))
+
+    # Inheritors from beneficiaries.contingent
+    beneficiaries = (person_cfg.get("beneficiaries") or {}).get("contingent") or []
+    non_spouse_heirs = [b for b in beneficiaries if b.get("relationship") != "spouse"]
+    num_heirs = len(non_spouse_heirs) or 1
+
+    # Heir income — use beneficiary estimated_income fields, or defaults
+    heir_mod_income  = 0.0
+    heir_high_income = 0.0
+    heir_filing      = "MFJ"
+    for h in non_spouse_heirs:
+        heir_mod_income  = max(heir_mod_income,  float(h.get("estimated_income_moderate", 150_000)))
+        heir_high_income = max(heir_high_income, float(h.get("estimated_income_high", 300_000)))
+        heir_filing = str(h.get("filing_status", "MFJ"))
+    if heir_mod_income  == 0.0: heir_mod_income  = 150_000.0
+    if heir_high_income == 0.0: heir_high_income = 300_000.0
+
+    # ── RMD setup ─────────────────────────────────────────────────────────────
+    try:
+        from rmd_core import rmd_start_age as _rsa
+        rmd_age = _rsa(birth_year)
+    except ImportError:
+        rmd_age = 73.0 if birth_year <= 1959 else 75.0
+
+    years_to_rmd   = max(0.0, rmd_age - current_age)
+    years_to_death = max(0.0, target_age - current_age)
+
+    # ── Projected IRA balances from simulation ────────────────────────────────
+    years_arr = list(simulation_portfolio.get("years") or [])
+    proj_trad_at_rmd  = _trad_ira_at_age(simulation_portfolio, years_arr, current_age, rmd_age)
+    proj_trad_at_death = _trad_ira_at_age(simulation_portfolio, years_arr, current_age, target_age)
+
+    # Fallback: compound from known starting balance if sim data missing
+    if proj_trad_at_rmd <= 0:
+        cagr = max(0.04, float(simulation_summary.get("cagr_nominal_median") or 7.0) / 100.0)
+        starting = simulation_portfolio.get("starting") or {}
+        trad_start = sum(float(v or 0) for k, v in starting.items()
+                         if "TRAD" in k.upper())
+        if trad_start <= 0:
+            trad_start = 4_800_000.0
+        proj_trad_at_rmd   = trad_start * ((1 + cagr) ** years_to_rmd)
+        proj_trad_at_death = trad_start * ((1 + cagr) ** years_to_death)
+
+    # ── Timebomb classification ───────────────────────────────────────────────
+    severity, projected_rmd_y1 = classify_ira_timebomb(proj_trad_at_rmd, rmd_age)
+
+    # ── Current income / bracket context ─────────────────────────────────────
+    current_income   = _current_income_estimate(person_cfg)
+    retirement_income = _retirement_income_estimate(person_cfg)
+    std_ded          = STD_DED_MFJ if filing == "MFJ" else STD_DED_SINGLE
+    current_taxable  = max(0.0, current_income - std_ded)
+    current_marg     = marginal_rate(current_taxable, filing)
+
+    # After-tax return for BETR discounting
+    atr = max(0.03, float(simulation_summary.get("cagr_real_median") or 5.0) / 100.0)
+
+    # ── Future rates (BETR Pass 2) ────────────────────────────────────────────
+    fr_self_mfj  = future_rmd_rate(projected_rmd_y1, retirement_income, "MFJ")
+    fr_survivor  = future_rmd_rate(projected_rmd_y1, retirement_income * 0.6, "single") \
+                   if include_survivor else fr_self_mfj
+    heir_share   = proj_trad_at_death / num_heirs
+    fr_heir_mod  = heir_forced_liquidation_rate(heir_share, heir_mod_income,  heir_filing) \
+                   if include_heir else 0.0
+    fr_heir_high = heir_forced_liquidation_rate(heir_share, heir_high_income, heir_filing) \
+                   if include_heir else 0.0
+
+    betr_self    = compute_betr(fr_self_mfj, atr, years_to_rmd)
+    betr_surv    = compute_betr(fr_survivor,  atr, years_to_rmd)
+    betr_heir_m  = compute_betr(fr_heir_mod,  atr, years_to_death)
+    betr_heir_h  = compute_betr(fr_heir_high, atr, years_to_death)
+
+    # ── Compute all 4 strategies ──────────────────────────────────────────────
+    strategies_out = {}
+    for name in ("conservative", "balanced", "aggressive", "maximum"):
+        conv_amt, eff_rate = compute_strategy_conversion(name, current_taxable, filing)
+        tax_cost_y1 = round(conv_amt * eff_rate)
+
+        # IRMAA
+        irmaa_relevant = (current_age >= 63) or (current_age + 2 >= 63)
+        magi_with_conv = current_income + conv_amt
+        delta_irmaa    = round(irmaa_annual(magi_with_conv, filing) -
+                               irmaa_annual(current_income, filing)) if irmaa_relevant else 0
+        _, irmaa_tier  = irmaa_cliff_info(current_income, filing)
+
+        # Savings per scenario
+        def _sav(fr, yrs):
+            return round(pv_tax_savings(conv_amt, eff_rate, fr, window_years, atr))
+
+        scenarios = {
+            "self_mfj": {
+                "future_rate":          round(fr_self_mfj, 4),
+                "betr":                 round(betr_self, 4),
+                "convert_makes_sense":  current_marg <= betr_self,
+                "lifetime_savings":     _sav(fr_self_mfj, years_to_rmd),
+                "description":          "Self — both spouses alive (MFJ)",
+            },
+            "self_survivor": {
+                "future_rate":          round(fr_survivor, 4),
+                "betr":                 round(betr_surv, 4),
+                "convert_makes_sense":  current_marg <= betr_surv,
+                "lifetime_savings":     _sav(fr_survivor, years_to_rmd),
+                "description":          f"Survivor — single filer from age {int(spouse_longevity)}",
+            },
+            "heir_moderate": {
+                "future_rate":          round(fr_heir_mod, 4),
+                "betr":                 round(betr_heir_m, 4),
+                "convert_makes_sense":  current_marg <= betr_heir_m,
+                "lifetime_savings":     _sav(fr_heir_mod, years_to_death),
+                "description":          f"Heir (moderate ~${int(heir_mod_income/1000)}K/yr) — 10yr liquidation",
+            },
+            "heir_high": {
+                "future_rate":          round(fr_heir_high, 4),
+                "betr":                 round(betr_heir_h, 4),
+                "convert_makes_sense":  current_marg <= betr_heir_h,
+                "lifetime_savings":     _sav(fr_heir_high, years_to_death),
+                "description":          f"Heir (high earner ~${int(heir_high_income/1000)}K/yr) — 10yr liquidation",
+            },
+        }
+
+        irmaa_notes = []
+        if irmaa_relevant and delta_irmaa > 0:
+            irmaa_notes.append(
+                f"Pushes MAGI to ${int(magi_with_conv):,} — IRMAA tier {irmaa_tier+1} "
+                f"(+${delta_irmaa:,}/yr). "
+                + ("Minor vs bracket savings." if irmaa_sensitivity == "low"
+                   else "Consider staying below cliff.")
+            )
+        elif not irmaa_relevant:
+            irmaa_notes.append(
+                f"Age {int(current_age)}: IRMAA not yet active (relevant from 63). "
+                f"{window_years}-yr window mostly pre-IRMAA."
+            )
+
+        strategies_out[name] = {
+            "annual_conversion":    round(conv_amt),
+            "bracket_filled":       f"{int(STRATEGY_TARGETS[name]*100)}%",
+            "effective_rate":       round(eff_rate, 4),
+            "tax_cost_year1":       tax_cost_y1,
+            "irmaa_annual_delta":   delta_irmaa,
+            "irmaa_notes":          irmaa_notes,
+            "scenarios":            scenarios,
+            "betr_primary":         round(betr_self, 4),
+        }
+
+    # ── Recommendation ────────────────────────────────────────────────────────
+    rec_name, rec_reason = _recommend(severity, strategies_out, irmaa_sensitivity, current_age)
+
+    # ── Year-by-year schedule for recommended strategy ────────────────────────
+    rec_conv = strategies_out[rec_name]["annual_conversion"]
+    schedule = _build_schedule(
+        rec_name, rec_conv, current_age, retirement_age,
+        window_years, current_income, filing
     )
-    bracket_label = f"{int(round(bracket_rate * 100))}%"
 
-    # ── Build year-by-year schedule ───────────────────────────────────────
-    schedule: List[Dict[str, Any]] = []
-    running_trad = float(trad_ira_balance)
-    running_roth = 0.0
-    lifetime_tax_do_nothing = 0.0
-    lifetime_tax_optimized  = 0.0
+    # ── Savings matrix (flat, for UI table) ──────────────────────────────────
+    savings_matrix = {
+        strat: {sc: d["lifetime_savings"] for sc, d in sdata["scenarios"].items()}
+        for strat, sdata in strategies_out.items()
+    }
 
-    for yr in range(years_total):
-        age = int(current_age) + yr
-        is_prime_window = prime_start <= age <= prime_end
-        year_income = 0.0 if age >= retirement_age else float(current_income)
-
-        # RMD for this year (if applicable)
-        rmd_age = int(rmd_start_age)
-        rmd_factor_yr = float(_rmd_factors.get(age, 0.0))
-        if age >= rmd_age and rmd_factor_yr > 0:
-            rmd_amount = running_trad / rmd_factor_yr
-        else:
-            rmd_amount = 0.0
-
-        # Conversion for this year
-        if is_prime_window and optimal_annual_conversion > 0:
-            conv_amount = min(optimal_annual_conversion, max(0.0, running_trad))
-        else:
-            conv_amount = 0.0
-
-        # Taxes on conversion + ordinary income (federal + state)
-        total_ordinary = year_income + rmd_amount + conv_amount
-        fed_tax  = _calc_tax_on_amount(conv_amount, year_income + rmd_amount, fed_brackets, fed_std_ded)
-        if state_type != "none" and state_bracks:
-            st_tax = _calc_tax_on_amount(conv_amount, year_income + rmd_amount, state_bracks, state_std)
-        else:
-            st_tax = 0.0
-        conv_tax = fed_tax + st_tax
-
-        # Do-nothing tax (no conversion, just income + RMD)
-        fed_tax_dn = _tax_progressive(max(0.0, year_income + rmd_amount - fed_std_ded), fed_brackets)
-        st_tax_dn  = (_tax_progressive(max(0.0, year_income + rmd_amount - state_std), state_bracks)
-                      if state_type != "none" else 0.0)
-        tax_do_nothing = fed_tax_dn + st_tax_dn
-
-        # Optimized total tax (income + RMD + conversion)
-        fed_tax_opt = _tax_progressive(max(0.0, total_ordinary - fed_std_ded), fed_brackets)
-        st_tax_opt  = (_tax_progressive(max(0.0, total_ordinary - state_std), state_bracks)
-                       if state_type != "none" else 0.0)
-        tax_optimized = fed_tax_opt + st_tax_opt
-
-        lifetime_tax_do_nothing += tax_do_nothing
-        lifetime_tax_optimized  += tax_optimized
-
-        # Update balances
-        running_trad = max(0.0, running_trad - conv_amount - rmd_amount)
-        running_trad *= (1.0 + float(annual_growth_rate))
-        running_roth += conv_amount
-        running_roth *= (1.0 + float(annual_growth_rate))
-
-        if age <= prime_end + 5 or (age >= rmd_age and age <= rmd_age + 5):
-            schedule.append({
-                "year":           yr + 1,
-                "age":            age,
-                "in_prime_window": bool(is_prime_window),
-                "trad_ira_bal":   round(running_trad, 0),
-                "roth_bal":       round(running_roth, 0),
-                "rmd_amount":     round(rmd_amount, 0),
-                "conversion":     round(conv_amount, 0),
-                "conv_tax":       round(conv_tax, 0),
-                "total_ordinary": round(total_ordinary, 0),
-                "effective_rate": round(
-                    (conv_tax / conv_amount * 100) if conv_amount > 1 else 0.0,
-                    1
-                ),
-            })
-
-    # ── Compute optimized TRAD balance at RMD start ───────────────────────
-    balance_at_rmd_optimized = float(trad_ira_balance)
-    for yr in range(years_to_rmd):
-        age = int(current_age) + yr
-        if prime_start <= age <= prime_end:
-            balance_at_rmd_optimized = max(0.0,
-                balance_at_rmd_optimized - optimal_annual_conversion)
-        balance_at_rmd_optimized *= (1.0 + float(annual_growth_rate))
-
-    optimized_rmd_yr1 = balance_at_rmd_optimized / rmd_factor
-
-    rmd_reduction = max(0.0, do_nothing_rmd_yr1 - optimized_rmd_yr1)
-
-    # Lifetime tax savings (rough estimate in today's dollars)
-    # Compares total taxes paid over planning horizon: do-nothing vs optimized
-    # Simplified: does not discount future dollars — directionally correct
-    lifetime_savings = max(0.0, lifetime_tax_do_nothing - lifetime_tax_optimized)
-
-    # ── Assemble warnings ─────────────────────────────────────────────────
-    if window_years == 0:
+    # ── Global warnings ───────────────────────────────────────────────────────
+    warnings = []
+    if severity in ("CRITICAL", "SEVERE"):
         warnings.append(
-            "No prime conversion window available — RMD start age is at or before "
-            "retirement age. Consider converting now or within the next few years."
+            f"IRA Timebomb {severity}: projected RMD yr1 ~${int(projected_rmd_y1):,} "
+            f"forces 37% bracket regardless of other choices. Convert aggressively now."
         )
-    if do_nothing_rmd_yr1 > 200_000:
+    if include_heir and fr_heir_high >= 0.37:
+        heir_sav = strategies_out["aggressive"]["scenarios"]["heir_high"]["lifetime_savings"]
         warnings.append(
-            f"RMD timebomb: without conversions, year-1 RMD at age {rmd_start_age} "
-            f"is estimated at ${do_nothing_rmd_yr1:,.0f}, which will likely push "
-            f"your marginal federal rate to 32%+."
+            f"High-earning heir faces {int(fr_heir_high*100)}% rate on 10yr forced liquidation. "
+            f"Aggressive strategy saves heirs ~${heir_sav:,}."
+        )
+    if not non_spouse_heirs:
+        warnings.append(
+            "No contingent beneficiaries defined. Add beneficiaries.contingent to person.json "
+            "for heir scenario analysis."
         )
 
     return {
-        "optimal_annual_conversion":      round(optimal_annual_conversion, 0),
-        "bracket_to_fill":                bracket_label,
-        "estimated_rmd_reduction":        round(rmd_reduction, 0),
-        "estimated_lifetime_tax_savings": round(lifetime_savings, 0),
-        "year_by_year_schedule":          schedule,
-        "warnings":                       warnings,
-        "do_nothing_rmd_at_start":        round(do_nothing_rmd_yr1, 0),
-        "optimized_rmd_at_start":         round(optimized_rmd_yr1, 0),
-        "window_years_available":         window_years,
-        "prime_window":                   f"age {prime_start}–{prime_end}" if window_years > 0 else "none",
-        "trad_ira_at_rmd_do_nothing":     round(balance_at_rmd_no_conv, 0),
-        "trad_ira_at_rmd_optimized":      round(balance_at_rmd_optimized, 0),
+        # Classification
+        "timebomb_severity":           severity,
+        "projected_trad_ira_at_rmd":   round(proj_trad_at_rmd),
+        "projected_rmd_year1":         round(projected_rmd_y1),
+        "rmd_start_age":               rmd_age,
+        "years_to_rmd":                round(years_to_rmd, 1),
+        "projected_ira_at_death":      round(proj_trad_at_death),
+        "num_heirs":                   num_heirs,
+
+        # Current bracket context
+        "current_income":              round(current_income),
+        "current_taxable_income":      round(current_taxable),
+        "current_marginal_rate":       round(current_marg, 4),
+        "after_tax_return_used":       round(atr, 4),
+
+        # Future rates (Pass 2)
+        "future_rate_self_mfj":        round(fr_self_mfj, 4),
+        "future_rate_survivor":        round(fr_survivor, 4),
+        "future_rate_heir_moderate":   round(fr_heir_mod, 4),
+        "future_rate_heir_high":       round(fr_heir_high, 4),
+        "betr_self_mfj":               round(betr_self, 4),
+        "betr_survivor":               round(betr_surv, 4),
+        "betr_heir_moderate":          round(betr_heir_m, 4),
+        "betr_heir_high":              round(betr_heir_h, 4),
+
+        # Strategies + matrix
+        "strategies":                  strategies_out,
+        "savings_matrix":              savings_matrix,
+
+        # Recommendation
+        "recommended_strategy":        rec_name,
+        "recommended_reason":          rec_reason,
+
+        # Schedule
+        "year_by_year_schedule":       schedule,
+        "conversion_window_years":     window_years,
+
+        # Warnings + metadata
+        "warnings":                    warnings,
+        "filing_used":                 filing,
+        "include_survivor":            include_survivor,
+        "include_heir":                include_heir,
     }

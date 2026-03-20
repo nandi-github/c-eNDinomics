@@ -109,35 +109,164 @@ def load_tax_unified(path: str, state: str, filing: str) -> Dict[str, Any]:
 # -----------------------------
 # Withdrawals schedule
 # -----------------------------
-def load_sched(path: str) -> Tuple[np.ndarray, np.ndarray]:
-    """Load withdrawal schedule.
+
+def _validate_withdrawal_schedule(rows: list, current_age: float, global_floor_k: float) -> None:
+    """
+    Validate withdrawal schedule rows. Raises ValueError on any of:
+    - Overlapping age ranges
+    - age_end <= age_start (reversed or zero-length range)
+    - base_k > amount_k (floor exceeds target)
+    - base_k < global floor_k (row floor below global floor)
+    Logs a warning for ages entirely before current_age (silently skipped).
+    """
+    import logging as _log
+    _logger = _log.getLogger(__name__)
+
+    # Collect age-based ranges for overlap detection
+    age_ranges: list = []  # [(age_start, age_end, row_index)]
+
+    for i, row in enumerate(rows):
+        if "ages" not in row:
+            continue  # year-based rows not validated for age overlaps
+
+        spec = str(row["ages"]).strip()
+        if "-" not in spec:
+            raise ValueError(
+                f"withdrawal_schedule row {i+1}: 'ages' must be a range like '47-65', got '{spec}'"
+            )
+        a, b = spec.split("-", 1)
+        try:
+            age_start, age_end = int(a), int(b)
+        except ValueError:
+            raise ValueError(
+                f"withdrawal_schedule row {i+1}: non-integer ages in '{spec}'"
+            )
+
+        # Rule: age_end must be > age_start
+        if age_end <= age_start:
+            raise ValueError(
+                f"withdrawal_schedule row {i+1}: age_end ({age_end}) must be > age_start ({age_start})"
+            )
+
+        # Warn if entirely in the past
+        if age_end <= current_age:
+            _logger.warning(
+                "withdrawal_schedule row %d: ages '%s' is entirely before current_age=%.1f — skipped",
+                i+1, spec, current_age
+            )
+
+        # Rule: base_k <= amount_k
+        amt_k = _safe_num(row.get("amount_k", 0.0), 0.0)
+        bk    = _safe_num(row.get("base_k", global_floor_k), global_floor_k)
+        if bk > amt_k:
+            raise ValueError(
+                f"withdrawal_schedule row {i+1} ages '{spec}': "
+                f"base_k ({bk:.0f}K) > amount_k ({amt_k:.0f}K) — floor cannot exceed target"
+            )
+
+        # Rule: base_k >= global floor_k
+        if bk < global_floor_k and row.get("base_k") is not None:
+            _logger.warning(
+                "withdrawal_schedule row %d ages '%s': base_k (%.0fK) < global floor_k (%.0fK)",
+                i+1, spec, bk, global_floor_k
+            )
+
+        age_ranges.append((age_start, age_end, i+1))
+
+    # Overlap detection: check every pair
+    for i in range(len(age_ranges)):
+        for j in range(i+1, len(age_ranges)):
+            s1, e1, r1 = age_ranges[i]
+            s2, e2, r2 = age_ranges[j]
+            # Closed intervals overlap if s1 <= e2 AND s2 <= e1
+            if s1 <= e2 and s2 <= e1:
+                raise ValueError(
+                    f"withdrawal_schedule rows {r1} and {r2} have overlapping age ranges: "
+                    f"'{s1}-{e1}' and '{s2}-{e2}'. Use exclusive non-overlapping ranges, "
+                    f"e.g. '47-64' and '65-74'."
+                )
+
+
+def load_sched(
+    path: str,
+    current_age: float = 0.0,
+    max_years: int = YEARS,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Load withdrawal schedule — age-based or year-based format.
+
+    Age-based format (recommended — self-documenting):
+        Use exclusive, non-overlapping age ranges:
+        { "ages": "47-64", "amount_k": 150, "base_k": 100 }
+        { "ages": "65-74", "amount_k": 200, "base_k": 140 }
+        { "ages": "75-95", "amount_k": 250, "base_k": 180 }
+
+        Rules enforced:
+        - Ranges must not overlap (ValueError raised)
+        - age_end must be > age_start (ValueError raised)
+        - base_k must be <= amount_k (ValueError raised)
+        - Ages before current_age are silently skipped (warning logged)
+
+        Conversion: year = age - current_age (year 1 = current_age + 1)
+
+    Year-based format (legacy — still supported):
+        { "years": "1-18", "amount_k": 150, "base_k": 100 }
+        Year numbers are simulation-relative (year 1 = first simulation year).
+
+    Parameters
+    ----------
+    path : str
+        Path to the withdrawal_schedule.json file.
+    current_age : float
+        Owner's current age. Required for age-based format conversion.
+        Pass person_cfg["current_age"] from api.py.
+    max_years : int
+        Simulation horizon in years (target_age - current_age).
+        Arrays are sized to this length. Defaults to YEARS (30) for
+        backward compatibility.
 
     Returns
     -------
-    desired : np.ndarray (YEARS,)
-        Desired (target) withdrawal amount per year in dollars.
-    base : np.ndarray (YEARS,)
+    desired : np.ndarray (max_years,)
+        Target withdrawal amount per year in dollars.
+    base : np.ndarray (max_years,)
         Minimum acceptable (floor) withdrawal per year in dollars.
-        Per-row ``base_k`` takes priority; falls back to the global
-        ``floor_k`` field, then zero.
     """
     data = _load_json(path)
-    desired = np.zeros(YEARS, dtype=float)
-    base    = np.zeros(YEARS, dtype=float)
+    desired = np.zeros(max_years, dtype=float)
+    base    = np.zeros(max_years, dtype=float)
 
-    # Global floor fallback (used when a row has no base_k)
     global_floor_k = _safe_num(data.get("floor_k", 0.0), 0.0)
-
     rows = data.get("schedule", []) or []
+
+    # Validate age-based rows before processing
+    if current_age > 0:
+        _validate_withdrawal_schedule(rows, current_age, global_floor_k)
+
     for row in rows:
-        yrs   = _years_range(str(row.get("years", "*")))
-        amt_k = _safe_num(row.get("amount_k", 0.0), 0.0)
-        # Per-row base_k overrides global floor_k; if absent use global floor
+        amt_k      = _safe_num(row.get("amount_k", 0.0), 0.0)
         row_base_k = _safe_num(row.get("base_k", global_floor_k), global_floor_k)
 
+        if "ages" in row:
+            # Age-based format
+            spec = str(row["ages"]).strip()
+            if "-" in spec:
+                a, b = spec.split("-", 1)
+                try:
+                    age_start, age_end = int(a), int(b)
+                except ValueError:
+                    continue
+                yr_start = max(1, age_start - int(current_age))
+                yr_end   = min(max_years, age_end - int(current_age))
+                yrs = list(range(yr_start, yr_end + 1)) if yr_end >= yr_start else []
+            else:
+                yrs = []
+        else:
+            # Year-based format (legacy)
+            yrs = _years_range(str(row.get("years", "*")), max_years)
+
         for y in yrs:
-            if 1 <= y <= YEARS:
-                desired[y - 1] = amt_k    * 1000.0
+            if 1 <= y <= max_years:
+                desired[y - 1] = amt_k      * 1000.0
                 base[y - 1]    = row_base_k * 1000.0
 
     return desired, base
