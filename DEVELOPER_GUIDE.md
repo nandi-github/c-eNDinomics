@@ -17,9 +17,10 @@ Working dir: `/Volumes/My Shared Files/workspace/research/c-eNDinomics/`
 7. [Profile Versioning](#7-profile-versioning)
 8. [Git Workflow](#8-git-workflow)
 9. [Configuration File Formats](#9-configuration-file-formats)
-10. [Simulation Modes](#10-simulation-modes)
-11. [Model / Reference Data Integrity](#11-model--reference-data-integrity)
-12. [Troubleshooting](#12-troubleshooting)
+10. [Default Profile — Canonical Reference](#10-default-profile--canonical-reference)
+11. [Simulation Modes](#11-simulation-modes)
+12. [Model / Reference Data Integrity](#12-model--reference-data-integrity)
+13. [Troubleshooting](#13-troubleshooting)
 
 ---
 
@@ -381,7 +382,47 @@ git push origin HEAD:main           # explicit push
 
 ---
 
-## 10. Simulation Modes
+## 10. Default Profile — Canonical Reference
+
+The `default` profile is the reference template for all new profiles. It must stay in sync with any schema changes made to the Test profile.
+
+**Always update `default` when:**
+
+| Change | Example |
+|--------|---------|
+| New field added to any config JSON | Added `roth_optimizer_config` to person.json |
+| Field removed | Removed deprecated field |
+| Format change | `"years"` → `"ages"` in income.json or withdrawal_schedule.json |
+| README/field reference updated | New field documented in readme block |
+| New config file added | New `cape_config.json` template |
+
+**Do NOT update `default` for:**
+- Profile-specific values (Test profile's $9.92M balances, birth_year 1980)
+- Field reordering (cosmetic)
+- Test-specific scenario configurations
+
+**Sync check after every session:**
+```bash
+# Compare top-level keys between Test and default person.json
+diff <(python3 -c "import json; d=json.load(open('src/profiles/Test/person.json')); print('\n'.join(sorted(k for k in d if k != 'readme')))") \
+     <(python3 -c "import json; d=json.load(open('src/profiles/default/person.json')); print('\n'.join(sorted(k for k in d if k != 'readme')))")
+# No output = schemas match
+```
+
+**Files that must stay in sync (schema, not values):**
+```
+src/profiles/Test/person.json              ↔  src/profiles/default/person.json
+src/profiles/Test/withdrawal_schedule.json ↔  src/profiles/default/withdrawal_schedule.json
+src/profiles/Test/income.json              ↔  src/profiles/default/income.json
+src/profiles/Test/allocation_yearly.json   ↔  src/profiles/default/allocation_yearly.json
+src/profiles/Test/inflation_yearly.json    ↔  src/profiles/default/inflation_yearly.json
+src/profiles/Test/shocks_yearly.json       ↔  src/profiles/default/shocks_yearly.json
+src/profiles/Test/economic.json            ↔  src/profiles/default/economic.json
+```
+
+---
+
+## 11. Simulation Modes
 
 Set in `person.json → simulation_mode` or on the Simulation tab.
 
@@ -408,7 +449,7 @@ Switch to `retirement` mode if consistent full withdrawal amounts are the priori
 
 ---
 
-## 11. Model / Reference Data Integrity
+## 12. Model / Reference Data Integrity
 
 ### Current approach (manual)
 Model files (`assets.json`, `rmd.json`, `cape_config.json`, `economicglobal.json`) are updated via `promote_model.py` and committed to git. Changes are tracked in `promotion_log.json`.
@@ -431,7 +472,7 @@ python3 -B test_flags.py --checkmodel
 
 ---
 
-## 12. Troubleshooting
+## 13. Troubleshooting
 
 ### Tests fail but you just deployed files
 ```bash

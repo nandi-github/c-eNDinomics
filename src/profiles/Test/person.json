@@ -60,6 +60,14 @@
   "state": "California",
   "rmd_table": "uniform_lifetime",
   "target_age": 95,
+  "simulation_mode": "automatic",
+  "retirement_age": 65,
+  "roth_optimizer_config": {
+    "include_survivor_scenario": true,
+    "include_heir_scenario": true,
+    "irmaa_sensitivity": "low",
+    "window_years": 29
+  },
   "readme": {
     "current_age": "Simulation start age. Year 1 = this age + 1. All age-gated logic (RMD start, Roth conversion window, tira_age_gate) is relative to this. Set to \"compute\" to derive automatically from birth_year (and optionally birth_month + birth_day). Example: \"current_age\": \"compute\"",
     "birth_year": "Used to determine SECURE 2.0 RMD start age: born 1950 or earlier = age 72, born 1951-1959 = age 73, born 1960 or later = age 75. Does not drive simulation year counting.",
@@ -98,13 +106,5 @@
       "irmaa_sensitivity": "low = IRMAA flagged but does not tip recommendation (appropriate when IRA timebomb savings dwarf IRMAA cost). high = IRMAA cliff treated as near-hard constraint (appropriate for moderate IRA).",
       "window_years": "Number of years in the conversion window. Defaults to min(29, 75 - current_age). Conversions run for this many years starting from current_age."
     }
-  },
-  "simulation_mode": "automatic",
-  "retirement_age": 65,
-  "roth_optimizer_config": {
-    "include_survivor_scenario": true,
-    "include_heir_scenario": true,
-    "irmaa_sensitivity": "low",
-    "window_years": 29
   }
 }

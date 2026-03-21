@@ -174,7 +174,7 @@ def _validate_withdrawal_schedule(rows: list, current_age: float, global_floor_k
 
         # Warn if entirely in the past
         if age_end <= current_age:
-            _logger.warning(
+            _logger.debug(
                 "withdrawal_schedule row %d: ages '%s' is entirely before current_age=%.1f — skipped",
                 i+1, spec, current_age
             )
