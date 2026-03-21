@@ -50,6 +50,30 @@ def _years_range(spec: str, max_years: int = YEARS) -> List[int]:
         return []
     return [y]
 
+def _ages_range(spec: str, current_age: float, max_years: int = YEARS) -> List[int]:
+    """Convert age range spec to simulation year indices (closed intervals, later row wins)."""
+    spec = str(spec).strip()
+    if "-" in spec:
+        a, b = spec.split("-", 1)
+        try:
+            age_start, age_end = int(a), int(b)
+        except ValueError:
+            return []
+        yr_start = max(1, age_start - int(current_age))
+        yr_end   = min(max_years, age_end - int(current_age))
+        if yr_end < yr_start:
+            return []
+        return list(range(yr_start, yr_end + 1))
+    try:
+        age = int(spec)
+        yr  = age - int(current_age)
+        if 1 <= yr <= max_years:
+            return [yr]
+    except Exception:
+        pass
+    return []
+
+
 def _normalize_weights_from_pct_map(pct_map: Dict[str, float], add_other_if_under_100: bool = True) -> Dict[str, float]:
     total_pct = sum(max(0.0, _safe_num(v, 0.0)) for v in pct_map.values())
     p = dict(pct_map)
@@ -663,25 +687,53 @@ def load_person(path: str) -> Dict[str, Any]:
 # -----------------------------
 # Income
 # -----------------------------
-def load_income(path: str) -> Dict[str, Any]:
+def load_income(
+    path: str,
+    current_age: float = 0.0,
+    max_years: int = YEARS,
+) -> Dict[str, Any]:
+    """Load income schedule — supports both age-based and year-based formats.
+
+    Age-based format (recommended — self-documenting):
+        { "ages": "47-64", "amount_nom": 350000 }
+        Converted to years using current_age: year = age - current_age
+
+    Year-based format (legacy — still supported):
+        { "years": "1-18", "amount_nom": 350000 }
+
+    Parameters
+    ----------
+    path : str
+        Path to income.json
+    current_age : float
+        Owner's current age. Required for age-based format.
+    max_years : int
+        Simulation horizon. Arrays sized to this length.
+    """
     data = _load_json(path)
+
     def _expand_series(rows_key: str) -> np.ndarray:
-        out = np.zeros(YEARS, dtype=float)
+        out = np.zeros(max_years, dtype=float)
         for r in (data.get(rows_key, []) or []):
-            yrs = _years_range(str(r.get("years", "*")))
             amt = _safe_num(r.get("amount_nom", 0.0), 0.0)
+            if "ages" in r:
+                # Age-based format
+                yrs = _ages_range(str(r["ages"]), current_age, max_years)
+            else:
+                # Year-based format (legacy)
+                yrs = _years_range(str(r.get("years", "*")), max_years)
             for y in yrs:
-                if 1 <= y <= YEARS:
+                if 1 <= y <= max_years:
                     out[y - 1] = amt
         return out
 
     return {
-        "w2": _expand_series("w2"),
-        "rental": _expand_series("rental"),
-        "interest": _expand_series("interest"),
+        "w2":             _expand_series("w2"),
+        "rental":         _expand_series("rental"),
+        "interest":       _expand_series("interest"),
         "ordinary_other": _expand_series("ordinary_other"),
-        "qualified_div": _expand_series("qualified_div"),
-        "cap_gains": _expand_series("cap_gains"),
+        "qualified_div":  _expand_series("qualified_div"),
+        "cap_gains":      _expand_series("cap_gains"),
     }
 
 # -----------------------------

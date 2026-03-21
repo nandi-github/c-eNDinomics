@@ -912,7 +912,7 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
     _n_years     = max(10, min(60, _target_age - _current_age))
     print(f"[api] sim years: {_n_years} (age {_current_age} → {_target_age})")
 
-    income_cfg = load_income(income_path)
+    income_cfg = load_income(income_path, current_age=float(_current_age), max_years=int(_n_years))
     econ_policy = load_economic_policy(economic_path_effective, global_path=economic_global_path)
 
     # 7) Run simulation
@@ -1024,7 +1024,9 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
         print("[DEBUG api] Using modular run_accounts_new for Test profile")
         rmds_enabled = not ignore_rmds_flag
 
-        income_cfg = load_income(f"profiles/{profile}/income.json")
+        income_cfg = load_income(f"profiles/{profile}/income.json",
+                         current_age=float((person_cfg or {}).get("current_age", 55)),
+                         max_years=max(10, min(60, int((person_cfg or {}).get("target_age", 95)) - int((person_cfg or {}).get("current_age", 55)))))
         (
             w2_cur,
             rental_cur,

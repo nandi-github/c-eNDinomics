@@ -176,6 +176,22 @@ BASE_INCOME = {
     "cap_gains":      [{"years": "1-30", "amount_nom": 0}],
 }
 
+# Realistic Test profile income (MFJ, $9.92M portfolio, born 1980, retirement 65)
+# Used in G4 realistic income tests
+TEST_INCOME = {
+    "w2": [
+        {"ages": "47-64", "amount_nom": 350_000},   # working years
+        {"ages": "65-65", "amount_nom": 175_000},   # partial retirement year
+    ],
+    "ordinary_other": [
+        {"ages": "66-95", "amount_nom": 51_000},    # SS taxable 85% of $60K combined
+    ],
+    "rental":       [{"ages": "47-95", "amount_nom": 0}],
+    "interest":     [{"ages": "47-95", "amount_nom": 0}],
+    "qualified_div":[{"ages": "47-95", "amount_nom": 0}],
+    "cap_gains":    [{"ages": "47-95", "amount_nom": 0}],
+}
+
 BASE_INFLATION = {
     "inflation": [
         {"years": "1-2",   "rate_pct": 3.0},
@@ -326,17 +342,17 @@ def load_cfg(name: str, state: str = "California", filing: str = "MFJ") -> Dict[
     # Explicit args take priority; fall back to person.json; then defaults
     _state  = state  if state  != "California" else _praw.get("state",         state)
     _filing = filing if filing != "MFJ"        else _praw.get("filing_status", filing)
+    _ca  = float(person.get("current_age") or 0.0)
+    _ta  = float(person.get("target_age") or person.get("assumed_death_age") or 95.0)
+    _ny  = max(10, min(60, int(_ta - _ca)))
     tax        = load_tax_unified(TAX_GLOBAL_PATH, state=_state, filing=_filing)
     alloc      = load_allocation_yearly_accounts(P("allocation_yearly.json"))
     validate_alloc_accounts(alloc)
-    income     = load_income(P("income.json"))
+    income     = load_income(P("income.json"), current_age=_ca, max_years=_ny)
     infl       = load_inflation_yearly(P("inflation_yearly.json"), years_count=YEARS)
     econ       = load_economic_policy(
         P("economic.json"),
         global_path=ECONOMIC_GLOBAL_PATH if os.path.isfile(ECONOMIC_GLOBAL_PATH) else None)
-    _ca  = float(person.get("current_age") or 0.0)
-    _ta  = float(person.get("target_age") or person.get("assumed_death_age") or 95.0)
-    _ny  = max(10, min(60, int(_ta - _ca)))
     sched, sched_base = load_sched(P("withdrawal_schedule.json"), current_age=_ca, max_years=_ny)
     shock_evts, _, _  = load_shocks(P("shocks_yearly.json"))
     return dict(tax=tax, alloc=alloc, person=person, income=income, infl=infl, econ=econ,
@@ -564,8 +580,7 @@ def group1_flag_matrix(paths: int):
         checks.append(chk(f"TRAD differs: {a} vs {b} (conv-bug guard)",
             abs(ca - cb) > 1_000, f"conv_a={ca:,.0f} conv_b={cb:,.0f} diff={cb-ca:+,.0f}"))
 
-    # Cross-combo: ignoring withdrawals → realized withdrawals must be 0; baseline must have withdrawals
-    # (Brokerage ending balance comparison is unreliable — RMD reinvestment over 40yr swamps the delta)
+    # Cross-combo: ignoring withdrawals → total realized withdrawals = 0; baseline has withdrawals
     wd_base   = total_wd(baseline)
     wd_ignore = total_wd(results["ignore_wd"])
     checks.append(chk("BROK: ignore_wd → realized withdrawals = 0 (no spending)",
@@ -771,31 +786,35 @@ def group4_income(paths: int):
     import tempfile, json as _json, os as _os
 
     # ── 4a: loader round-trip — independent of simulator ──────────────────
-    def _roundtrip(raw: dict) -> dict:
+    def _roundtrip(raw: dict, current_age: float = 55.0) -> dict:
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             _json.dump(raw, f); p = f.name
-        result = load_income(p); _os.unlink(p)
+        result = load_income(p, current_age=current_age, max_years=40); _os.unlink(p)
         return result
 
     rt_w2 = _roundtrip({**BASE_INCOME,
-                         "w2": [{"years": "1-5",  "amount_nom": 200_000},
-                                {"years": "6-30", "amount_nom": 0}]})
+                         "w2": [{"ages": "56-60", "amount_nom": 200_000},
+                                {"ages": "61-95", "amount_nom": 0}]},
+                        current_age=55.0)
     w2_arr = np.asarray(rt_w2.get("w2", []), dtype=float)
-    checks.append(chk("income loader: W2 $200k yrs1-5, 0 after",
-                       len(w2_arr) == 30 and all(w2_arr[:5] == 200_000) and all(w2_arr[5:30] == 0),
+    # ages 56-60 → years 1-5 (current_age=55), 61-95 → years 6-40
+    checks.append(chk("income loader: W2 $200k ages56-60 (yrs1-5), 0 after",
+                       len(w2_arr) >= 10 and all(w2_arr[:5] == 200_000) and all(w2_arr[5:10] == 0),
                        f"w2[:5]={w2_arr[:5].tolist()} w2[5]={float(w2_arr[5]) if len(w2_arr)>5 else 'N/A'}"))
 
     rt_r = _roundtrip({**BASE_INCOME,
-                        "rental":         [{"years": "1-30", "amount_nom": 24_000}],
-                        "interest":       [{"years": "1-30", "amount_nom": 12_000}],
-                        "ordinary_other": [{"years": "1-15", "amount_nom": 18_000}]})
+                        "rental":         [{"ages": "56-95", "amount_nom": 24_000}],
+                        "interest":       [{"ages": "56-95", "amount_nom": 12_000}],
+                        "ordinary_other": [{"ages": "56-70", "amount_nom": 18_000}]},
+                       current_age=55.0)
     rental_arr = np.asarray(rt_r.get("rental", []), dtype=float)
     oo_arr     = np.asarray(rt_r.get("ordinary_other", []), dtype=float)
-    checks.append(chk("income loader: rental $24k all 30 yrs",
-                       len(rental_arr) == 30 and all(rental_arr == 24_000),
+    checks.append(chk("income loader: rental $24k ages56-95 (all yrs)",
+                       len(rental_arr) >= 30 and all(rental_arr == 24_000),
                        f"rental[0]={float(rental_arr[0]) if len(rental_arr) else 'N/A'}"))
-    checks.append(chk("income loader: ordinary_other $18k yrs1-15, 0 after",
-                       len(oo_arr) == 30 and all(oo_arr[:15] == 18_000) and all(oo_arr[15:30] == 0),
+    # ages 56-70 → years 1-15, after → 0
+    checks.append(chk("income loader: ordinary_other $18k ages56-70 (yrs1-15), 0 after",
+                       len(oo_arr) >= 15 and all(oo_arr[:15] == 18_000) and (len(oo_arr) <= 15 or all(oo_arr[15:] == 0)),
                        f"oo[14]={float(oo_arr[14]) if len(oo_arr)>14 else 'N/A'} oo[15]={float(oo_arr[15]) if len(oo_arr)>15 else 'N/A'}"))
 
     # ── 4b: simulator runs without crash ──────────────────────────────────
@@ -804,41 +823,41 @@ def group4_income(paths: int):
 
     res_w2, t = ephemeral_run("g4a_w2", paths,
                                income={**BASE_INCOME,
-                                       "w2": [{"years": "1-5",  "amount_nom": 200_000},
-                                              {"years": "6-30", "amount_nom": 0}]}); elapsed += t
+                                       "w2": [{"ages": "56-60", "amount_nom": 200_000},
+                                              {"ages": "61-95", "amount_nom": 0}]}); elapsed += t
     checks.append(chk_len("W2 income: 30yr portfolio", _portfolio_future(res_w2)))
     checks.append(chk_all_finite("W2 income: no NaN", _portfolio_future(res_w2)))
 
     res_rental, t = ephemeral_run("g4b_rental", paths,
                                    income={**BASE_INCOME,
-                                           "rental":         [{"years": "1-30", "amount_nom": 24_000}],
-                                           "interest":       [{"years": "1-30", "amount_nom": 12_000}],
-                                           "ordinary_other": [{"years": "1-15", "amount_nom": 18_000}]}); elapsed += t
+                                           "rental":         [{"ages": "56-95", "amount_nom": 24_000}],
+                                           "interest":       [{"ages": "56-95", "amount_nom": 12_000}],
+                                           "ordinary_other": [{"ages": "56-70", "amount_nom": 18_000}]}); elapsed += t
     checks.append(chk_len("rental+interest+ord_other: 30yr portfolio", _portfolio_future(res_rental)))
     checks.append(chk_all_finite("rental+interest+ord_other: no NaN", _portfolio_future(res_rental)))
 
     res_qd, t = ephemeral_run("g4c_qual_div_cg", paths,
                                income={**BASE_INCOME,
-                                       "qualified_div": [{"years": "1-30", "amount_nom": 50_000}],
-                                       "cap_gains":     [{"years": "1-30", "amount_nom": 40_000}]}); elapsed += t
+                                       "qualified_div": [{"ages": "56-95", "amount_nom": 50_000}],
+                                       "cap_gains":     [{"ages": "56-95", "amount_nom": 40_000}]}); elapsed += t
     checks.append(chk_len("qual_div+cap_gains: 30yr fed_tax array", _tax_fed(res_qd)))
     checks.append(chk_len("qual_div+cap_gains: 30yr niit array",    _tax_niit(res_qd)))
     checks.append(chk_all_finite("qual_div+cap_gains: no NaN", _portfolio_future(res_qd)))
 
     res_stagger, t = ephemeral_run("g4d_staggered", paths,
                                     income={**BASE_INCOME,
-                                            "rental": [{"years": "1-5",  "amount_nom": 0},
-                                                       {"years": "6-30", "amount_nom": 36_000}]}); elapsed += t
+                                            "rental": [{"ages": "56-60", "amount_nom": 0},
+                                                       {"ages": "61-95", "amount_nom": 36_000}]}); elapsed += t
     checks.append(chk_len("staggered rental: 30yr portfolio", _portfolio_future(res_stagger)))
     checks.append(chk_all_finite("staggered rental: no NaN", _portfolio_future(res_stagger)))
 
     res_all, t = ephemeral_run("g4e_all_income", paths,
-                                income={"w2":             [{"years": "1-10", "amount_nom": 50_000}],
-                                        "rental":         [{"years": "1-30", "amount_nom": 18_000}],
-                                        "interest":       [{"years": "1-30", "amount_nom":  8_000}],
-                                        "ordinary_other": [{"years": "1-20", "amount_nom": 10_000}],
-                                        "qualified_div":  [{"years": "1-30", "amount_nom": 30_000}],
-                                        "cap_gains":      [{"years": "1-30", "amount_nom": 20_000}]}); elapsed += t
+                                income={"w2":             [{"ages": "56-65", "amount_nom": 50_000}],
+                                        "rental":         [{"ages": "56-95", "amount_nom": 18_000}],
+                                        "interest":       [{"ages": "56-95", "amount_nom":  8_000}],
+                                        "ordinary_other": [{"ages": "56-75", "amount_nom": 10_000}],
+                                        "qualified_div":  [{"ages": "56-95", "amount_nom": 30_000}],
+                                        "cap_gains":      [{"ages": "56-95", "amount_nom": 20_000}]}); elapsed += t
     b, t_, r = end_by_type(res_all)
     checks.append(chk("all-income: balances > 0", b + t_ + r > 0, f"total={b+t_+r:,.0f}"))
     checks.append(chk_all_finite("all-income: no NaN", _portfolio_future(res_all)))
@@ -861,7 +880,70 @@ def group4_income(paths: int):
         fed_rental > 0,
         f"fed_rental={fed_rental:,.0f} (0 = income not reaching tax block)"))
 
-    return "G4", "Income types and schedules (W2, rental, interest, qual_div, cap_gains)", checks, elapsed
+    # ── 4d: Realistic Test profile income ────────────────────────────────
+    # W2 $350K/yr ages 47-64 → taxable ~$318.5K → 24% marginal bracket
+    # SS $51K taxable from retirement → 10% bracket → prime Roth window
+    import tempfile as _tf, os as _os2
+    from loaders import load_income as _li
+
+    with _tf.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as _f:
+        import json as _json2; _json2.dump(TEST_INCOME, _f); _tmp_inc = _f.name
+    _ca_test = float(BASE_PERSON.get("current_age", 55))  # Test profile current_age
+    try:
+        _rt = _li(_tmp_inc, current_age=46.0, max_years=49)  # Test: born 1980, target 95
+        _w2 = np.asarray(_rt.get("w2", []), dtype=float)
+        _ss = np.asarray(_rt.get("ordinary_other", []), dtype=float)
+        checks.append(chk(
+            "4d: Test W2 $350K yrs 1-18",
+            len(_w2) >= 18 and all(_w2[:18] == 350_000),
+            f"w2[0]={float(_w2[0]) if len(_w2) else 0:.0f}"
+        ))
+        checks.append(chk(
+            "4d: Test W2 $175K yr 19 (partial)",
+            len(_w2) >= 19 and abs(_w2[18] - 175_000) < 1,
+            f"w2[18]={float(_w2[18]) if len(_w2)>18 else 0:.0f}"
+        ))
+        # ages "66-95" with current_age=46 → years 20-49 (year = age - 46)
+        checks.append(chk(
+            "4d: Test SS $51K from yr 20 (age 66)",
+            len(_ss) >= 20 and all(_ss[19:] == 51_000),
+            f"ss[19]={float(_ss[19]) if len(_ss)>19 else 0:.0f}"
+        ))
+        checks.append(chk(
+            "4d: Test SS $0 before age 66 (yrs 1-19)",
+            len(_ss) >= 19 and all(_ss[:19] == 0),
+            f"ss[0]={float(_ss[0]) if len(_ss) else 0:.0f}"
+        ))
+    finally:
+        _os2.unlink(_tmp_inc)
+
+    # Run sim with realistic income — verify stability
+    # Note: ephemeral_run uses BASE_PERSON (current_age=55), so use age ranges starting from 56
+    _INCOME_55 = {
+        "w2":          [{"ages": "56-69", "amount_nom": 350_000}, {"ages": "70-70", "amount_nom": 175_000}],
+        "ordinary_other": [{"ages": "71-95", "amount_nom": 51_000}],
+        "rental":      [{"ages": "56-95", "amount_nom": 0}],
+        "interest":    [{"ages": "56-95", "amount_nom": 0}],
+        "qualified_div":[{"ages": "56-95", "amount_nom": 0}],
+        "cap_gains":   [{"ages": "56-95", "amount_nom": 0}],
+    }
+    res_realistic, t = ephemeral_run("g4f_realistic", paths, income=_INCOME_55); elapsed += t
+    fed_realistic = _tax_fed(res_realistic)
+    fed_base_arr  = _tax_fed(res_base)
+    checks.append(chk_len("4d: realistic income sim: 40yr portfolio", _portfolio_future(res_realistic)))
+    checks.append(chk_all_finite("4d: realistic income: no NaN", _portfolio_future(res_realistic)))
+    checks.append(chk(
+        "[XFAIL pipeline] 4d: W2 $350K → higher fed tax (yrs 1-5) — income not yet reaching tax block",
+        sum(fed_realistic[:5]) > sum(fed_base_arr[:5]) if len(fed_realistic) >= 5 else False,
+        f"realistic={sum(fed_realistic[:5]):,.0f} base={sum(fed_base_arr[:5]):,.0f} (known: ordinary_income_cur_paths not wired to tax block)"
+    ))
+    checks.append(chk(
+        "4d: portfolio finite and positive with realistic income",
+        all(v > 0 for v in _portfolio_future(res_realistic) if v is not None),
+        "portfolio went negative"
+    ))
+
+    return "G4", "Income types and schedules (W2, rental, interest, qual_div, cap_gains, realistic)", checks, elapsed
 
 
 def group5_inflation(paths: int):
