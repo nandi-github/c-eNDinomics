@@ -4168,6 +4168,96 @@ def _save(*, profile, paths, mode, elapsed, total_pass, total_fail, scenarios) -
 # ENTRY POINT
 # ===========================================================================
 
+def check_updates(server_url: str = "http://localhost:8000") -> bool:
+    """
+    --checkupdates: Fetch /manifest from running server and compare against
+    local file hashes. Fails if any deployed file differs from the local copy.
+    Returns True if all files match, False if any are stale/missing.
+    """
+    import hashlib, urllib.request, urllib.error
+
+    def file_sha256_short(path: str) -> str:
+        try:
+            h = hashlib.sha256()
+            with open(path, "rb") as f:
+                for chunk in iter(lambda: f.read(65536), b""):
+                    h.update(chunk)
+            return h.hexdigest()[:16]
+        except FileNotFoundError:
+            return "missing"
+        except Exception as e:
+            return f"error:{e}"
+
+    print("\n" + "="*72)
+    print(f"  eNDinomics --checkupdates  |  server: {server_url}")
+    print(f"  Tracks all files Claude provides — catches missed copies before testing")
+    print("="*72 + "\n")
+
+    # Fetch server manifest
+    try:
+        with urllib.request.urlopen(f"{server_url}/manifest", timeout=5) as resp:
+            manifest = json.loads(resp.read())
+    except Exception as e:
+        print(f"  ❌ Could not reach server manifest: {e}")
+        print(f"     Is the server running at {server_url}?")
+        return False
+
+    src_root = os.path.dirname(os.path.abspath(__file__))
+    all_match = True
+    rows = []
+
+    for name, server_info in manifest.get("files", {}).items():
+        local_path  = os.path.join(src_root, name)
+        local_hash  = file_sha256_short(local_path)
+        server_hash = server_info.get("sha256_short", "?")
+        server_mtime = server_info.get("mtime", "?")
+        exists_local  = os.path.isfile(local_path)
+        exists_server = server_info.get("exists", False)
+
+        if local_hash == server_hash and exists_local and exists_server:
+            status = "✅ match"
+        elif not exists_server:
+            status = "❌ MISSING on server"
+            all_match = False
+        elif not exists_local:
+            status = "⚠  missing locally"
+            all_match = False
+        else:
+            status = "❌ STALE — server has old version"
+            all_match = False
+
+        rows.append((name, local_hash, server_hash, server_mtime, status))
+
+    # Print table grouped by category
+    categories = {
+        "Python backend": [r for r in rows if not r[0].startswith(("ui/", "profiles/"))],
+        "UI files":       [r for r in rows if r[0].startswith("ui/")],
+        "Profile configs":[r for r in rows if r[0].startswith("profiles/")],
+    }
+    for cat, cat_rows in categories.items():
+        if not cat_rows: continue
+        print(f"  {cat}")
+        print(f"  {'File':<40} {'Local hash':<18} {'Server hash':<18} Status")
+        print(f"  {'-'*40} {'-'*18} {'-'*18} {'-'*30}")
+        for name, lh, sh, mt, status in cat_rows:
+            print(f"  {name:<40} {lh:<18} {sh:<18} {status}")
+        print()
+    if all_match:
+        print("  ✅ ALL FILES MATCH — server is running the latest code\n")
+    else:
+        stale = [r[0] for r in rows if "STALE" in r[4] or "MISSING" in r[4]]
+        print(f"  ❌ {len(stale)} file(s) out of date — copy and restart server:")
+        print()
+        for f in stale:
+            print(f"     cp ~/Downloads/{f.split('/')[-1]}  src/{f}")
+        print("\n  Then restart: cd src && ./vcleanbld_ui  (or just restart for .py changes)")
+        print()
+
+    print(f"  Server manifest generated: {manifest.get('generated_at', '?')}")
+    print("="*72 + "\n")
+    return all_match
+
+
 def main():
     ap = argparse.ArgumentParser(description="eNDinomics functional test harness")
     ap.add_argument("--profile",            default="Test", help="Profile name (default: Test)")
@@ -4179,9 +4269,18 @@ def main():
                     help="Skip G19 Playwright UI tests (no browser/server needed)")
     ap.add_argument("--update-baseline",    action="store_true",
                     help="Clear G18 snapshot regression baseline before running")
+    ap.add_argument("--checkupdates",       action="store_true",
+                    help="Compare local file hashes against running server — catch stale deployments")
+    ap.add_argument("--server",             default="http://localhost:8000",
+                    help="Server URL for --checkupdates (default: http://localhost:8000)")
     args = ap.parse_args()
 
     paths = 50 if args.fast else args.paths
+
+    if args.checkupdates:
+        ok = check_updates(args.server)
+        sys.exit(0 if ok else 1)
+
     if args.comprehensive_test:
         if args.update_baseline:
             _bp = os.path.join(os.path.dirname(os.path.abspath(__file__)),

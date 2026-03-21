@@ -107,7 +107,7 @@ test.beforeAll(async ({ browser }) => {
   await page.goto("/");
   await expect(page.locator("h1")).toContainText("eNDinomics");
 
-  // Switch to Run tab
+  // Switch to Simulation tab
   await page.locator(".tab", { hasText: "Simulation" }).click();
   await expect(page.locator("h2")).toContainText("Simulation");
 
@@ -260,9 +260,9 @@ test("Summary table: columns, no bad values, plausible metrics", async ({ page }
   const cells = await getTableCells(page, table);
   assertNoBadValues(cells, "Summary");
 
-  // Success/survival rate row — label varies by simulation mode:
+  // Survival/success rate row — label varies by mode:
+  //   retirement → "Full-plan survival rate"
   //   automatic/investment → "Floor survival rate"
-  //   retirement           → "Full-plan survival rate"
   const successRow = cells.find((r) =>
     r[0].includes("survival rate") || r[0].includes("Success rate")
   );
@@ -559,7 +559,7 @@ test("Aggregate Balances Charts section present and images load", async ({ page 
 test("Insights section present with at least one finding", async ({ page }) => {
   await loadResults(page);
 
-  // Use h3 with exact "Insights" text to avoid matching "Roth Conversion Insights"
+  // Use h3 filter to distinguish "Insights" section from "Roth Conversion Insights"
   const insights = page.locator("section.results-section").filter({
     has: page.locator("h3", { hasText: /^.*Insights.*finding/ }),
   });
@@ -679,4 +679,311 @@ test("No NaN or undefined text anywhere in results page", async ({ page }) => {
       ).not.toMatch(pattern);
     }
   }
+});
+
+// ─── Test 17: Roth Conversion Insights section ───────────────────────────────
+
+test("Roth Conversion Insights: present, collapsed by default, expands on click", async ({ page }) => {
+  await loadResults(page);
+
+  // Section must be present
+  const section = page.locator("section.results-section").filter({
+    has: page.locator("h3", { hasText: "Roth Conversion Insights" }),
+  });
+  await expect(section).toBeVisible({ timeout: 10_000 });
+
+  const h3 = section.locator("h3");
+
+  // Collapsed by default — h3 should show ▶ and strategy summary
+  await expect(h3).toContainText("▶");
+  await expect(h3).toContainText("click to expand");
+
+  // IRA Timebomb severity badge present (CRITICAL, SEVERE, MODERATE, or MANAGEABLE)
+  const badge = h3.locator("span").filter({ hasText: /CRITICAL|SEVERE|MODERATE|MANAGEABLE/ });
+  await expect(badge).toBeVisible();
+
+  // Click to expand
+  await h3.click();
+  await expect(h3).toContainText("▼");
+
+  // Current Situation subsection visible
+  await expect(section.locator("div", { hasText: "Current Situation" }).first()).toBeVisible();
+
+  // Recommendation subsection visible
+  await expect(section.locator("div", { hasText: "Recommendation" }).first()).toBeVisible();
+
+  // Apply button present with strategy name
+  const applyBtn = section.locator("button", { hasText: /Apply .* to profile/ });
+  await expect(applyBtn).toBeVisible();
+
+  // 4×4 savings matrix table present
+  const table = section.locator("table.table").first();
+  await expect(table).toBeVisible();
+  await expect(table.locator("th", { hasText: "Strategy" })).toBeVisible();
+  await expect(table.locator("th", { hasText: "Convert/yr" })).toBeVisible();
+});
+
+
+// ─── Test 18: Configure tab — Version History panel ─────────────────────────
+
+test("Configure tab: Version History panel present for non-default profile", async ({ page }) => {
+  await page.goto("/");
+
+  // Should already be on Configure tab
+  await expect(page.locator("h2", { hasText: "Configure" })).toBeVisible();
+
+  // Select Test profile
+  await page.locator(".profile-row select").selectOption(PROFILE);
+  await page.waitForTimeout(500);
+
+  // Version History button present (non-default profile)
+  const versionBtn = page.locator("button", { hasText: "Version History" });
+  await expect(versionBtn).toBeVisible();
+
+  // Collapsed by default — click to expand
+  await versionBtn.click();
+  await page.waitForTimeout(300);
+
+  // Panel appears — shows either "No versions yet" or a table
+  const panel = page.locator("div").filter({ hasText: /No versions yet|Ver.*Saved.*Note/ }).first();
+  await expect(panel).toBeVisible({ timeout: 5_000 });
+});
+
+
+// ─── Test 19: Configure tab — Save Version button behavior ───────────────────
+
+test("Configure tab: Save Version button visible in view mode, hidden when dirty", async ({ page }) => {
+  await page.goto("/");
+
+  await page.locator(".profile-row select").selectOption(PROFILE);
+  await page.waitForTimeout(500);
+
+  // Switch to view mode
+  await page.locator(".profile-actions button", { hasText: "VIEW" }).click();
+  await page.waitForTimeout(300);
+
+  // Save Version button should be visible in clean state
+  const saveVersionBtn = page.locator("button", { hasText: "Save Version" });
+  await expect(saveVersionBtn).toBeVisible();
+
+  // Switch to edit mode — use exact match to avoid matching "Clear Cache (Profile Editor)"
+  await page.locator(".profile-actions button", { hasText: "EDIT" }).click();
+  await page.waitForTimeout(300);
+
+  // Save Version visible in clean edit mode
+  await expect(saveVersionBtn).toBeVisible();
+
+  // Make a trivial edit to dirty the editor
+  const textarea = page.locator("textarea");
+  await textarea.click();
+  await textarea.press("End");
+  await textarea.pressSequentially(" ", { delay: 50 });
+  await page.waitForTimeout(200);
+
+  // Save Version button should now be hidden
+  await expect(saveVersionBtn).not.toBeVisible();
+
+  // Note field should appear when dirty — look for the "Version note" label
+  const versionNoteLabel = page.locator("div", { hasText: "Version note" }).first();
+  await expect(versionNoteLabel).toBeVisible({ timeout: 5_000 });
+  // And an input near it
+  const noteInput = page.locator("input[type='text']").last();
+  await expect(noteInput).toBeVisible();
+});
+
+
+// ─── Test 20: Investment tab — Roth Conversion Recommendations (Option C) ────
+
+test("Investment tab: Roth Conversion Recommendations section present", async ({ page }) => {
+  await page.goto("/");
+
+  // Navigate to Investment tab
+  await page.locator(".tab", { hasText: "Investment" }).click();
+  await expect(page.locator("h2", { hasText: "Investment" })).toBeVisible();
+
+  // Roth Conversion Recommendations section should be present
+  const section = page.locator("section.results-section").filter({
+    has: page.locator("h3", { hasText: "Roth Conversion Recommendations" }),
+  });
+  await expect(section).toBeVisible({ timeout: 5_000 });
+
+  // Section should have some content — either severity data or instructions
+  // Just verify the section itself has non-empty text content
+  const sectionText = await section.textContent() ?? "";
+  expect(sectionText.length, "Option C section has content").toBeGreaterThan(10);
+});
+
+// ─── Test 21: Versioning — Save Version creates a version entry ──────────────
+
+test("Versioning: Save Version creates a version in history", async ({ page }) => {
+  await page.goto("/");
+
+  // Select Test profile in Configure tab
+  await page.locator(".profile-row select").selectOption(PROFILE);
+  await page.waitForTimeout(500);
+
+  // Open Version History to get baseline count
+  const versionBtn = page.locator("button", { hasText: "Version History" });
+  await versionBtn.click();
+  await page.waitForTimeout(300);
+
+  // Count existing versions (may be 0 or more)
+  const panel = page.locator("table").filter({ hasText: "Ver" }).first();
+  const existingRows = await panel.locator("tbody tr").count().catch(() => 0);
+
+  // If at or near the cap, prune down to 30 via API to make room
+  if (existingRows >= 40) {
+    await fetch("/profile/Test/versions?keep=30", { method: "DELETE" }).catch(() => {});
+    await page.waitForTimeout(500);
+    // Reload version history
+    await versionBtn.click();
+    await page.waitForTimeout(300);
+    await versionBtn.click();
+    await page.waitForTimeout(300);
+  }
+
+  // Close history
+  await versionBtn.click();
+  await page.waitForTimeout(200);
+
+  // Open Save Version prompt
+  const saveVersionBtn = page.locator("button", { hasText: "Save Version" });
+  await expect(saveVersionBtn).toBeVisible();
+  await saveVersionBtn.click();
+  await page.waitForTimeout(200);
+
+  // Type a label
+  const labelInput = page.locator("input").filter({ hasText: "" }).last();
+  await labelInput.fill("playwright test checkpoint");
+
+  // Click Save
+  await page.locator("button", { hasText: /^Save$/ }).click();
+  await page.waitForTimeout(500);
+
+  // Reopen Version History — should have one more entry
+  await versionBtn.click();
+  await page.waitForTimeout(300);
+
+  const newRows = await panel.locator("tbody tr").count().catch(() => 0);
+  expect(newRows, "Version count increased after Save Version").toBeGreaterThan(existingRows);
+
+  // The new entry should contain our label
+  await expect(panel).toContainText("playwright test checkpoint");
+});
+
+
+// ─── Test 22: Versioning — auto-version created on config save ───────────────
+
+test("Versioning: auto-version created when saving a config file", async ({ page }) => {
+  await page.goto("/");
+
+  await page.locator(".profile-row select").selectOption(PROFILE);
+  await page.waitForTimeout(500);
+
+  // Get baseline version count
+  const versionBtn = page.locator("button", { hasText: "Version History" });
+  await versionBtn.click();
+  await page.waitForTimeout(300);
+
+  const historyTable = page.locator("table").filter({ hasText: "Ver" }).first();
+  let countBefore = await historyTable.locator("tbody tr").count().catch(() => 0);
+
+  // If at or near the cap, prune via API
+  if (countBefore >= 40) {
+    await fetch("/profile/Test/versions?keep=30", { method: "DELETE" }).catch(() => {});
+    await page.waitForTimeout(500);
+    countBefore = await historyTable.locator("tbody tr").count().catch(() => 0);
+  }
+
+  await versionBtn.click(); // close
+  await page.waitForTimeout(200);
+
+  // Switch to edit mode and make a trivial change
+  await page.locator(".profile-actions button", { hasText: "EDIT" }).click();
+  await page.waitForTimeout(400);
+
+  // Click on person.json
+  await page.locator(".config-file", { hasText: "person.json" }).click();
+  await page.waitForTimeout(300);
+
+  // Make a trivial whitespace change to trigger dirty
+  const textarea = page.locator("textarea");
+  await textarea.click();
+  await textarea.press("End");
+  await textarea.pressSequentially(" ");
+  await page.waitForTimeout(200);
+
+  // Type a version note
+  const versionNoteLabel = page.locator("div", { hasText: "Version note" }).first();
+  await expect(versionNoteLabel).toBeVisible();
+  const noteInput = page.locator("input[type='text']").last();
+  await noteInput.fill("playwright auto-version test");
+
+  // Save to Profile
+  await page.locator("button", { hasText: "Save to Profile" }).click();
+  await page.waitForTimeout(500);
+
+  // Reopen Version History — count should have increased
+  await versionBtn.click();
+  await page.waitForTimeout(300);
+
+  const countAfter = await historyTable.locator("tbody tr").count().catch(() => 0);
+  expect(countAfter, "Version count increased after save").toBeGreaterThan(countBefore);
+  await expect(historyTable).toContainText("playwright auto-version test");
+});
+
+
+// ─── Test 23: Versioning — Restore reverts to a previous version ─────────────
+
+test("Versioning: Restore reverts config and creates auto-save", async ({ page }) => {
+  await page.goto("/");
+
+  await page.locator(".profile-row select").selectOption(PROFILE);
+  await page.waitForTimeout(500);
+
+  // Open Version History
+  const versionBtn = page.locator("button", { hasText: "Version History" });
+  await versionBtn.click();
+  await page.waitForTimeout(300);
+
+  const historyTable = page.locator("table").filter({ hasText: "Ver" }).first();
+  let countBefore = await historyTable.locator("tbody tr").count().catch(() => 0);
+
+  // If at or near the cap, prune via API
+  if (countBefore >= 40) {
+    await fetch("/profile/Test/versions?keep=30", { method: "DELETE" }).catch(() => {});
+    await page.waitForTimeout(500);
+    countBefore = await historyTable.locator("tbody tr").count().catch(() => 0);
+  }
+
+  // Need at least 2 versions to restore
+  if (countBefore < 2) {
+    // Skip — not enough versions to test restore
+    test.skip();
+    return;
+  }
+
+  // Click View on the second row (index 1 — not the latest) to preview first
+  const viewBtn = historyTable.locator("tbody tr").nth(1).locator("button", { hasText: "View" });
+  await expect(viewBtn).toBeVisible();
+  await viewBtn.click();
+  await page.waitForTimeout(800);
+
+  // Preview panel should appear with JSON content
+  const previewPanel = page.locator("pre").filter({ hasText: "{" }).first();
+  await expect(previewPanel).toBeVisible({ timeout: 5_000 });
+
+  // Restore button is on the row itself (↩ Restore)
+  const restoreBtn = page.locator("button", { hasText: /↩ Restore/ }).first();
+  await expect(restoreBtn).toBeVisible();
+  await restoreBtn.click();
+  await page.waitForTimeout(800);
+
+  // After restore: version count should increase by 1 (auto-save of current state)
+  const countAfter = await historyTable.locator("tbody tr").count().catch(() => 0);
+  expect(countAfter, "Restore auto-saves current state → count increases").toBeGreaterThan(countBefore);
+
+  // The latest entry should mention "before restore" (auto-save note)
+  const latestRow = historyTable.locator("tbody tr").first();
+  await expect(latestRow).toContainText(/before restore|auto-save/i);
 });

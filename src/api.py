@@ -46,8 +46,16 @@ COMMON_ASSETS_JSON = os.path.join(APP_ROOT, "config", "assets.json")
 COMMON_RMD_JSON    = os.path.join(APP_ROOT, "config", "rmd.json")
 
 # Profile versioning
-VERSIONABLE_FILES  = {"person.json", "withdrawal_schedule.json", "allocation_yearly.json", "income.json"}
-MAX_VERSIONS       = 20  # auto-prune oldest beyond this
+VERSIONABLE_FILES  = {
+    "person.json",
+    "withdrawal_schedule.json",
+    "allocation_yearly.json",
+    "income.json",
+    "inflation_yearly.json",
+    "shocks_yearly.json",
+    "economic.json",
+}
+MAX_VERSIONS       = 50  # auto-prune oldest beyond this
 
 PROFILES_ROOT = os.path.join(APP_ROOT, "profiles")
 DEFAULT_PROFILE = "default"
@@ -67,7 +75,119 @@ _GLOBAL_ONLY_NAMES = {
     "assets.json",
 }
 
+# ── Source file manifest — computed at import time ───────────────────────────
+import hashlib as _hashlib
+
+# Key source files to track — relative to APP_ROOT
+# All files Claude may provide during a session.
+# If any of these are stale on the server, --checkupdates will flag them.
+MANIFEST_FILES = [
+    # Python backend
+    "api.py",
+    "loaders.py",
+    "simulator_new.py",
+    "snapshot.py",
+    "roth_optimizer.py",
+    "test_flags.py",
+    # UI
+    "ui/src/App.tsx",
+    "ui/tests/smoke.spec.ts",
+    # Test profile configs (Claude sometimes provides updated versions)
+    "profiles/Test/person.json",
+    "profiles/Test/withdrawal_schedule.json",
+    "profiles/Test/income.json",
+    "profiles/Test/allocation_yearly.json",
+    "profiles/Test/inflation_yearly.json",
+    "profiles/Test/shocks_yearly.json",
+    "profiles/Test/economic.json",
+]
+
+def _file_sha256(path: str) -> str:
+    """Return hex SHA256 of a file, or 'missing' if not found."""
+    try:
+        h = _hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(65536), b""):
+                h.update(chunk)
+        return h.hexdigest()[:16]  # first 16 chars — enough for change detection
+    except FileNotFoundError:
+        return "missing"
+    except Exception as e:
+        return f"error:{e}"
+
+def _build_manifest() -> Dict[str, Any]:
+    """Build a manifest of all tracked source files."""
+    import datetime as _dt
+    files = {}
+    for name in MANIFEST_FILES:
+        path = os.path.join(APP_ROOT, name)
+        files[name] = {
+            "sha256_short": _file_sha256(path),
+            "exists":       os.path.isfile(path),
+            "size_bytes":   os.path.getsize(path) if os.path.isfile(path) else 0,
+            "mtime":        _dt.datetime.fromtimestamp(
+                                os.path.getmtime(path)
+                            ).isoformat(timespec="seconds") if os.path.isfile(path) else None,
+        }
+    return {
+        "generated_at": _dt.datetime.now().isoformat(timespec="seconds"),
+        "app_root":     APP_ROOT,
+        "files":        files,
+    }
+
+# Compute manifest once at startup
+_STARTUP_MANIFEST: Dict[str, Any] = {}
+
+
 app = FastAPI(title="eNDinomics API", version="1.0.0")
+
+
+@app.on_event("startup")
+def on_startup() -> None:
+    """On server start: build file manifest and snapshot all user profiles."""
+    global _STARTUP_MANIFEST
+    _STARTUP_MANIFEST = _build_manifest()
+
+    # Log manifest summary
+    print("[startup] Source file manifest:")
+    for name, info in _STARTUP_MANIFEST["files"].items():
+        status = info["sha256_short"] if info["exists"] else "⚠ MISSING"
+        print(f"  {name:<30} {status}")
+
+    # Auto-snapshot all non-default profiles
+    profiles_dir = os.path.join(APP_ROOT, "profiles")
+    if os.path.isdir(profiles_dir):
+        for profile in os.listdir(profiles_dir):
+            if profile.startswith(("default", "__", ".")):
+                continue
+            pdir = os.path.join(profiles_dir, profile)
+            if not os.path.isdir(pdir):
+                continue
+            try:
+                # Only snapshot if last version is >1 hour old — prevents test/dev
+                # restarts from spamming version history
+                history = _load_version_manifest(profile)
+                should_snap = True
+                if history:
+                    import datetime as _dt2
+                    last_ts = history[-1].get("ts", "")
+                    try:
+                        last_dt = _dt2.datetime.fromisoformat(last_ts)
+                        age_mins = (_dt2.datetime.now() - last_dt).total_seconds() / 60
+                        if age_mins < 60:
+                            print(f"[startup] Skipping snapshot for '{profile}' — last version {age_mins:.0f}m ago")
+                            should_snap = False
+                    except Exception:
+                        pass
+                if should_snap:
+                    v = _snapshot_profile_version(
+                        profile,
+                        note="server startup — auto-checkpoint",
+                        source="auto"
+                    )
+                    print(f"[startup] Versioned profile '{profile}' → v{v}")
+            except Exception as e:
+                print(f"[startup] Could not version profile '{profile}': {e}")
 
 
 app.add_middleware(
@@ -81,6 +201,17 @@ app.add_middleware(
 # Serve built UI assets
 if os.path.isdir(ASSETS_DIR):
     app.mount("/assets", StaticFiles(directory=ASSETS_DIR, html=False), name="assets")
+
+
+@app.get("/manifest")
+def get_manifest() -> Dict[str, Any]:
+    """
+    Return the server's source file manifest (SHA256 hashes, sizes, mtimes).
+    Used by test_flags.py --checkupdates to verify deployed files match local files.
+    """
+    if not _STARTUP_MANIFEST:
+        return _build_manifest()
+    return _STARTUP_MANIFEST
 
 
 @app.get("/health")
@@ -157,9 +288,15 @@ def _ensure_dir(path: str) -> None:
 
 
 def _write_json(path: str, obj: Dict[str, Any]) -> None:
+    """Write JSON via temp file + os.replace to avoid SMB permission errors on existing files."""
     _ensure_dir(os.path.dirname(path))
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(obj, f, indent=2)
+    import tempfile as _tf2
+    dir_ = os.path.dirname(path) or "."
+    with _tf2.NamedTemporaryFile(mode="w", encoding="utf-8",
+                                  dir=dir_, delete=False, suffix=".tmp") as tmp:
+        json.dump(obj, tmp, indent=2)
+        tmp_path = tmp.name
+    os.replace(tmp_path, path)
 
 
 def _copy_file(src: str, dst: str) -> None:
@@ -217,7 +354,18 @@ def _snapshot_profile_version(profile: str, note: str = "", source: str = "auto"
         src_path = _profile_json_path(profile, fname)
         if os.path.isfile(src_path):
             import shutil
-            shutil.copy(src_path, os.path.join(snap_dir, fname))
+            try:
+                with open(src_path, "r", encoding="utf-8") as _fi:
+                    _fc = _fi.read()
+                snap_dst = os.path.join(snap_dir, fname)
+                import tempfile as _tf4
+                with _tf4.NamedTemporaryFile(mode="w", encoding="utf-8",
+                                              dir=snap_dir, delete=False, suffix=".tmp") as _tmp:
+                    _tmp.write(_fc)
+                    _tmp_path = _tmp.name
+                os.replace(_tmp_path, snap_dst)
+            except Exception as _se:
+                print(f"[snapshot] Could not snapshot {fname}: {_se}")
             files_saved.append(fname)
 
     history.append({
@@ -366,6 +514,8 @@ def create_profile(payload: Dict[str, Any] = Body(...)):
         raise HTTPException(status_code=400, detail="Profile already exists.")
     _ensure_dir(dest_dir)
 
+    clone_version = payload.get("clone_version")  # specific version number to clone from
+
     if source == "clean":
         for n in _default_json_names():
             _write_json(_profile_json_path(name, n), _default_scaffold(n))
@@ -374,11 +524,30 @@ def create_profile(payload: Dict[str, Any] = Body(...)):
         src_dir = _profile_dir(src_profile)
         if not os.path.isdir(src_dir):
             raise HTTPException(status_code=404, detail=f"Source profile '{src_profile}' not found.")
+
+        # Determine source directory — versioned snapshot or current
+        if clone_version is not None:
+            version_dir = os.path.join(_versions_dir(src_profile), f"v{clone_version}")
+            if not os.path.isdir(version_dir):
+                raise HTTPException(status_code=404, detail=f"Version v{clone_version} not found in '{src_profile}'.")
+            file_src_dir = version_dir
+        else:
+            file_src_dir = src_dir
+
         for n in _default_json_names():
-            src_path = _profile_json_path(src_profile, n)
+            src_path = os.path.join(file_src_dir, n)
+            # Fallback to current profile file if not in versioned snapshot
+            if not os.path.isfile(src_path):
+                src_path = _profile_json_path(src_profile, n)
             dst_path = _profile_json_path(name, n)
             if os.path.isfile(src_path):
-                _copy_file(src_path, dst_path)
+                try:
+                    with open(src_path, "r", encoding="utf-8") as _fi:
+                        _fc = _fi.read()
+                    with open(dst_path, "w", encoding="utf-8") as _fo:
+                        _fo.write(_fc)
+                except Exception:
+                    _copy_file(src_path, dst_path)  # fallback
             else:
                 _write_json(dst_path, _default_scaffold(n))
 
@@ -509,8 +678,13 @@ def save_profile_json(payload: Dict[str, Any] = Body(...)):
             logger.warning("Version snapshot failed (non-fatal): %s", _ve)
 
     try:
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(merged, f, indent=2)
+        import tempfile as _tf3
+        dir_ = os.path.dirname(path) or "."
+        with _tf3.NamedTemporaryFile(mode="w", encoding="utf-8",
+                                      dir=dir_, delete=False, suffix=".tmp") as tmp:
+            json.dump(merged, tmp, indent=2)
+            tmp_path = tmp.name
+        os.replace(tmp_path, path)
         return {"ok": True, "note": note}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -525,6 +699,25 @@ def list_profile_versions(profile: str):
         raise HTTPException(status_code=404, detail=f"Profile '{profile}' not found")
     history = _load_version_manifest(profile)
     return {"profile": profile, "versions": history}
+
+
+@app.get("/profile/{profile}/versions/{v}/{name}")
+def get_version_file(profile: str, v: int, name: str):
+    """Return content of a specific file from a version snapshot for preview."""
+    if not os.path.isdir(_profile_dir(profile)):
+        raise HTTPException(status_code=404, detail=f"Profile '{profile}' not found")
+    if not name.lower().endswith(".json") or "/" in name or name.startswith("."):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    snap_path = os.path.join(_versions_dir(profile), f"v{v}", name)
+    if not os.path.isfile(snap_path):
+        raise HTTPException(status_code=404, detail=f"v{v}/{name} not found")
+    try:
+        with open(snap_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        editable = _strip_meta_keys(data)
+        return {"profile": profile, "v": v, "name": name, "content": json.dumps(editable, indent=2)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/profile/{profile}/restore/{v}")
@@ -554,8 +747,22 @@ def restore_profile_version(profile: str, v: int):
     for fname in VERSIONABLE_FILES:
         src_path = os.path.join(snap_dir, fname)
         if os.path.isfile(src_path):
-            shutil.copy(src_path, _profile_json_path(profile, fname))  # no metadata copy
-            files_restored.append(fname)
+            dst_path = _profile_json_path(profile, fname)
+            try:
+                # Read source content
+                with open(src_path, "r", encoding="utf-8") as f_in:
+                    content = f_in.read()
+                # Write via temp file then replace — avoids SMB open-existing-file permission errors
+                import tempfile as _tf
+                dst_dir = os.path.dirname(dst_path)
+                with _tf.NamedTemporaryFile(mode="w", encoding="utf-8",
+                                            dir=dst_dir, delete=False, suffix=".tmp") as f_tmp:
+                    f_tmp.write(content)
+                    tmp_path = f_tmp.name
+                os.replace(tmp_path, dst_path)
+                files_restored.append(fname)
+            except Exception as _re:
+                print(f"[restore] Could not restore {fname}: {_re}")
 
     return {
         "ok":             True,
@@ -629,6 +836,82 @@ def snapshot_profile(profile: str, payload: Dict[str, Any] = Body(...)):
         return {"ok": True, "v": v, "note": note}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+
+@app.get("/profile/{profile}/versions/{v}/{filename}")
+def get_version_file(profile: str, v: int, filename: str):
+    """Return the content of a specific file from a saved version snapshot."""
+    if not os.path.isdir(_profile_dir(profile)):
+        raise HTTPException(status_code=404, detail=f"Profile '{profile}' not found")
+    allowed = VERSIONABLE_FILES
+    if filename not in allowed:
+        raise HTTPException(status_code=400, detail=f"File '{filename}' not versionable")
+    snap_dir  = os.path.join(_versions_dir(profile), f"v{v}")
+    file_path = os.path.join(snap_dir, filename)
+    if not os.path.isfile(file_path):
+        raise HTTPException(status_code=404, detail=f"v{v}/{filename} not found")
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        editable = _strip_meta_keys(data)
+        return {"v": v, "filename": filename, "content": json.dumps(editable, indent=2)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+
+@app.delete("/profile/{profile}/versions/{v}")
+def delete_profile_version(profile: str, v: int):
+    """Delete a single version snapshot from history."""
+    if not os.path.isdir(_profile_dir(profile)):
+        raise HTTPException(status_code=404, detail=f"Profile '{profile}' not found")
+    if profile == DEFAULT_PROFILE:
+        raise HTTPException(status_code=403, detail="Cannot modify default profile")
+    history = _load_version_manifest(profile)
+    entry = next((e for e in history if e["v"] == v), None)
+    if not entry:
+        raise HTTPException(status_code=404, detail=f"Version v{v} not found")
+    # Remove snapshot directory
+    snap_dir = os.path.join(_versions_dir(profile), f"v{v}")
+    if os.path.isdir(snap_dir):
+        import shutil
+        shutil.rmtree(snap_dir, ignore_errors=True)
+    # Remove from manifest
+    history = [e for e in history if e["v"] != v]
+    _save_version_manifest(profile, history)
+    return {"ok": True, "deleted_v": v}
+
+
+@app.delete("/profile/{profile}/versions")
+def clear_profile_versions(profile: str, keep: int = 0):
+    """
+    Admin: delete version history for a profile.
+    keep=0 deletes everything; keep=N keeps the N most recent versions.
+    """
+    if not os.path.isdir(_profile_dir(profile)):
+        raise HTTPException(status_code=404, detail=f"Profile '{profile}' not found")
+    vdir = _versions_dir(profile)
+    if not os.path.isdir(vdir):
+        return {"ok": True, "deleted": 0, "kept": 0}
+    history = _load_version_manifest(profile)
+    if keep <= 0:
+        # Delete everything
+        import shutil
+        shutil.rmtree(vdir, ignore_errors=True)
+        return {"ok": True, "deleted": len(history), "kept": 0}
+    else:
+        # Keep last N, delete the rest
+        to_keep   = history[-keep:]
+        to_delete = history[:-keep]
+        for entry in to_delete:
+            import shutil
+            old_dir = os.path.join(vdir, f"v{entry['v']}")
+            if os.path.isdir(old_dir):
+                shutil.rmtree(old_dir, ignore_errors=True)
+        _save_version_manifest(profile, to_keep)
+        return {"ok": True, "deleted": len(to_delete), "kept": len(to_keep)}
 
 
 @app.get("/reports/{profile}")

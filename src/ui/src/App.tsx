@@ -354,6 +354,7 @@ const App: React.FC = () => {
   const [runSimulationMode,    setRunSimulationMode]    = useState<string>("automatic");
 
   const [runs, setRuns] = useState<string[]>([]);
+  const [snapshotReloadKey, setSnapshotReloadKey] = useState(0);  // increment to force snapshot reload
   const [selectedRun, setSelectedRun] = useState<string>("");
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [resultsError, setResultsError] = useState<string>("");
@@ -361,6 +362,8 @@ const App: React.FC = () => {
   const [cloneDialogOpen, setCloneDialogOpen] = useState(false);
   const [cloneNewName, setCloneNewName] = useState("");
   const [cloneSource, setCloneSource] = useState<string>("clean");
+  const [cloneVersion, setCloneVersion] = useState<number | "latest">("latest");
+  const [cloneSourceVersions, setCloneSourceVersions] = useState<{v:number;ts:string;note:string}[]>([]);
 
   const [selectedResultsAccount, setSelectedResultsAccount] =
     useState<string>("None");
@@ -383,6 +386,13 @@ const App: React.FC = () => {
   const [showVersionHistory, setShowVersionHistory] = useState(false);
   const [versionHistory, setVersionHistory] = useState<{v:number;ts:string;note:string;files_changed:string[]}[]>([]);
   const [versionRestoring, setVersionRestoring] = useState<number|null>(null);
+  const [confirmDeleteV, setConfirmDeleteV] = useState<number | null>(null);
+  const [confirmClearReports, setConfirmClearReports] = useState(false);
+  const [confirmDeleteProfile, setConfirmDeleteProfile] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [pendingDirtyAction, setPendingDirtyAction] = useState<(() => void) | null>(null);
+  const [versionPreview, setVersionPreview] = useState<{v:number; name:string; content:string} | null>(null);
+  const [versionPreviewLoading, setVersionPreviewLoading] = useState(false);
   const [saveNote, setSaveNote] = useState("");
   const [originalContent, setOriginalContent] = useState("");
   const [showVersionPrompt, setShowSaveVersionPrompt] = useState(false);
@@ -424,6 +434,10 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (!selectedProfile) return;
+    // Clear stale run data immediately when profile changes
+    setSelectedRun("");
+    setSnapshot(null);
+    setRuns([]);
     loadRuns(selectedProfile);
     loadConfig(selectedProfile, configFile, "view");
     loadPersonDefaults(selectedProfile);
@@ -438,15 +452,21 @@ const App: React.FC = () => {
       return;
     }
     loadSnapshot(selectedProfile, selectedRun);
-  }, [selectedProfile, selectedRun]);
+  }, [selectedProfile, selectedRun, snapshotReloadKey]);
 
   const loadRuns = (profile: string) => {
+    // Clear stale run/snapshot when called (profile may or may not have changed)
+    // snapshotReloadKey increment below handles forced reload for same-profile refreshes
     apiGet<ReportsList>(`/reports/${encodeURIComponent(profile)}`)
       .then((data) => {
         const list = data.runs || [];
         setRuns(list);
         if (list.length > 0) {
-          setSelectedRun(list[list.length - 1]);
+          const latest = list[list.length - 1];
+          // Always increment reload key to force snapshot reload
+          // even when run ID is unchanged (e.g. page refresh, tab switch)
+          setSnapshotReloadKey(k => k + 1);
+          setSelectedRun(latest);
         } else {
           setSelectedRun("");
           setSnapshot(null);
@@ -563,10 +583,7 @@ const App: React.FC = () => {
   };
 
   const createProfile = () => {
-    const name = window.prompt("New profile name:");
-    if (!name) return;
-
-    setCloneNewName(name);
+    setCloneNewName("");
     if (profiles.includes(selectedProfile)) {
       setCloneSource(selectedProfile);
     } else if (profiles.includes("default")) {
@@ -577,18 +594,41 @@ const App: React.FC = () => {
     setCloneDialogOpen(true);
   };
 
+  const deleteVersion = async (v: number) => {
+    if (!selectedProfile) return;
+    try {
+      const res = await fetch(`/profile/${encodeURIComponent(selectedProfile)}/versions/${v}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(await res.text());
+      await loadVersionHistory(selectedProfile);
+      if (versionPreview?.v === v) setVersionPreview(null);
+    } catch (e: any) {
+      alert(`Delete failed: ${String(e?.message || e)}`);
+    } finally {
+      setConfirmDeleteV(null);
+    }
+  };
+
+  const loadCloneSourceVersions = async (profile: string) => {
+    if (!profile || profile === "clean") { setCloneSourceVersions([]); return; }
+    try {
+      const res = await apiGet<{versions: any[]}>(`/profile/${encodeURIComponent(profile)}/versions`);
+      setCloneSourceVersions((res.versions || []).slice().reverse()); // newest first
+    } catch { setCloneSourceVersions([]); }
+  };
+
   const confirmCreateProfile = async () => {
-    if (!cloneNewName) return;
+    if (!cloneNewName.trim()) return;
     const source = cloneSource || "clean";
     try {
-      await apiPost<{ ok: boolean; profile: string }>("/profiles/create", {
-        name: cloneNewName,
-        source,
-      });
+      const trimmedName = cloneNewName.trim();
+      const versionPayload = cloneVersion !== "latest" && cloneSource !== "clean"
+        ? { name: trimmedName, source, clone_version: cloneVersion }
+        : { name: trimmedName, source };
+      await apiPost<{ ok: boolean; profile: string }>("/profiles/create", versionPayload);
       const data = await apiGet<ProfileList>("/profiles");
       const list = data.profiles || [];
       setProfiles(list);
-      setSelectedProfile(cloneNewName);
+      setSelectedProfile(cloneNewName.trim());
     } catch (e: any) {
       alert(`Create profile failed: ${String(e?.message || e)}`);
     } finally {
@@ -604,12 +644,12 @@ const App: React.FC = () => {
 
   const clearReports = async () => {
     if (!selectedProfile) return;
-    if (
-      !window.confirm(
-        `Clear all run reports for profile '${selectedProfile}'?`,
-      )
-    )
-      return;
+    setConfirmClearReports(true);
+  };
+
+  const clearReportsConfirmed = async () => {
+    setConfirmClearReports(false);
+    if (!selectedProfile) return;
     try {
       await apiPost("/reports/clear", { profile: selectedProfile });
       loadRuns(selectedProfile);
@@ -621,12 +661,12 @@ const App: React.FC = () => {
 
   const deleteProfile = async () => {
     if (!selectedProfile || selectedProfile === "default") return;
-    if (
-      !window.confirm(
-        `Delete profile '${selectedProfile}' and all its reports?`,
-      )
-    )
-      return;
+    setConfirmDeleteProfile(true);
+  };
+
+  const deleteProfileConfirmed = async () => {
+    setConfirmDeleteProfile(false);
+    if (!selectedProfile || selectedProfile === "default") return;
     try {
       await apiPost("/profiles/delete", { profile: selectedProfile });
       const data = await apiGet<ProfileList>("/profiles");
@@ -671,14 +711,15 @@ const App: React.FC = () => {
     }
   };
 
-  // Returns true if safe to navigate away, false if user cancelled
-  const guardDirty = (action: string = "leave this file"): boolean => {
-    if (!editorDirty) return true;
-    return window.confirm(
-      `You have unsaved changes to ${configFile}.
-
-Save to Profile to keep them, or click OK to discard and ${action}.`
-    );
+  // Returns true if safe to navigate away (no changes), or queues the action for after inline confirm
+  const guardDirty = (action: (() => void) | null = null): boolean => {
+    if (!editorDirty) {
+      if (action) action();
+      return true;
+    }
+    setPendingDirtyAction(() => action);
+    setConfirmDiscard(true);
+    return false;
   };
 
   const generateVersionLabel = (filename: string, original: string, updated: string): string => {
@@ -705,8 +746,32 @@ Save to Profile to keep them, or click OK to discard and ${action}.`
       }
       if (filename === "allocation_yearly.json") return "Allocation updated";
       if (filename === "income.json") return "Income updated";
+      if (filename === "inflation_yearly.json") return "Inflation schedule updated";
+      if (filename === "shocks_yearly.json") return "Shocks/scenario updated";
+      if (filename === "economic.json") return "Economic policy updated";
       return `${filename} updated`;
     } catch { return `${filename} saved`; }
+  };
+
+  const viewVersionFile = async (v: number, name: string) => {
+    // Toggle — close if already showing same version+file
+    if (versionPreview?.v === v && versionPreview?.name === name) {
+      setVersionPreview(null);
+      return;
+    }
+    setVersionPreviewLoading(true);
+    setVersionPreview(null);
+    try {
+      const res = await apiGet<{v:number; name:string; content:string}>(
+        `/profile/${encodeURIComponent(selectedProfile ?? "")}` +
+        `/versions/${v}/${encodeURIComponent(name)}`
+      );
+      setVersionPreview(res);
+    } catch (e: any) {
+      alert(`Could not load version: ${String(e?.message || e)}`);
+    } finally {
+      setVersionPreviewLoading(false);
+    }
   };
 
   const loadVersionHistory = async (profile: string) => {
@@ -852,8 +917,7 @@ Save to Profile to keep them, or click OK to discard and ${action}.`
       createProfile();
       return;
     }
-    if (!guardDirty("switch profiles")) return;
-    setSelectedProfile(value);
+    guardDirty(() => setSelectedProfile(value));
   };
 
   return (
@@ -869,19 +933,19 @@ Save to Profile to keep them, or click OK to discard and ${action}.`
           </button>
           <button
             className={tab === "simulation" ? "tab active" : "tab"}
-            onClick={() => { if (guardDirty("switch tabs")) setTab("simulation"); }}
+            onClick={() => guardDirty(() => setTab("simulation"))}
           >
             Simulation
           </button>
           <button
             className={tab === "investment" ? "tab active" : "tab"}
-            onClick={() => { if (guardDirty("switch tabs")) setTab("investment"); }}
+            onClick={() => guardDirty(() => setTab("investment"))}
           >
             Investment
           </button>
           <button
             className={tab === "results" ? "tab active" : "tab"}
-            onClick={() => { if (guardDirty("switch tabs")) setTab("results"); }}
+            onClick={() => guardDirty(() => setTab("results"))}
           >
             Results
           </button>
@@ -909,6 +973,48 @@ Save to Profile to keep them, or click OK to discard and ${action}.`
             <button onClick={() => setShowHelp(false)}
               style={{ background: "none", border: "none", cursor: "pointer", fontSize: 20, color: "#6b7280" }}>✕</button>
           </div>
+
+          {/* Simulation Modes */}
+          <h3 style={{ fontSize: 14, color: "#1e40af", marginBottom: 8 }}>Simulation Modes — Withdrawal Funding Priority</h3>
+          <p style={{ fontSize: 13, color: "#374151", margin: "0 0 6px" }}>
+            The simulation mode controls how the simulator balances <strong>withdrawal funding</strong> vs <strong>portfolio growth</strong>. Set in <code>person.json → simulation_mode</code> or on the Simulation tab.
+          </p>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, marginBottom: 12 }}>
+            <thead>
+              <tr style={{ background: "#f1f5f9", borderBottom: "2px solid #e2e8f0" }}>
+                <th style={{ padding: "6px 10px", textAlign: "left", color: "#1e40af" }}>Mode</th>
+                <th style={{ padding: "6px 10px", textAlign: "left", color: "#1e40af" }}>Withdrawal funded to</th>
+                <th style={{ padding: "6px 10px", textAlign: "left", color: "#1e40af" }}>Primary success metric</th>
+                <th style={{ padding: "6px 10px", textAlign: "left", color: "#1e40af" }}>Best for</th>
+              </tr>
+            </thead>
+            <tbody>
+              {[
+                ["🔄 Automatic", "Floor (base_k) in poor years, full target otherwise — glide path shifts over time", "Floor survival rate", "Most users — balances growth and security automatically"],
+                ["📈 Investment-first", "Floor only (base_k) — preserves capital for growth even in good years", "Floor survival rate + CAGR", "Accumulation phase — maximize long-term portfolio value"],
+                ["⚖ Balanced", "50/50 blend of floor and full-plan targets", "Composite score", "Transition years — equal weight on growth and income"],
+                ["🛡 Retirement-first", "Full target (amount_k) when funded; floor (base_k) when portfolio survival is at risk — prioritizes longevity over growth", "Full-plan survival rate", "Distribution phase — maximize years of full funding"],
+              ].map(([mode, funding, metric, use]) => (
+                <tr key={mode} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                  <td style={{ padding: "5px 10px", fontWeight: 600 }}>{mode}</td>
+                  <td style={{ padding: "5px 10px", color: "#374151" }}>{funding}</td>
+                  <td style={{ padding: "5px 10px", color: "#6b7280" }}>{metric}</td>
+                  <td style={{ padding: "5px 10px", color: "#6b7280", fontStyle: "italic" }}>{use}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <p style={{ fontSize: 12, color: "#6b7280", margin: "0 0 14px", background: "#fffbeb",
+            border: "1px solid #fde68a", borderRadius: 6, padding: "8px 12px" }}>
+            ⚠ <strong>Investment and Automatic modes will show 0% full-plan survival</strong> — this is expected and correct.
+            These modes deliberately fund only the floor (base_k) in poor years to preserve capital for recovery and long-term growth.
+            A 0% full-plan rate alongside 100% floor survival and a growing portfolio is the <em>ideal outcome</em> in these modes, not a failure.
+            <br/><br/>
+            <strong>All modes</strong> fall back to the floor in scenarios where paying the full amount would risk portfolio depletion —
+            the difference is <em>how often and how aggressively</em>: investment-first funds only the floor even in good years,
+            retirement-first funds the full target whenever the portfolio can sustain it, and falls to the floor only under duress.
+            No mode guarantees 100% full-plan survival — that would require an infinite portfolio.
+          </p>
 
           {/* Config formats */}
           <h3 style={{ fontSize: 14, color: "#1e40af", marginBottom: 8 }}>Withdrawal &amp; Income — Age-Based Format</h3>
@@ -1033,8 +1139,7 @@ Save to Profile to keep them, or click OK to discard and ${action}.`
               <button
                 onClick={() => {
                   if (!selectedProfile) return;
-                  if (!guardDirty("switch to edit mode")) return;
-                  loadConfig(selectedProfile, configFile, "edit");
+                  guardDirty(() => loadConfig(selectedProfile, configFile, "edit"));
                 }}
                 disabled={!selectedProfile || isDefaultProfile}
               >
@@ -1049,39 +1154,138 @@ Save to Profile to keep them, or click OK to discard and ${action}.`
               >
                 VIEW
               </button>
-              <button onClick={clearReports} disabled={!selectedProfile}>
-                CLEAR RUN REPORTS (profile)
-              </button>
-              <button
-                onClick={deleteProfile}
-                disabled={!selectedProfile || isDefaultProfile}
-              >
-                DELETE
-              </button>
+              {!confirmClearReports ? (
+                <button onClick={clearReports} disabled={!selectedProfile}>
+                  CLEAR RUN REPORTS (profile)
+                </button>
+              ) : (
+                <span style={{ display:"flex", gap:6, alignItems:"center",
+                  background:"#fef2f2", border:"1px solid #fecaca",
+                  borderRadius:6, padding:"3px 10px", fontSize:12 }}>
+                  <span style={{color:"#dc2626"}}>Clear all reports for {selectedProfile}?</span>
+                  <button onClick={clearReportsConfirmed}
+                    style={{background:"#dc2626",color:"#fff",border:"none",
+                      borderRadius:4,padding:"1px 8px",cursor:"pointer",fontSize:12}}>Yes</button>
+                  <button onClick={() => setConfirmClearReports(false)}
+                    style={{background:"none",border:"1px solid #e5e7eb",
+                      borderRadius:4,padding:"1px 8px",cursor:"pointer",fontSize:12}}>No</button>
+                </span>
+              )}
+              {!confirmDeleteProfile ? (
+                <button
+                  onClick={deleteProfile}
+                  disabled={!selectedProfile || isDefaultProfile}
+                >
+                  DELETE
+                </button>
+              ) : (
+                <span style={{ display:"flex", gap:6, alignItems:"center",
+                  background:"#fef2f2", border:"1px solid #fecaca",
+                  borderRadius:6, padding:"3px 10px", fontSize:12 }}>
+                  <span style={{color:"#dc2626"}}>Delete profile {selectedProfile}?</span>
+                  <button onClick={deleteProfileConfirmed}
+                    style={{background:"#dc2626",color:"#fff",border:"none",
+                      borderRadius:4,padding:"1px 8px",cursor:"pointer",fontSize:12}}>Yes</button>
+                  <button onClick={() => setConfirmDeleteProfile(false)}
+                    style={{background:"none",border:"1px solid #e5e7eb",
+                      borderRadius:4,padding:"1px 8px",cursor:"pointer",fontSize:12}}>No</button>
+                </span>
+              )}
             </div>
           </div>
 
           {cloneDialogOpen && (
-            <div className="clone-row">
-              <span>
-                New profile: <strong>{cloneNewName}</strong>
-              </span>
-              <label>
-                Clone from:
+            <div style={{
+              display: "flex", alignItems: "center", gap: 12,
+              padding: "10px 14px", margin: "8px 0",
+              background: "#f8faff", border: "1px solid #e0e7ff",
+              borderRadius: 8, flexWrap: "wrap",
+            }}>
+              {/* New profile name input */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                <span style={{ fontSize: 11, color: "#6b7280", fontWeight: 500 }}>New profile name</span>
+                <input
+                  type="text"
+                  value={cloneNewName}
+                  onChange={e => setCloneNewName(e.target.value)}
+                  onBlur={e => setCloneNewName(e.target.value.trim())}
+                  onKeyDown={e => e.key === "Enter" && confirmCreateProfile()}
+                  placeholder="e.g. Aggressive, Conservative…"
+                  autoFocus
+                  style={{
+                    fontSize: 13, padding: "4px 10px",
+                    border: "1px solid #d1d5db", borderRadius: 6,
+                    width: 200, color: "#111827",
+                  }}
+                />
+              </div>
+
+              {/* Seed from profile */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                <span style={{ fontSize: 11, color: "#6b7280", fontWeight: 500 }}>Seed from</span>
                 <select
                   value={cloneSource}
-                  onChange={(e) => setCloneSource(e.target.value)}
+                  onChange={(e) => {
+                    setCloneSource(e.target.value);
+                    setCloneVersion("latest");
+                    loadCloneSourceVersions(e.target.value);
+                  }}
+                  style={{ fontSize: 13, padding: "4px 10px", border: "1px solid #d1d5db",
+                    borderRadius: 6, color: "#111827" }}
                 >
-                  <option value="clean">(clean profile)</option>
+                  <option value="clean">(clean — empty profile)</option>
                   {profiles.map((p) => (
-                    <option key={p} value={p}>
-                      {p}
-                    </option>
+                    <option key={p} value={p}>{p}</option>
                   ))}
                 </select>
-              </label>
-              <button onClick={confirmCreateProfile}>Create</button>
-              <button onClick={cancelCreateProfile}>Cancel</button>
+              </div>
+
+              {/* Version selector — only when seeding from a profile with history */}
+              {cloneSource !== "clean" && cloneSourceVersions.length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                  <span style={{ fontSize: 11, color: "#6b7280", fontWeight: 500 }}>At version</span>
+                  <select
+                    value={String(cloneVersion)}
+                    onChange={(e) => setCloneVersion(e.target.value === "latest" ? "latest" : Number(e.target.value))}
+                    style={{ fontSize: 13, padding: "4px 10px", border: "1px solid #d1d5db",
+                      borderRadius: 6, color: "#111827", maxWidth: 260 }}
+                  >
+                    <option value="latest">latest (current)</option>
+                    {cloneSourceVersions.map(v => (
+                      <option key={v.v} value={v.v}>
+                        v{v.v} · {new Date(v.ts).toLocaleDateString()} · {v.note}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {/* Actions */}
+              <div style={{ display: "flex", gap: 8, alignSelf: "flex-end", paddingBottom: 1 }}>
+                <button
+                  onClick={confirmCreateProfile}
+                  disabled={!cloneNewName.trim()}
+                  style={{
+                    background: cloneNewName.trim() ? "#1d4ed8" : "#e5e7eb",
+                    color: cloneNewName.trim() ? "#fff" : "#9ca3af",
+                    border: "none", borderRadius: 6,
+                    padding: "5px 16px", cursor: cloneNewName.trim() ? "pointer" : "default",
+                    fontSize: 13, fontWeight: 600,
+                  }}
+                >
+                  Create
+                </button>
+                <button
+                  onClick={cancelCreateProfile}
+                  style={{
+                    background: "none", color: "#6b7280",
+                    border: "1px solid #d1d5db", borderRadius: 6,
+                    padding: "5px 14px", cursor: "pointer", fontSize: 13,
+                  }}
+                >
+                  Cancel
+                </button>
+              </div>
             </div>
           )}
 
@@ -1120,70 +1324,163 @@ Save to Profile to keep them, or click OK to discard and ${action}.`
                       No versions yet. Created automatically on each config save.
                     </div>
                   ) : (
-                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, tableLayout: "fixed" }}>
                       <thead>
                         <tr style={{ background: "#f9fafb", borderBottom: "1px solid #e5e7eb" }}>
-                          {["Ver","Saved","Note","Files",""].map(h => (
-                            <th key={h} style={{ padding: "6px 12px", textAlign: "left",
-                              color: "#6b7280", fontWeight: 600 }}>{h}</th>
-                          ))}
+                          <th style={{ padding: "6px 12px", textAlign: "left", color: "#6b7280", fontWeight: 600, width: 70 }}>Ver</th>
+                          <th style={{ padding: "6px 12px", textAlign: "left", color: "#6b7280", fontWeight: 600, width: 160 }}>Saved</th>
+                          <th style={{ padding: "6px 12px", textAlign: "left", color: "#6b7280", fontWeight: 600, maxWidth: 300 }}>Note</th>
+                          <th style={{ padding: "6px 12px", textAlign: "right", color: "#6b7280", fontWeight: 600, width: 210, minWidth: 210 }}></th>
                         </tr>
                       </thead>
                       <tbody>
-                        {versionHistory.map((entry, idx) => (
-                          <tr key={entry.v} style={{
-                            borderBottom: "1px solid #f3f4f6",
-                            background: idx === 0 ? "#f0fdf4" : undefined,
-                          }}>
-                            <td style={{ padding: "6px 12px", fontWeight: idx === 0 ? 700 : 400 }}>
-                              v{entry.v}
-                              {idx === 0 && <span style={{ marginLeft: 6, fontSize: 10, color: "#15803d",
-                                background: "#dcfce7", borderRadius: 999, padding: "1px 6px" }}>latest</span>}
-                            </td>
-                            <td style={{ padding: "6px 12px", color: "#6b7280" }}>
-                              {new Date(entry.ts).toLocaleString()}
-                            </td>
-                            <td style={{ padding: "6px 12px" }}>
-                              {entry.note}
-                              {" "}
-                              <span style={{
-                                fontSize: 9, borderRadius: 999, padding: "1px 5px",
-                                background: (entry as any).source === "user" ? "#fef3c7" : "#f3f4f6",
-                                color:      (entry as any).source === "user" ? "#92400e" : "#9ca3af",
-                                fontWeight: 600,
+                        {versionHistory.map((entry, idx) => {
+                          const isLatest = idx === 0;
+                          const isPreviewing = versionPreview?.v === entry.v;
+                          const viewFile = entry.files_changed?.[0] ?? "person.json";
+                          return (
+                            <React.Fragment key={entry.v}>
+                              <tr style={{
+                                borderBottom: isPreviewing ? "none" : "1px solid #f3f4f6",
+                                background: isLatest ? "#f0fdf4" : isPreviewing ? "#eff6ff" : undefined,
                               }}>
-                                {(entry as any).source === "user" ? "user" : "auto"}
-                              </span>
-                            </td>
-                            <td style={{ padding: "6px 12px", color: "#9ca3af", fontSize: 11 }}>
-                              {entry.files_changed?.join(", ")}
-                            </td>
-                            <td style={{ padding: "6px 12px" }}>
-                              {idx > 0 && (
-                                <button
-                                  disabled={versionRestoring !== null}
-                                  onClick={() => {
-                                    if (confirm(`Restore v${entry.v}?\n\nSaved: ${new Date(entry.ts).toLocaleString()}\nNote: ${entry.note}\n\nCurrent state will be auto-saved first.`)) {
-                                      restoreVersion(entry.v);
-                                    }
-                                  }}
-                                  style={{ background: "#eff6ff", color: "#1d4ed8",
-                                    border: "1px solid #bfdbfe", borderRadius: 5,
-                                    padding: "2px 10px", cursor: "pointer", fontSize: 11,
-                                    opacity: versionRestoring !== null ? 0.5 : 1 }}
-                                >
-                                  {versionRestoring === entry.v ? "Restoring…" : "Restore"}
-                                </button>
+                                {/* Ver */}
+                                <td style={{ padding: "6px 12px", fontWeight: isLatest ? 700 : 400, whiteSpace: "nowrap" }}>
+                                  v{entry.v}
+                                  {isLatest && <span style={{ marginLeft: 6, fontSize: 10, color: "#15803d",
+                                    background: "#dcfce7", borderRadius: 999, padding: "1px 6px" }}>latest</span>}
+                                </td>
+                                {/* Saved */}
+                                <td style={{ padding: "6px 12px", color: "#6b7280", whiteSpace: "nowrap" }}>
+                                  {new Date(entry.ts).toLocaleString()}
+                                </td>
+                                {/* Note — takes remaining space, truncates if needed */}
+                                <td style={{ padding: "6px 12px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 0 }}>
+                                  {entry.note}{" "}
+                                  <span style={{
+                                    fontSize: 9, borderRadius: 999, padding: "1px 5px",
+                                    background: (entry as any).source === "user" ? "#fef3c7" : "#f3f4f6",
+                                    color:      (entry as any).source === "user" ? "#92400e" : "#9ca3af",
+                                    fontWeight: 600,
+                                  }}>
+                                    {(entry as any).source === "user" ? "user" : "auto"}
+                                  </span>
+                                </td>
+                                {/* Actions */}
+                                <td style={{ padding: "6px 8px", whiteSpace: "nowrap" }}>
+                                  <div style={{ display: "flex", gap: 4, justifyContent: "flex-end" }}>
+                                    {/* View/Hide */}
+                                    <button
+                                      onClick={() => viewVersionFile(entry.v, viewFile)}
+                                      disabled={versionPreviewLoading}
+                                      style={{
+                                        background: isPreviewing ? "#dbeafe" : "#f8faff",
+                                        color: "#1d4ed8",
+                                        border: `1px solid ${isPreviewing ? "#93c5fd" : "#bfdbfe"}`,
+                                        borderRadius: 5, padding: "2px 8px",
+                                        cursor: "pointer", fontSize: 11,
+                                        fontWeight: isPreviewing ? 600 : 400,
+                                      }}
+                                    >
+                                      {isPreviewing ? "▼ Hide" : "▶ View"}
+                                    </button>
+                                    {/* Restore — not on latest */}
+                                    {!isLatest && (
+                                      <button
+                                        disabled={versionRestoring !== null}
+                                        onClick={() => { setVersionPreview(null); restoreVersion(entry.v); }}
+                                        style={{
+                                          background: "#eff6ff", color: "#1d4ed8",
+                                          border: "1px solid #bfdbfe", borderRadius: 5,
+                                          padding: "2px 8px", cursor: "pointer", fontSize: 11,
+                                          opacity: versionRestoring !== null ? 0.5 : 1,
+                                        }}
+                                      >
+                                        {versionRestoring === entry.v ? "…" : "↩ Restore"}
+                                      </button>
+                                    )}
+                                    {/* Delete — not on latest */}
+                                    {!isLatest && confirmDeleteV !== entry.v && (
+                                      <button
+                                        onClick={() => setConfirmDeleteV(entry.v)}
+                                        style={{
+                                          background: "none", color: "#d1d5db",
+                                          border: "1px solid #e5e7eb", borderRadius: 5,
+                                          padding: "2px 6px", cursor: "pointer", fontSize: 11,
+                                        }}
+                                      >🗑</button>
+                                    )}
+                                    {/* Inline delete confirm */}
+                                    {!isLatest && confirmDeleteV === entry.v && (
+                                      <span style={{ display: "flex", gap: 4, alignItems: "center",
+                                        background: "#fef2f2", border: "1px solid #fecaca",
+                                        borderRadius: 5, padding: "2px 6px", fontSize: 11 }}>
+                                        <span style={{ color: "#dc2626" }}>Delete?</span>
+                                        <button onClick={() => deleteVersion(entry.v)}
+                                          style={{ background: "#dc2626", color: "#fff", border: "none",
+                                            borderRadius: 4, padding: "1px 6px", cursor: "pointer", fontSize: 11 }}>Yes</button>
+                                        <button onClick={() => setConfirmDeleteV(null)}
+                                          style={{ background: "none", color: "#6b7280", border: "1px solid #e5e7eb",
+                                            borderRadius: 4, padding: "1px 6px", cursor: "pointer", fontSize: 11 }}>No</button>
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                              {/* Preview panel — file selector only, no version/note repetition */}
+                              {isPreviewing && versionPreview && (
+                                <tr style={{ background: "#f0f7ff" }}>
+                                  <td colSpan={4} style={{ padding: 0 }}>
+                                    <div style={{ borderTop: "1px solid #bfdbfe", borderBottom: "1px solid #bfdbfe" }}>
+                                      {/* File selector bar — clean, no version/note */}
+                                      <div style={{
+                                        padding: "6px 12px", background: "#dbeafe",
+                                        display: "flex", gap: 6, alignItems: "center",
+                                        borderBottom: "1px solid #bfdbfe", flexWrap: "wrap",
+                                      }}>
+                                        <span style={{ fontSize: 11, color: "#1e40af", fontWeight: 600 }}>View file:</span>
+                                        {(entry.files_changed ?? []).map(f => (
+                                          <button key={f}
+                                            onClick={() => viewVersionFile(entry.v, f)}
+                                            style={{
+                                              background: versionPreview.name === f ? "#1d4ed8" : "#eff6ff",
+                                              color: versionPreview.name === f ? "#fff" : "#1d4ed8",
+                                              border: "1px solid #bfdbfe", borderRadius: 4,
+                                              padding: "1px 8px", cursor: "pointer", fontSize: 11,
+                                            }}
+                                          >{f}</button>
+                                        ))}
+                                      </div>
+                                      {/* JSON content */}
+                                      <pre style={{
+                                        margin: 0, padding: "10px 14px",
+                                        fontSize: 11, lineHeight: 1.5,
+                                        background: "#1e293b", color: "#e2e8f0",
+                                        maxHeight: 300, overflowY: "auto",
+                                        fontFamily: "monospace",
+                                      }}>
+                                        {versionPreview.content}
+                                      </pre>
+                                      {/* Warning — below content */}
+                                      <div style={{ padding: "6px 12px", fontSize: 11,
+                                        background: "#fffbeb", borderTop: "1px solid #fde68a", color: "#92400e" }}>
+                                        ⚠ Restoring replaces all {entry.files_changed?.length ?? 7} config files.
+                                        Currently previewing <strong>{versionPreview.name}</strong> only.
+                                        Current state auto-saved first.
+                                      </div>
+                                    </div>
+                                  </td>
+                                </tr>
                               )}
-                            </td>
-                          </tr>
-                        ))}
+                            </React.Fragment>
+                          );
+                        })}
                       </tbody>
                     </table>
                   )}
                   <div style={{ padding: "6px 12px", fontSize: 11, color: "#9ca3af",
                     borderTop: "1px solid #f3f4f6", background: "#fafafa" }}>
-                    Auto-saved on every config write · Restore always saves current state first · Last 20 versions kept
+                    Auto-saved on every config write · Restore replaces all 7 config files (person.json, withdrawal_schedule.json, allocation_yearly.json, income.json, inflation_yearly.json, shocks_yearly.json, economic.json) · Last 50 versions kept
                   </div>
                 </div>
               )}
@@ -1203,7 +1500,7 @@ Save to Profile to keep them, or click OK to discard and ${action}.`
                         }
                         onClick={() => {
                           if (!selectedProfile) return;
-                          if (!guardDirty(`switch to ${name}`)) return;
+                          guardDirty(() => loadConfig(selectedProfile, name, configMode));
                           loadConfig(selectedProfile, name, configMode);
                         }}
                       >
@@ -1274,15 +1571,32 @@ Save to Profile to keep them, or click OK to discard and ${action}.`
                     >
                       Save to Profile
                     </button>
-                    <button
-                      onClick={() => {
-                        if (!selectedProfile) return;
-                        if (editorDirty && !window.confirm(`Discard unsaved changes to ${configFile}?`)) return;
-                        loadConfig(selectedProfile, configFile, configMode);
-                      }}
-                    >
-                      {editorDirty ? "Discard Changes" : "Clear Cache (Profile Editor)"}
-                    </button>
+                    {editorDirty && confirmDiscard ? (
+                      <span style={{ display:"flex", gap:6, alignItems:"center",
+                        background:"#fef2f2", border:"1px solid #fecaca",
+                        borderRadius:6, padding:"3px 10px", fontSize:12 }}>
+                        <span style={{color:"#dc2626"}}>Discard changes to {configFile}?</span>
+                        <button onClick={() => {
+                            setConfirmDiscard(false);
+                            if (pendingDirtyAction) { pendingDirtyAction(); setPendingDirtyAction(null); }
+                            else loadConfig(selectedProfile, configFile, configMode);
+                          }}
+                          style={{background:"#dc2626",color:"#fff",border:"none",
+                            borderRadius:4,padding:"1px 8px",cursor:"pointer",fontSize:12}}>Yes</button>
+                        <button onClick={() => { setConfirmDiscard(false); setPendingDirtyAction(null); }}
+                          style={{background:"none",border:"1px solid #e5e7eb",
+                            borderRadius:4,padding:"1px 8px",cursor:"pointer",fontSize:12}}>No</button>
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => {
+                          if (!selectedProfile) return;
+                          guardDirty(() => loadConfig(selectedProfile, configFile, configMode));
+                        }}
+                      >
+                        {editorDirty ? "Discard Changes" : "Clear Cache (Profile Editor)"}
+                      </button>
+                    )}
                     {/* Save Version — only before editing (not while dirty) */}
                     {!isDefaultProfile && !editorDirty && (
                       <button
@@ -1902,8 +2216,13 @@ Save to Profile to keep them, or click OK to discard and ${action}.`
                       const isRetirement = !isInvestmentFirst;
                       const dd90sc = snapshot.summary?.drawdown_p90 ?? 0;
                       const successLabel = snapshot.summary?.success_rate_label ?? "Survival rate";
-                      const successRate  = snapshot.summary?.success_rate ?? 0;
                       const floorRate    = snapshot.summary?.floor_success_rate;
+                      const rawSuccessRate = snapshot.summary?.success_rate ?? 0;
+                      // Investment-first/automatic: primary metric is floor survival rate
+                      // Retirement-first: primary metric is full-plan survival rate
+                      const successRate = (isInvestmentFirst && floorRate !== undefined)
+                        ? floorRate
+                        : rawSuccessRate;
                       const composite    = snapshot.summary?.composite_score;
                       return (<>
                         {/* Mode badge row */}
@@ -1935,13 +2254,31 @@ Save to Profile to keep them, or click OK to discard and ${action}.`
                           <td>
                             <Tip label={successLabel}
                               tip={isInvestmentFirst
-                                ? "Investment-first mode: success measured against the spending floor only. Going below the full plan is acceptable — the portfolio is optimized for growth."
-                                : "Retirement-first mode: success measured against the full spending plan. Any shortfall below the planned withdrawal counts as a failure year."} />
+                                ? "Floor survival rate: the % of simulation paths where the portfolio always stayed above the spending floor (base_k). In investment/automatic modes this is the primary success metric — the full-plan rate (shown below) will often be 0% because the simulator may fund only the floor in poor years to preserve long-term growth. A high floor rate with a large ending balance is the ideal outcome."
+                                : "Full-plan survival rate: the % of simulation paths where every planned withdrawal (amount_k) was fully met in every year. In retirement-first mode this is the primary metric — any year with a shortfall counts as a failure regardless of the final balance."} />
                           </td>
                           <td>{formatPct(successRate)}</td>
                         </tr>
 
-                        {/* Show floor rate as secondary when in retirement mode */}
+                        {/* Secondary — investment mode: reframe instead of showing raw 0% */}
+                        {isInvestmentFirst && (
+                          <tr style={{ fontSize: 11, color: "#6b7280" }}>
+                            <td style={{ paddingLeft: 16 }}>
+                              <Tip label="↳ Withdrawal strategy"
+                                tip="In investment and automatic modes, the simulator prioritizes long-term portfolio growth. In poor market years it may fund only the floor (base spending) rather than the full target — preserving capital for recovery. This is intentional: the floor survival rate above is the meaningful success metric. Full-target-every-year is a retirement-first objective." />
+                            </td>
+                            <td>
+                              <span style={{
+                                background: "#f0fdf4", color: "#15803d",
+                                border: "1px solid #86efac",
+                                borderRadius: 999, padding: "1px 8px",
+                                fontSize: 10, fontWeight: 600,
+                              }}>
+                                Growth-optimized · floor always funded
+                              </span>
+                            </td>
+                          </tr>
+                        )}
                         {!isInvestmentFirst && floorRate !== undefined && floorRate !== successRate && (
                           <tr style={{ color: "#6b7280", fontSize: 12 }}>
                             <td style={{ paddingLeft: 16 }}>↳ Floor-only survival rate</td>
@@ -3268,13 +3605,24 @@ Save to Profile to keep them, or click OK to discard and ${action}.`
 
               <section className="results-section">
                 <h3>Withdrawals</h3>
+                {(snapshot.summary?.investment_weight ?? 0.5) >= 0.5 && (
+                  <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8,
+                    background: "#f8faff", border: "1px solid #e0e7ff",
+                    borderRadius: 6, padding: "6px 12px" }}>
+                    ℹ️ <strong>Investment / Automatic mode — median path shown.</strong>{" "}
+                    A well-funded portfolio typically meets the full withdrawal target on the median path.
+                    Floor-only funding (base_k) occurs on stressed paths and is captured in the
+                    floor survival rate, not this table. Switch to Retirement-first mode to prioritize
+                    full funding on all paths.
+                  </div>
+                )}
                 <table className="table">
                   <thead>
                     <tr>
                       <th>Year</th>
                       <th>Age</th>
-                      <th><Tip label="Planned withdrawal" tip="The withdrawal amount you scheduled in today's dollars, as specified in your withdrawal schedule." /></th>
-                      <th><Tip label="For spending (median path)" tip="Amount that goes toward your planned spending in today's dollars. In RMD years where RMD exceeds plan, this equals the planned amount (surplus RMD is reinvested). Shows shortfall when portfolio cannot meet the plan." /></th>
+                      <th><Tip label="Planned withdrawal" tip="The full target withdrawal (amount_k) from your withdrawal schedule in today's dollars. In investment and automatic modes, stressed paths may fund only the floor (base_k) — this table shows the median path, which typically funds the full amount when the portfolio is healthy." /></th>
+                      <th><Tip label="For spending (median path)" tip="Amount actually withdrawn for spending on the median path, in today's dollars. A healthy portfolio (like this profile at $9.92M) typically funds the full planned amount even in investment mode — floor-only funding occurs on stressed paths. RMD surplus beyond the plan is reinvested." /></th>
                       <th><Tip label="Diff vs plan (median path)" tip="Total received minus planned withdrawal. Zero or positive means fully met (including via RMD). Negative means genuine shortfall — the portfolio could not cover the planned amount." /></th>
                       <th><Tip label="For spending — future $" tip="Spending amount in nominal (future) dollars." /></th>
                       <th><Tip label="Required minimum distribution" tip="IRS-mandated minimum withdrawal from tax-deferred accounts (TRAD IRA). Begins at age 73 or 75 depending on birth year." /></th>
