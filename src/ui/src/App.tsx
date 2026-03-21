@@ -380,6 +380,13 @@ const App: React.FC = () => {
   const [showPortfolioAnalysis, setShowPortfolioAnalysis] = useState(false);
   const [showRothSchedule, setShowRothSchedule] = useState(false);
   const [showRothInsights, setShowRothInsights] = useState(false);
+  const [showVersionHistory, setShowVersionHistory] = useState(false);
+  const [versionHistory, setVersionHistory] = useState<{v:number;ts:string;note:string;files_changed:string[]}[]>([]);
+  const [versionRestoring, setVersionRestoring] = useState<number|null>(null);
+  const [saveNote, setSaveNote] = useState("");
+  const [originalContent, setOriginalContent] = useState("");
+  const [showVersionPrompt, setShowSaveVersionPrompt] = useState(false);
+  const [versionLabel, setVersionLabel] = useState("");
   const [capeConfig, setCapeConfig] = useState<{
     cape_current: number;
     cape_historical_mean: number;
@@ -421,6 +428,8 @@ const App: React.FC = () => {
     loadConfig(selectedProfile, configFile, "view");
     loadPersonDefaults(selectedProfile);
     setEndingBalances(null);
+    loadVersionHistory(selectedProfile);
+    setShowVersionHistory(false);
   }, [selectedProfile]);
 
   useEffect(() => {
@@ -494,15 +503,21 @@ const App: React.FC = () => {
           try {
             const parsed = JSON.parse(raw);
             setConfigContent(JSON.stringify(parsed, null, 2));
+            setOriginalContent(JSON.stringify(parsed, null, 2));
           } catch {
             setConfigContent(raw);
+            setOriginalContent(raw);
           }
           setConfigReadme((data as any).readme ?? null);
+          setSaveNote("");
         } else {
           // Fallback: old format — full object, strip readme client-side
           const { readme, ...rest } = data as any;
-          setConfigContent(JSON.stringify(rest, null, 2));
+          const fb = JSON.stringify(rest, null, 2);
+          setConfigContent(fb);
+          setOriginalContent(fb);
           setConfigReadme(readme ?? null);
+          setSaveNote("");
         }
       })
       .catch((err) => {
@@ -512,22 +527,39 @@ const App: React.FC = () => {
 
   const saveConfig = async () => {
     if (isDefaultProfile || !selectedProfile || !configFile) return;
-    try {
-      JSON.parse(configContent);
-    } catch (e) {
-      alert(`Invalid JSON: ${String(e)}`);
-      return;
-    }
+    try { JSON.parse(configContent); }
+    catch (e) { alert(`Invalid JSON: ${String(e)}`); return; }
+    const isUserNote = saveNote.trim().length > 0;
+    const note = isUserNote ? saveNote.trim()
+      : generateVersionLabel(configFile, originalContent, configContent);
     try {
       await apiPost<{ ok: boolean }>("/profile-config", {
         profile: selectedProfile,
         name: configFile,
         content: configContent,
+        version_note: note,
+        version_source: isUserNote ? "user" : "auto",
       });
       setEditorDirty(false);
-    } catch (e: any) {
-      alert(`Save failed: ${String(e?.message || e)}`);
-    }
+      setOriginalContent(configContent);
+      setSaveNote("");
+      loadVersionHistory(selectedProfile);
+    } catch (e: any) { alert(`Save failed: ${String(e?.message || e)}`); }
+  };
+
+  const saveVersion = async () => {
+    if (!selectedProfile || isDefaultProfile) return;
+    const note = versionLabel.trim() || "manual save";
+    try {
+      // Use dedicated snapshot endpoint — no file write, just versions the current state
+      await apiPost<{ ok: boolean; v: number }>(
+        `/profile/${encodeURIComponent(selectedProfile)}/snapshot`,
+        { note, source: "user" }
+      );
+      setVersionLabel("");
+      setShowSaveVersionPrompt(false);
+      loadVersionHistory(selectedProfile);
+    } catch (e: any) { alert(`Save version failed: ${String(e?.message || e)}`); }
   };
 
   const createProfile = () => {
@@ -637,6 +669,65 @@ const App: React.FC = () => {
       setRunStatus("error");
       setRunError(String(e?.message || e));
     }
+  };
+
+  // Returns true if safe to navigate away, false if user cancelled
+  const guardDirty = (action: string = "leave this file"): boolean => {
+    if (!editorDirty) return true;
+    return window.confirm(
+      `You have unsaved changes to ${configFile}.
+
+Save to Profile to keep them, or click OK to discard and ${action}.`
+    );
+  };
+
+  const generateVersionLabel = (filename: string, original: string, updated: string): string => {
+    try {
+      const o = JSON.parse(original), u = JSON.parse(updated);
+      if (filename === "person.json") {
+        if (o.retirement_age !== u.retirement_age)
+          return `Retirement age: ${o.retirement_age} → ${u.retirement_age}`;
+        if (o.simulation_mode !== u.simulation_mode)
+          return `Simulation mode: ${o.simulation_mode} → ${u.simulation_mode}`;
+        if (o.filing_status !== u.filing_status)
+          return `Filing status: ${o.filing_status} → ${u.filing_status}`;
+        if (JSON.stringify(o.roth_conversion_policy) !== JSON.stringify(u.roth_conversion_policy)) {
+          const strat = u.roth_conversion_policy?.recommended_strategy;
+          const conv  = u.roth_conversion_policy?.annual_conversion_k;
+          return strat ? `Roth policy: ${strat}${conv ? ` $${conv}K/yr` : ""}` : "Roth policy updated";
+        }
+        if (o.target_age !== u.target_age) return `Target age: ${o.target_age} → ${u.target_age}`;
+        return "person.json updated";
+      }
+      if (filename === "withdrawal_schedule.json") {
+        if (o.floor_k !== u.floor_k) return `Spending floor: $${o.floor_k}K → $${u.floor_k}K`;
+        return `Withdrawal schedule: ${(u.schedule||[]).length} brackets`;
+      }
+      if (filename === "allocation_yearly.json") return "Allocation updated";
+      if (filename === "income.json") return "Income updated";
+      return `${filename} updated`;
+    } catch { return `${filename} saved`; }
+  };
+
+  const loadVersionHistory = async (profile: string) => {
+    if (!profile || profile === "default") { setVersionHistory([]); return; }
+    try {
+      const res = await apiGet<{versions: any[]}>(`/profile/${encodeURIComponent(profile)}/versions`);
+      setVersionHistory((res.versions || []).slice().reverse());
+    } catch { setVersionHistory([]); }
+  };
+
+  const restoreVersion = async (v: number) => {
+    if (!selectedProfile) return;
+    setVersionRestoring(v);
+    try {
+      const res2 = await apiPost<any>(`/profile/${encodeURIComponent(selectedProfile)}/restore/${v}`, {});
+      await loadVersionHistory(selectedProfile);
+      await loadConfig(selectedProfile, configFile, configMode);
+      alert(`Restored to v${v}. Current state was auto-saved as v${res2.auto_saved_as}.`);
+    } catch (e: any) {
+      alert("Restore failed: " + String(e?.message || e));
+    } finally { setVersionRestoring(null); }
   };
 
   const runRothOptimizer = async () => {
@@ -761,6 +852,7 @@ const App: React.FC = () => {
       createProfile();
       return;
     }
+    if (!guardDirty("switch profiles")) return;
     setSelectedProfile(value);
   };
 
@@ -777,19 +869,19 @@ const App: React.FC = () => {
           </button>
           <button
             className={tab === "simulation" ? "tab active" : "tab"}
-            onClick={() => setTab("simulation")}
+            onClick={() => { if (guardDirty("switch tabs")) setTab("simulation"); }}
           >
             Simulation
           </button>
           <button
             className={tab === "investment" ? "tab active" : "tab"}
-            onClick={() => setTab("investment")}
+            onClick={() => { if (guardDirty("switch tabs")) setTab("investment"); }}
           >
             Investment
           </button>
           <button
             className={tab === "results" ? "tab active" : "tab"}
-            onClick={() => setTab("results")}
+            onClick={() => { if (guardDirty("switch tabs")) setTab("results"); }}
           >
             Results
           </button>
@@ -935,10 +1027,11 @@ const App: React.FC = () => {
             </select>
             <div className="profile-actions">
               <button
-                onClick={() =>
-                  selectedProfile &&
-                  loadConfig(selectedProfile, configFile, "edit")
-                }
+                onClick={() => {
+                  if (!selectedProfile) return;
+                  if (!guardDirty("switch to edit mode")) return;
+                  loadConfig(selectedProfile, configFile, "edit");
+                }}
                 disabled={!selectedProfile || isDefaultProfile}
               >
                 EDIT
@@ -988,6 +1081,111 @@ const App: React.FC = () => {
             </div>
           )}
 
+          {/* ── Version History ─────────────────────────────────────────── */}
+          {selectedProfile && !isDefaultProfile && (
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <button
+                  onClick={() => setShowVersionHistory(v => !v)}
+                  style={{ background: "none", border: "1px solid #d1d5db",
+                    borderRadius: 6, padding: "3px 10px", fontSize: 12,
+                    cursor: "pointer", color: "#374151",
+                    display: "flex", alignItems: "center", gap: 5 }}
+                >
+                  <span>{showVersionHistory ? "▼" : "▶"}</span>
+                  Version History
+                  {versionHistory.length > 0 && (
+                    <span style={{ background: "#e0e7ff", color: "#1e40af",
+                      borderRadius: 999, padding: "0 6px", fontSize: 11, fontWeight: 600 }}>
+                      {versionHistory.length}
+                    </span>
+                  )}
+                </button>
+                {versionHistory.length > 0 && !showVersionHistory && (
+                  <span style={{ fontSize: 11, color: "#9ca3af" }}>
+                    Latest: v{versionHistory[0]?.v} · {new Date(versionHistory[0]?.ts).toLocaleString()} · {versionHistory[0]?.note}
+                  </span>
+                )}
+              </div>
+
+              {showVersionHistory && (
+                <div style={{ marginTop: 8, border: "1px solid #e5e7eb",
+                  borderRadius: 8, overflow: "hidden" }}>
+                  {versionHistory.length === 0 ? (
+                    <div style={{ padding: "10px 14px", fontSize: 12, color: "#9ca3af" }}>
+                      No versions yet. Created automatically on each config save.
+                    </div>
+                  ) : (
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                      <thead>
+                        <tr style={{ background: "#f9fafb", borderBottom: "1px solid #e5e7eb" }}>
+                          {["Ver","Saved","Note","Files",""].map(h => (
+                            <th key={h} style={{ padding: "6px 12px", textAlign: "left",
+                              color: "#6b7280", fontWeight: 600 }}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {versionHistory.map((entry, idx) => (
+                          <tr key={entry.v} style={{
+                            borderBottom: "1px solid #f3f4f6",
+                            background: idx === 0 ? "#f0fdf4" : undefined,
+                          }}>
+                            <td style={{ padding: "6px 12px", fontWeight: idx === 0 ? 700 : 400 }}>
+                              v{entry.v}
+                              {idx === 0 && <span style={{ marginLeft: 6, fontSize: 10, color: "#15803d",
+                                background: "#dcfce7", borderRadius: 999, padding: "1px 6px" }}>latest</span>}
+                            </td>
+                            <td style={{ padding: "6px 12px", color: "#6b7280" }}>
+                              {new Date(entry.ts).toLocaleString()}
+                            </td>
+                            <td style={{ padding: "6px 12px" }}>
+                              {entry.note}
+                              {" "}
+                              <span style={{
+                                fontSize: 9, borderRadius: 999, padding: "1px 5px",
+                                background: (entry as any).source === "user" ? "#fef3c7" : "#f3f4f6",
+                                color:      (entry as any).source === "user" ? "#92400e" : "#9ca3af",
+                                fontWeight: 600,
+                              }}>
+                                {(entry as any).source === "user" ? "user" : "auto"}
+                              </span>
+                            </td>
+                            <td style={{ padding: "6px 12px", color: "#9ca3af", fontSize: 11 }}>
+                              {entry.files_changed?.join(", ")}
+                            </td>
+                            <td style={{ padding: "6px 12px" }}>
+                              {idx > 0 && (
+                                <button
+                                  disabled={versionRestoring !== null}
+                                  onClick={() => {
+                                    if (confirm(`Restore v${entry.v}?\n\nSaved: ${new Date(entry.ts).toLocaleString()}\nNote: ${entry.note}\n\nCurrent state will be auto-saved first.`)) {
+                                      restoreVersion(entry.v);
+                                    }
+                                  }}
+                                  style={{ background: "#eff6ff", color: "#1d4ed8",
+                                    border: "1px solid #bfdbfe", borderRadius: 5,
+                                    padding: "2px 10px", cursor: "pointer", fontSize: 11,
+                                    opacity: versionRestoring !== null ? 0.5 : 1 }}
+                                >
+                                  {versionRestoring === entry.v ? "Restoring…" : "Restore"}
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                  <div style={{ padding: "6px 12px", fontSize: 11, color: "#9ca3af",
+                    borderTop: "1px solid #f3f4f6", background: "#fafafa" }}>
+                    Auto-saved on every config write · Restore always saves current state first · Last 20 versions kept
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {selectedProfile && (
             <div className="config-layout">
               <div className="config-files">
@@ -999,10 +1197,11 @@ const App: React.FC = () => {
                         className={
                           name === configFile ? "config-file active" : "config-file"
                         }
-                        onClick={() =>
-                          selectedProfile &&
-                          loadConfig(selectedProfile, name, configMode)
-                        }
+                        onClick={() => {
+                          if (!selectedProfile) return;
+                          if (!guardDirty(`switch to ${name}`)) return;
+                          loadConfig(selectedProfile, name, configMode);
+                        }}
                       >
                         {name}
                       </button>
@@ -1035,29 +1234,97 @@ const App: React.FC = () => {
                       setConfigContent(e.target.value);
                       if (configMode === "edit" && !isDefaultProfile) {
                         setEditorDirty(true);
+                        setShowSaveVersionPrompt(false);
                       }
                     }}
                     readOnly={configMode === "view" || isDefaultProfile}
                     style={{ height: "40vh", minHeight: 240 }}
                   />
+                  {/* Note field — shown when editor is dirty */}
+                  {editorDirty && configMode === "edit" && !isDefaultProfile && (
+                    <div style={{ padding: "8px 10px", background: "#fafafa",
+                      borderTop: "1px solid #e5e7eb", display: "flex", flexDirection: "column", gap: 6 }}>
+                      <div style={{ fontSize: 11, color: "#6b7280" }}>
+                        Version note <span style={{ color: "#9ca3af" }}>(optional — leave blank for auto-label)</span>
+                      </div>
+                      <input
+                        type="text"
+                        value={saveNote}
+                        onChange={e => setSaveNote(e.target.value)}
+                        onKeyDown={e => e.key === "Enter" && saveConfig()}
+                        placeholder={generateVersionLabel(configFile, originalContent, configContent)}
+                        style={{ fontSize: 12, padding: "4px 8px", borderRadius: 5,
+                          border: "1px solid #d1d5db", color: "#374151", width: "100%",
+                          boxSizing: "border-box" }}
+                      />
+                      <div style={{ fontSize: 11, color: "#9ca3af" }}>
+                        Auto-label preview: <em>{generateVersionLabel(configFile, originalContent, configContent)}</em>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="config-editor-actions">
                     <button
                       onClick={saveConfig}
-                      disabled={
-                        configMode !== "edit" || isDefaultProfile || !editorDirty
-                      }
+                      disabled={configMode !== "edit" || isDefaultProfile || !editorDirty}
                     >
                       Save to Profile
                     </button>
                     <button
-                      onClick={() =>
-                        selectedProfile &&
-                        loadConfig(selectedProfile, configFile, configMode)
-                      }
+                      onClick={() => {
+                        if (!selectedProfile) return;
+                        if (editorDirty && !window.confirm(`Discard unsaved changes to ${configFile}?`)) return;
+                        loadConfig(selectedProfile, configFile, configMode);
+                      }}
                     >
-                      Clear Cache (Profile Editor)
+                      {editorDirty ? "Discard Changes" : "Clear Cache (Profile Editor)"}
                     </button>
+                    {/* Save Version — only before editing (not while dirty) */}
+                    {!isDefaultProfile && !editorDirty && (
+                      <button
+                        onClick={() => setShowSaveVersionPrompt(v => !v)}
+                        style={{ marginLeft: "auto", background: "#f0fdf4", color: "#15803d",
+                          border: "1px solid #86efac", borderRadius: 5,
+                          padding: "4px 12px", cursor: "pointer", fontSize: 12, fontWeight: 600 }}
+                      >
+                        💾 Save Version
+                      </button>
+                    )}
                   </div>
+
+                  {/* Save Version inline prompt */}
+                  {showVersionPrompt && !editorDirty && (
+                    <div style={{ padding: "10px 12px", background: "#f0fdf4",
+                      border: "1px solid #86efac", borderRadius: 6, marginTop: 6 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: "#15803d", marginBottom: 6 }}>
+                        Save Version — <span style={{ fontWeight: 400, color: "#374151" }}>current state of {configFile}</span>
+                      </div>
+                      <input
+                        type="text"
+                        value={versionLabel}
+                        onChange={e => setVersionLabel(e.target.value)}
+                        onKeyDown={e => e.key === "Enter" && saveVersion()}
+                        placeholder="e.g. before tax law change experiment, pre-retirement scenario A…"
+                        autoFocus
+                        style={{ fontSize: 12, padding: "4px 8px", borderRadius: 5,
+                          border: "1px solid #d1d5db", width: "100%",
+                          boxSizing: "border-box", marginBottom: 8 }}
+                      />
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button onClick={saveVersion}
+                          style={{ background: "#15803d", color: "#fff", border: "none",
+                            borderRadius: 5, padding: "4px 14px", cursor: "pointer",
+                            fontSize: 12, fontWeight: 600 }}>
+                          Save
+                        </button>
+                        <button onClick={() => { setShowSaveVersionPrompt(false); setVersionLabel(""); }}
+                          style={{ background: "none", border: "1px solid #d1d5db",
+                            borderRadius: 5, padding: "4px 10px", cursor: "pointer", fontSize: 12 }}>
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
                 {configReadme ? (
                   <div className="config-readme" style={{ maxHeight: "40vh" }}>
@@ -2581,8 +2848,10 @@ const App: React.FC = () => {
                                   profile: selectedProfile,
                                   name: "person.json",
                                   content: JSON.stringify(person, null, 2),
+                                  version_note: `optimizer applied — ${stratLabels[rec] || rec} $${conv_k}K/yr`,
                                 });
-                                alert(`Saved: ${stratLabels[rec] || rec} ($${conv_k}K/yr) written to ${selectedProfile}/person.json. Re-run simulation to see updated projections.`);
+                                loadVersionHistory(selectedProfile);
+                            alert(`Saved: ${stratLabels[rec] || rec} ($${conv_k}K/yr) written to ${selectedProfile}/person.json. Re-run simulation to see updated projections.`);
                               } catch (e: any) {
                                 alert("Save failed: " + String(e?.message || e));
                               }

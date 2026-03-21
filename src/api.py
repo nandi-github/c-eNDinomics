@@ -45,6 +45,10 @@ ASSETS_DIR = os.path.join(UI_DIST, "assets")
 COMMON_ASSETS_JSON = os.path.join(APP_ROOT, "config", "assets.json")
 COMMON_RMD_JSON    = os.path.join(APP_ROOT, "config", "rmd.json")
 
+# Profile versioning
+VERSIONABLE_FILES  = {"person.json", "withdrawal_schedule.json", "allocation_yearly.json", "income.json"}
+MAX_VERSIONS       = 20  # auto-prune oldest beyond this
+
 PROFILES_ROOT = os.path.join(APP_ROOT, "profiles")
 DEFAULT_PROFILE = "default"
 
@@ -160,7 +164,7 @@ def _write_json(path: str, obj: Dict[str, Any]) -> None:
 
 def _copy_file(src: str, dst: str) -> None:
     _ensure_dir(os.path.dirname(dst))
-    shutil.copy2(src, dst)
+    shutil.copy(src, dst)  # copy without metadata to avoid SMB permission issues
 
 
 def _write_run_meta(run_dir: str, profile: str, run_id: str, run_info: Dict[str, Any]) -> None:
@@ -171,6 +175,71 @@ def _write_run_meta(run_dir: str, profile: str, run_id: str, run_info: Dict[str,
     }
     path = os.path.join(run_dir, "run_meta.json")
     _write_json(path, meta)
+
+
+
+def _versions_dir(profile: str) -> str:
+    return os.path.join(_profile_dir(profile), ".versions")
+
+def _version_manifest_path(profile: str) -> str:
+    return os.path.join(_versions_dir(profile), "profile_history.json")
+
+def _load_version_manifest(profile: str) -> List[Dict[str, Any]]:
+    path = _version_manifest_path(profile)
+    if not os.path.isfile(path):
+        return []
+    try:
+        with open(path) as f:
+            return json.load(f) or []
+    except Exception:
+        return []
+
+def _save_version_manifest(profile: str, history: List[Dict[str, Any]]) -> None:
+    vdir = _versions_dir(profile)
+    _ensure_dir(vdir)
+    with open(_version_manifest_path(profile), "w") as f:
+        json.dump(history, f, indent=2)
+
+def _snapshot_profile_version(profile: str, note: str = "", source: str = "auto") -> int:
+    """
+    Snapshot the current versionable files into .versions/vN/.
+    Returns the new version number.
+    Auto-prunes versions beyond MAX_VERSIONS.
+    """
+    history    = _load_version_manifest(profile)
+    next_v     = (history[-1]["v"] + 1) if history else 1
+    vdir       = _versions_dir(profile)
+    snap_dir   = os.path.join(vdir, f"v{next_v}")
+    _ensure_dir(snap_dir)
+
+    files_saved = []
+    for fname in VERSIONABLE_FILES:
+        src_path = _profile_json_path(profile, fname)
+        if os.path.isfile(src_path):
+            import shutil
+            shutil.copy(src_path, os.path.join(snap_dir, fname))
+            files_saved.append(fname)
+
+    history.append({
+        "v":             next_v,
+        "ts":            __import__("datetime").datetime.now().isoformat(timespec="seconds"),
+        "note":          note or "manual save",
+        "source":        source,
+        "files_changed": files_saved,
+    })
+
+    # Auto-prune oldest beyond MAX_VERSIONS
+    if len(history) > MAX_VERSIONS:
+        old_entries = history[:-MAX_VERSIONS]
+        history     = history[-MAX_VERSIONS:]
+        for entry in old_entries:
+            import shutil
+            old_dir = os.path.join(vdir, f"v{entry['v']}")
+            if os.path.isdir(old_dir):
+                shutil.rmtree(old_dir, ignore_errors=True)
+
+    _save_version_manifest(profile, history)
+    return next_v
 
 
 def _default_json_names() -> List[str]:
@@ -430,12 +499,70 @@ def save_profile_json(payload: Dict[str, Any] = Body(...)):
     merged = _strip_meta_keys(incoming)
     merged.update(meta)
 
+    # Snapshot current state before overwriting (versioning)
+    note = str(payload.get("version_note", "")).strip() or f"saved {name}"
+    if name in VERSIONABLE_FILES:
+        try:
+            _source = str(payload.get("version_source", "auto"))
+            _snapshot_profile_version(profile, note=note, source=_source)
+        except Exception as _ve:
+            logger.warning("Version snapshot failed (non-fatal): %s", _ve)
+
     try:
         with open(path, "w", encoding="utf-8") as f:
             json.dump(merged, f, indent=2)
-        return {"ok": True}
+        return {"ok": True, "note": note}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Profile versioning endpoints ──────────────────────────────────────────
+
+@app.get("/profile/{profile}/versions")
+def list_profile_versions(profile: str):
+    """List all saved versions for a profile."""
+    if not os.path.isdir(_profile_dir(profile)):
+        raise HTTPException(status_code=404, detail=f"Profile '{profile}' not found")
+    history = _load_version_manifest(profile)
+    return {"profile": profile, "versions": history}
+
+
+@app.post("/profile/{profile}/restore/{v}")
+def restore_profile_version(profile: str, v: int):
+    """
+    Restore profile to version v.
+    First saves current state as a new version (auto-save before restore),
+    then copies vN files back to profile root.
+    """
+    if not os.path.isdir(_profile_dir(profile)):
+        raise HTTPException(status_code=404, detail=f"Profile '{profile}' not found")
+    if profile == DEFAULT_PROFILE:
+        raise HTTPException(status_code=403, detail="Cannot restore default profile")
+
+    vdir     = _versions_dir(profile)
+    snap_dir = os.path.join(vdir, f"v{v}")
+    if not os.path.isdir(snap_dir):
+        raise HTTPException(status_code=404, detail=f"Version v{v} not found")
+
+    # Save current state first so restore is always reversible
+    history = _load_version_manifest(profile)
+    saved_v = _snapshot_profile_version(profile, note=f"auto-save before restore to v{v}")
+
+    # Copy vN files back to profile root
+    import shutil
+    files_restored = []
+    for fname in VERSIONABLE_FILES:
+        src_path = os.path.join(snap_dir, fname)
+        if os.path.isfile(src_path):
+            shutil.copy(src_path, _profile_json_path(profile, fname))  # no metadata copy
+            files_restored.append(fname)
+
+    return {
+        "ok":             True,
+        "restored_to":    v,
+        "auto_saved_as":  saved_v,
+        "files_restored": files_restored,
+    }
 
 
 # Reports endpoints
@@ -484,6 +611,23 @@ def run_roth_optimizer_standalone(payload: Dict[str, Any] = Body(...)):
         return {"ok": True, "roth_optimizer": result}
     except Exception as e:
         logger.exception("roth-optimize failed")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+
+@app.post("/profile/{profile}/snapshot")
+def snapshot_profile(profile: str, payload: Dict[str, Any] = Body(...)):
+    """Create a version snapshot without modifying any files — used by Save Version button."""
+    if not os.path.isdir(_profile_dir(profile)):
+        raise HTTPException(status_code=404, detail=f"Profile '{profile}' not found")
+    if profile == DEFAULT_PROFILE:
+        raise HTTPException(status_code=403, detail="Cannot version default profile")
+    note   = str(payload.get("note", "")).strip() or "manual checkpoint"
+    source = str(payload.get("source", "user"))
+    try:
+        v = _snapshot_profile_version(profile, note=note, source=source)
+        return {"ok": True, "v": v, "note": note}
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
