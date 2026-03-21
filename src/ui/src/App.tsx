@@ -911,10 +911,12 @@ Save to Profile to keep them, or click OK to discard and ${action}.`
           </div>
 
           {/* Config formats */}
-          <h3 style={{ fontSize: 14, color: "#1e40af", marginBottom: 8 }}>Withdrawal Schedule — Age-Based Format</h3>
+          <h3 style={{ fontSize: 14, color: "#1e40af", marginBottom: 8 }}>Withdrawal &amp; Income — Age-Based Format</h3>
           <p style={{ fontSize: 13, color: "#374151", margin: "0 0 8px" }}>
-            Use <strong>exclusive, non-overlapping age ranges</strong>. The loader converts ages to simulation
-            years using <code>current_age</code> from person.json. Overlapping ranges are a validation error.
+            <code>withdrawal_schedule.json</code> and <code>income.json</code> use <strong>exclusive, non-overlapping age ranges</strong>.
+            The loader converts ages to simulation years using <code>current_age</code> from person.json.
+            Overlapping ranges are a validation error.
+            <br/><em>inflation_yearly.json and shocks_yearly.json use year-relative format — year 1 = current_age + 1 — because they describe economic conditions, not life-stage events.</em>
           </p>
           <pre style={{ fontSize: 12, background: "#1e293b", color: "#e2e8f0",
             borderRadius: 6, padding: "10px 14px", margin: "0 0 8px", overflowX: "auto" }}>{
@@ -1001,6 +1003,8 @@ Save to Profile to keep them, or click OK to discard and ${action}.`
             <strong>Age ranges are exclusive:</strong> use "47-64" and "65-74" — not "47-65" and "65-74". Overlapping ranges raise a validation error.
             &nbsp;·&nbsp;
             <strong>income.json</strong> is for income <em>outside</em> your portfolio (salary, rental, SS). Do not enter dividends, RMDs, or conversion amounts — those are computed automatically.
+            &nbsp;·&nbsp;
+            <strong>inflation_yearly.json &amp; shocks_yearly.json</strong> use <em>year-relative</em> format ("years": "1-5") — not ages. Year 1 = current_age + 1 (age 47 for this profile). These describe economic conditions during the simulation, not life-stage events, so years are the correct unit.
           </div>
         </div>
       )}
