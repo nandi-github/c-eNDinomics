@@ -1108,6 +1108,18 @@ def run_accounts_new(
     nom_withdraw_yoy_mean_pct  = (inv_nom_yoy.mean(axis=0)  * 100.0).tolist()
     real_withdraw_yoy_mean_pct = (inv_real_yoy.mean(axis=0) * 100.0).tolist()
 
+    # P10/P90 of annual returns — shows the realistic downside/upside range
+    # P10: 1-in-10 bad year return — will show negative years during shocks/bad markets
+    # P90: 1-in-10 good year return — shows realistic upside per year
+    import warnings as _w2
+    with _w2.catch_warnings():
+        _w2.simplefilter("ignore", RuntimeWarning)
+        nom_withdraw_yoy_p10_pct  = (np.nanpercentile(inv_nom_yoy,  10, axis=0) * 100.0).tolist()
+        nom_withdraw_yoy_p90_pct  = (np.nanpercentile(inv_nom_yoy,  90, axis=0) * 100.0).tolist()
+        inv_nom_yoy_p10_pct_core  = (np.nanpercentile(inv_nom_yoy_paths_core_shifted, 10, axis=0) * 100.0).tolist()
+        inv_nom_yoy_p90_pct_core  = (np.nanpercentile(inv_nom_yoy_paths_core_shifted, 90, axis=0) * 100.0).tolist()
+        inv_real_yoy_p10_pct_core = (np.nanpercentile(inv_real_yoy_paths_core_shifted, 10, axis=0) * 100.0).tolist()
+
     start_nom  = np.maximum(total_nom_paths[:,  0], 1e-12)
     end_nom    = np.maximum(total_nom_paths[:, -1], 1e-12)
     start_real = np.maximum(total_real_paths[:,  0], 1e-12)
@@ -1125,20 +1137,6 @@ def run_accounts_new(
     cagr_real_median = float(np.median(cagr_real_paths))
     cagr_real_p10    = float(np.percentile(cagr_real_paths, 10))
     cagr_real_p90    = float(np.percentile(cagr_real_paths, 90))
-
-    # ── Pure Asset Return ─────────────────────────────────────────────────────
-    # CAGR from the pre-cashflow core paths (no RMDs, withdrawals, or reinvestment).
-    # Measures raw portfolio return stripped of all cash flows.
-    # pure_return <= cagr_nominal in most runs because RMD reinvestment inflates
-    # the post-cashflow final balance (G13 check 13k asserts this relationship).
-    _core_start_nom  = np.maximum(total_nom_paths_core[:, 0], 1e-12)
-    _core_end_nom    = np.maximum(total_nom_paths_core[:, -1], 1e-12)
-    _core_start_real = _core_start_nom / float(np.maximum(_deflator_core[0], 1e-12))
-    _core_end_real   = _core_end_nom   / float(np.maximum(_deflator_core[-1], 1e-12))
-    _pure_nom_paths  = (_core_end_nom  / _core_start_nom)  ** (1.0 / n_years) - 1.0
-    _pure_real_paths = (_core_end_real / _core_start_real) ** (1.0 / n_years) - 1.0
-    pure_asset_return_nom_pct  = float(_pure_nom_paths.mean()  * 100.0)
-    pure_asset_return_real_pct = float(_pure_real_paths.mean() * 100.0)
 
     # Drawdown: worst peak-to-trough over the FULL simulation period per path.
     # max_to_date[path, y] = running portfolio peak up to year y.
@@ -1274,6 +1272,18 @@ def run_accounts_new(
     cagr_real_mean  *= 100.0;  cagr_real_median *= 100.0
     cagr_real_p10   *= 100.0;  cagr_real_p90   *= 100.0
 
+    # ── Pure Asset Return ─────────────────────────────────────────────────────
+    # CAGR from pre-cashflow core paths (no RMDs, withdrawals, or reinvestment).
+    # pure_return <= cagr_nominal because RMD reinvestment inflates final balance.
+    _core_start_nom  = np.maximum(total_nom_paths_core[:, 0], 1e-12)
+    _core_end_nom    = np.maximum(total_nom_paths_core[:, -1], 1e-12)
+    _core_start_real = _core_start_nom / float(np.maximum(_deflator_core[0], 1e-12))
+    _core_end_real   = _core_end_nom   / float(np.maximum(_deflator_core[-1], 1e-12))
+    _pure_nom_paths  = ((_core_end_nom  / _core_start_nom)  ** (1.0 / n_years) - 1.0) * 100.0
+    _pure_real_paths = ((_core_end_real / _core_start_real) ** (1.0 / n_years) - 1.0) * 100.0
+    pure_asset_return_nom_pct  = float(_pure_nom_paths.mean())
+    pure_asset_return_real_pct = float(_pure_real_paths.mean())
+
     res["summary"] = {
         "success_rate":               success_rate_pct,
         "success_rate_label":         "Floor survival rate" if _investment_w >= 0.5 else "Full-plan survival rate",
@@ -1305,9 +1315,7 @@ def run_accounts_new(
         "cagr_real_median":           cagr_real_median,
         "cagr_real_p10":              cagr_real_p10,
         "cagr_real_p90":              cagr_real_p90,
-        # Pure asset return: CAGR from pre-cashflow core paths.
-        # Excludes RMDs, withdrawals, and reinvestment — measures raw investment return.
-        # pure_return <= cagr_nominal because RMD reinvestment inflates final balance.
+        # Pure asset return: CAGR from pre-cashflow core paths (no RMDs/withdrawals/reinvest)
         "pure_asset_return_nom_pct":  pure_asset_return_nom_pct,
         "pure_asset_return_real_pct": pure_asset_return_real_pct,
     }
@@ -1353,17 +1361,20 @@ def run_accounts_new(
         "nom_withdraw_yoy_mean_pct": nom_withdraw_yoy_mean_pct,
         "real_withdraw_yoy_mean_pct": real_withdraw_yoy_mean_pct,
 
-        # Investment-only YoY from core path
+        # P10/P90 of annual portfolio returns — realistic downside/upside per year
+        # P10 shows negative years in shock/bad-market scenarios (mean hides these)
+        "nom_withdraw_yoy_p10_pct":  nom_withdraw_yoy_p10_pct,
+        "nom_withdraw_yoy_p90_pct":  nom_withdraw_yoy_p90_pct,
+
+        # Investment-only YoY from core path (mean)
         "inv_nom_yoy_mean_pct": inv_nom_yoy_mean_pct_core,
         "inv_real_yoy_mean_pct": inv_real_yoy_mean_pct_core,
 
-        # (plus your median/p10/p90 arrays if you’ve added them)
-        #"inv_nom_yoy_median_pct": inv_nom_yoy_median_pct,
-        #"inv_real_yoy_median_pct": inv_real_yoy_median_pct,
-        #"inv_nom_yoy_p10_pct": inv_nom_yoy_p10_pct,
-        #"inv_nom_yoy_p90_pct": inv_nom_yoy_p90_pct,
-        #"inv_real_yoy_p10_pct": inv_real_yoy_p10_pct,
-        #"inv_real_yoy_p90_pct": inv_real_yoy_p90_pct,
+        # Investment-only P10/P90 — pure asset return downside/upside
+        "inv_nom_yoy_p10_pct":  inv_nom_yoy_p10_pct_core,
+        "inv_nom_yoy_p90_pct":  inv_nom_yoy_p90_pct_core,
+        "inv_real_yoy_p10_pct": inv_real_yoy_p10_pct_core,
+
     }
 
     res["returns_acct"] = {

@@ -33,7 +33,7 @@ const COLS = {
   summary:           2,   // Metric | Value
   aggregateBalances: 4,   // Aggregate | Starting | Current median | Future median
   accountBalances:   5,   // Account | Type | Starting | Current median | Future median
-  portfolio:        11,   // Year | Age | Median | Today$ | Mean | P10 | P90 | Growth | RealGrowth | NomInv | RealInv
+  portfolio:        12,   // Year | Age | Median | Today$ | Mean | P10 | P90 | Growth(mean) | RealGrowth(mean) | StressP10 | NomInv | RealInv
   withdrawals:      14,   // Year | Age | Planned | ForSpending | Diff | FutureSpend | RMD | RMDFut | Total | TotalFut | RMDReinvCur | RMDReinvFut | Conv | ConvTax
   taxes:             9,   // Year | Age | Fed | State | NIIT | Excise | Total | TakeHome | EffRate
 };

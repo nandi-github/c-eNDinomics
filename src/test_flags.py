@@ -1798,6 +1798,15 @@ def _port_nom_yoy(res):
 def _port_real_yoy(res):
     return res.get("returns", {}).get("real_withdraw_yoy_mean_pct", [])
 
+def _port_nom_yoy_p10(res):
+    return res.get("returns", {}).get("nom_withdraw_yoy_p10_pct", [])
+
+def _port_nom_yoy_p90(res):
+    return res.get("returns", {}).get("nom_withdraw_yoy_p90_pct", [])
+
+def _inv_nom_yoy_p10(res):
+    return res.get("returns", {}).get("inv_nom_yoy_p10_pct", [])
+
 def _yoy_acct_nom(res):
     return res.get("returns_acct", {}).get("inv_nom_yoy_mean_pct_acct", {})
 
@@ -2458,6 +2467,44 @@ def group13_yoy_sanity(paths: int):
         pure_ret <= cagr_chk + 0.5,   # allow 0.5 ppt noise from different path compositions
         f"pure={pure_ret:.2f}% cagr_nom={cagr_chk:.2f}% — pure should be ≤ (RMDs inflate cagr)"
     ))
+
+    # ── 13l: P10 return arrays exist, are correct length, are below mean ────
+    # P10 must always be below mean (by definition). If equal, distribution collapsed.
+    p10_port = _port_nom_yoy_p10(res)
+    p10_inv  = _inv_nom_yoy_p10(res)
+    checks.append(chk_len("P10 portfolio YoY present and correct length", p10_port))
+    checks.append(chk_len("P10 investment YoY present and correct length", p10_inv))
+    checks.append(chk_all_finite("P10 portfolio YoY: all finite", p10_port))
+
+    if len(p10_port) == YEARS and len(nom_port) == YEARS:
+        p10_arr  = np.array([float(v) for v in p10_port], dtype=float)
+        mean_arr = np.array([float(v) for v in nom_port],  dtype=float)
+        n_p10_above_mean = int((p10_arr > mean_arr + 0.01).sum())
+        checks.append(chk(
+            "P10 portfolio YoY < mean YoY every year (P10 always below mean by definition)",
+            n_p10_above_mean == 0,
+            f"{n_p10_above_mean} years where P10 > mean (smoothing bug)"
+        ))
+
+    # ── 13m: P10 shows negative years in severe shock scenario ────────────────
+    # With 40% shock, P10 annual return MUST go negative in shock years.
+    # If P10 is always positive, the downside is being hidden by smoothing.
+    sh_severe = {"mode": "augment", "events": [
+        _base_event(start_year=5, depth=0.40, dip_quarters=4, recovery_quarters=8)
+    ]}
+    res_sh2, t = ephemeral_run("g13m_shock_p10", paths, shocks=sh_severe); elapsed += t
+    p10_shock = _port_nom_yoy_p10(res_sh2)
+    if len(p10_shock) >= 8:
+        shock_region_p10 = [float(p10_shock[i]) for i in range(3, 7)]
+        n_negative_p10 = sum(1 for v in shock_region_p10 if v < 0)
+        checks.append(chk(
+            "P10 shows negative return in shock region (depth=40%, yrs4-7) — honest downside visible",
+            n_negative_p10 >= 1,
+            f"P10 yrs4-7: {[round(v,1) for v in shock_region_p10]}% "
+            f"({n_negative_p10} negative; 0 = mean-smoothing hiding downside)"
+        ))
+    else:
+        checks.append(chk("P10 shock array long enough for 13m check", False, "array too short"))
 
     return "G13", "YoY returns sanity (range, inflation gap, variance, shock impact, CAGR, deflator guard)", checks, elapsed
 
@@ -3433,6 +3480,45 @@ def group17_ui_data_integrity(paths: int):
         all(float(v) >= 0 for v in dd50),
         f"min={min(float(v) for v in dd50):.4f}" if dd50 else "empty"
     ))
+
+    # ── 17k: P10/P90 return fields present (new session 26 fields) ───────────
+    # These fields power the "Stress return" column in the portfolio table.
+    # Missing = mean-only view hides all negative years from the user.
+    R = res.get("returns", {})
+    for field in [
+        "nom_withdraw_yoy_p10_pct",
+        "nom_withdraw_yoy_p90_pct",
+        "inv_nom_yoy_p10_pct",
+        "inv_nom_yoy_p90_pct",
+        "inv_real_yoy_p10_pct",
+    ]:
+        arr = R.get(field, [])
+        checks.append(chk(
+            f"17k: returns.{field} present and length={NY}",
+            len(arr) == NY,
+            f"len={len(arr)} expected={NY} — missing = stress return column shows dashes"
+        ))
+
+    # P10 < P90 every year (basic sanity — percentile ordering)
+    p10 = R.get("nom_withdraw_yoy_p10_pct", [])
+    p90 = R.get("nom_withdraw_yoy_p90_pct", [])
+    if len(p10) == NY and len(p90) == NY:
+        n_inverted = sum(1 for i in range(NY) if float(p10[i]) > float(p90[i]) + 0.01)
+        checks.append(chk(
+            "17k: P10 <= P90 every year (percentile ordering intact)",
+            n_inverted == 0,
+            f"{n_inverted} years where P10 > P90 (inversion = computation error)"
+        ))
+
+    # P10 < mean every year
+    mean_ret = R.get("nom_withdraw_yoy_mean_pct", [])
+    if len(p10) == NY and len(mean_ret) == NY:
+        n_p10_above = sum(1 for i in range(NY) if float(p10[i]) > float(mean_ret[i]) + 0.01)
+        checks.append(chk(
+            "17k: P10 <= mean YoY every year (P10 always below mean by definition)",
+            n_p10_above == 0,
+            f"{n_p10_above} years where P10 > mean"
+        ))
 
     return "G17", "UI data integrity (median-path fields, diff correctness, no silent zeros)", checks, elapsed
 

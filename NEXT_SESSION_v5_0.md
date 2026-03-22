@@ -12,9 +12,109 @@
 
 ---
 
-## IMMEDIATE (Session 26 — do in order)
+## IMMEDIATE (Session 27 — do in order)
 
-### 1. G13 — Add real vs nominal YoY assertion
+### 0. Bad Market Response — Wire Everything (HIGHEST PRIORITY)
+**Files:** `src/api.py`, `src/simulator_new.py`
+
+**Background:** `economicglobal.json` defines a complete bad market response
+system. NONE of it is wired. Every setting is config-only dead code:
+
+| Config field | Purpose | Status |
+|---|---|---|
+| `order_bad_market` | Switch withdrawal sequence in bad markets | ❌ built but never assigned (api.py line 1416) |
+| `shock_scaling_enabled` | Scale withdrawal amounts down in bad markets | ❌ never read |
+| `min_scaling_factor: 0.65` | Floor at 65% of target in bad markets | ❌ never applied |
+| `scale_curve: linear` | Gradient from full→floor as drawdown worsens | ❌ never applied |
+| `makeup_enabled` | Recover missed withdrawals in good years | ❌ never applied |
+| `makeup_ratio: 0.3` | Recover 30% of deficit per good year | ❌ never applied |
+
+**What actually happens today:**
+```
+Market crashes → portfolio drops correctly (shocks ARE wired for returns)
+             → person keeps spending FULL amount regardless
+             → withdrawal sequence stays on order_GOOD_market always
+             → no makeup in recovery years
+```
+
+**What should happen:**
+```
+Year y: total_nom_paths[:, y] drops > drawdown_threshold from peak
+     OR cross-sectional P10 return[y] < p10_threshold (-2%)
+         ↓
+bad_market_flag[path, y] = True
+         ↓
+1. Switch withdrawal sequence → seq_bad_per_year
+2. Scale withdrawal amount:
+   scale = 1.0 - (drawdown / max_drawdown) × (1 - min_scaling_factor)
+   scale = clip(scale, min_scaling_factor, 1.0)
+   effective_amount = max(base_k, scale × amount_k)
+         ↓
+Recovery year (bad_market_flag = False, prev year had deficit):
+   makeup = min(deficit_cur × makeup_ratio, amount_k × makeup_cap_per_year)
+   effective_amount = amount_k + makeup
+```
+
+**Implementation plan:**
+
+**Step 1 — `simulator_new.py` (STEP 3 withdrawal loop):**
+```python
+# Before withdrawal loop — compute cross-sectional P10 return per year
+# (uses pre-cashflow core paths already computed)
+p10_return_by_year = np.nanpercentile(
+    inv_nom_yoy_paths_core_shifted, 10, axis=0
+)  # shape (n_years,) — one number per year, shared across all paths
+
+# Compute running peak per path (for drawdown detection)
+running_peak = np.maximum.accumulate(total_nom_paths_core, axis=1)
+
+# In withdrawal loop year y:
+drawdown_y = 1.0 - total_nom_paths[:, y] / np.maximum(running_peak[:, y], 1e-12)
+p10_signal_y = p10_return_by_year[y] < p10_threshold  # scalar bool
+
+bad_market_flag_y = (drawdown_y > drawdown_threshold) | p10_signal_y
+
+# Scale amount
+scale_y = np.where(
+    bad_market_flag_y,
+    np.clip(1.0 - drawdown_y * (1.0 - min_scaling_factor) / drawdown_threshold,
+            min_scaling_factor, 1.0),
+    1.0
+)
+effective_amount_y = np.maximum(sched_base[y] * deflator[y],
+                                scale_y * extra_nom)
+
+# Switch sequence
+seq_y = seq_bad[y] if bad_market_flag_y.mean() > 0.5 else seq_good[y]
+```
+
+**Step 2 — `api.py`:**
+- Line 1416: pass BOTH `seq_good_per_year` AND `seq_bad_per_year` to simulator
+- Pass `econ_policy` scaling params explicitly (already passed at line 1443)
+
+**Step 3 — makeup in recovery years:**
+```python
+# Track cumulative deficit per path
+deficit_nom_paths = np.zeros((paths, n_years), dtype=float)
+# In year y: if was bad last year, recover makeup_ratio × cumulative_deficit
+```
+
+**Step 4 — P10 threshold config:**
+```json
+// economicglobal.json — add to bad_market:
+"p10_return_threshold_pct": -2.0,
+"p10_signal_enabled": true
+```
+
+**Testing:**
+- G1: bad market sequence switches in shock years
+- G6: withdrawal amounts scale down in shock years, recover after
+- G13: new check — with severe shock, realized withdrawals < planned in shock years
+- New G23: bad market response functional test
+
+---
+
+
 **File:** `src/test_flags.py`
 
 Now that the deflator is fixed, add a G13 check:
@@ -77,13 +177,18 @@ cape_config.json, economicglobal.json). `promote_model.py` writes lock.
 
 | Item | Location | Priority |
 |------|----------|----------|
+| **Bad market withdrawal scaling** | simulator_new.py, api.py | **Session 27 #0 — HIGHEST** |
+| **Bad market sequence switching** | api.py line 1416 | **Session 27 #0 — HIGHEST** |
+| **Makeup in recovery years** | simulator_new.py | **Session 27 #0 — HIGHEST** |
+| **P10 cross-sectional bad market signal** | simulator_new.py | **Session 27 #0 — HIGHEST** |
 | G13 real < nominal assertion | test_flags.py | Session 26 #1 — ✅ done |
 | Playwright T24–T25 | smoke.spec.ts | Session 26 #2 — ✅ done |
 | Pure investment return metric | simulator_new.py | Session 26 #3 — ✅ done |
 | --checkupdates --full (Tier 2) | test_flags.py | ✅ done session 26 |
 | manifest.lock (Tier 3) | promote_model.py | Near-term |
 | SCHP holdings | market_data | Low |
-| Dynamic upside withdrawal scaling | simulator_new.py, economicglobal.json | Near-term |
+| Dynamic upside withdrawal scaling | simulator_new.py, economicglobal.json | After bad market |
+| Safe withdrawal rate at P10 | simulator_new.py | After bad market |
 
 ---
 

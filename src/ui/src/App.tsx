@@ -112,6 +112,11 @@ type SnapshotSummary = {
 type SnapshotReturns = {
   nom_withdraw_yoy_mean_pct?: number[];
   real_withdraw_yoy_mean_pct?: number[];
+  nom_withdraw_yoy_p10_pct?: number[];
+  nom_withdraw_yoy_p90_pct?: number[];
+  inv_nom_yoy_p10_pct?: number[];
+  inv_nom_yoy_p90_pct?: number[];
+  inv_real_yoy_p10_pct?: number[];
   inv_nom_yoy_mean_pct?: number[];
   inv_real_yoy_mean_pct?: number[];
 };
@@ -3563,10 +3568,11 @@ const App: React.FC = () => {
                       <th><Tip label="Average balance (mean)" tip="Mathematical average across all paths. Skewed upward by a few exceptional market scenarios. The typical (median) column is usually more representative." /></th>
                       <th><Tip label="Floor balance" tip="In 90% of simulated market scenarios your portfolio exceeds this value — a stress-test floor. Essential spending should remain viable at this level." /></th>
                       <th><Tip label="Ceiling balance" tip="In 90% of simulated scenarios your portfolio stays below this value — your realistic upside. Don't build spending plans around this number." /></th>
-                      <th><Tip label="Annual growth — total portfolio" tip="Year-over-year growth of the total portfolio in future (nominal) dollars. Includes investment returns, withdrawals, deposits, and RMDs." /></th>
-                      <th><Tip label="Annual growth — inflation-adjusted" tip="Year-over-year growth after removing the effect of inflation. This is your real purchasing-power gain each year." /></th>
-                      <th><Tip label="Investment return only (nominal)" tip="Pure investment return, excluding cashflows like withdrawals and deposits. Shows how your assets performed in the market." /></th>
-                      <th><Tip label="Investment return only (real)" tip="Pure investment return after inflation. This is the closest measure to what your money actually earned in real terms." /></th>
+                      <th><Tip label="Annual growth — total portfolio (mean)" tip="Mean year-over-year growth across all simulated paths. Averages out negative years — use the stress return column to see realistic downside." /></th>
+                      <th><Tip label="Annual growth — inflation-adjusted (mean)" tip="Mean year-over-year growth after removing inflation. Averaged across all paths." /></th>
+                      <th><Tip label="Stress return — 1-in-10 bad year (P10)" tip="In 1 out of 10 simulated scenarios, annual return was THIS bad or worse. Unlike the mean columns, this will show negative years during shocks and bad markets — the honest downside picture." /></th>
+                      <th><Tip label="Investment return only (nominal, mean)" tip="Mean pure investment return excluding cashflows like withdrawals and deposits." /></th>
+                      <th><Tip label="Investment return only (real, mean)" tip="Mean pure investment return after inflation." /></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -3585,6 +3591,7 @@ const App: React.FC = () => {
                       const realWith = R?.real_withdraw_yoy_mean_pct?.[i] ?? 0;
                       const nomInv = R?.inv_nom_yoy_mean_pct?.[i] ?? 0;
                       const realInv = R?.inv_real_yoy_mean_pct?.[i] ?? 0;
+                      const p10Return = R?.nom_withdraw_yoy_p10_pct?.[i] ?? null;
               
                       // Age: starting age from person.json + year offset
                       const startAge =
@@ -3605,6 +3612,12 @@ const App: React.FC = () => {
                           <td>{formatUSD(futP90)}</td>
                           <td>{formatPct(nomWith)}</td>
                           <td>{formatPct(realWith)}</td>
+                          <td style={{
+                            color: p10Return !== null && p10Return < 0 ? "#dc2626" : "#15803d",
+                            fontWeight: p10Return !== null && p10Return < 0 ? 600 : 400,
+                          }}>
+                            {p10Return !== null ? formatPct(p10Return) : "—"}
+                          </td>
                           <td>{formatPct(nomInv)}</td>
                           <td>{formatPct(realInv)}</td>
                         </tr>
