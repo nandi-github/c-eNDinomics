@@ -77,12 +77,48 @@ cape_config.json, economicglobal.json). `promote_model.py` writes lock.
 
 | Item | Location | Priority |
 |------|----------|----------|
-| G13 real < nominal assertion | test_flags.py | Session 26 #1 |
-| Playwright T24–T25 | smoke.spec.ts | Session 26 #2 |
-| Pure investment return metric | simulator_new.py | Session 26 #3 |
-| --checkupdates --full (Tier 2) | test_flags.py | Near-term |
+| G13 real < nominal assertion | test_flags.py | Session 26 #1 — ✅ done |
+| Playwright T24–T25 | smoke.spec.ts | Session 26 #2 — ✅ done |
+| Pure investment return metric | simulator_new.py | Session 26 #3 — ✅ done |
+| --checkupdates --full (Tier 2) | test_flags.py | ✅ done session 26 |
 | manifest.lock (Tier 3) | promote_model.py | Near-term |
 | SCHP holdings | market_data | Low |
+| Dynamic upside withdrawal scaling | simulator_new.py, economicglobal.json | Near-term |
+
+---
+
+## Dynamic Upside Withdrawal Scaling (new — session 26)
+
+When the portfolio meaningfully outperforms the expected median path, the
+simulator currently does nothing — the user keeps withdrawing the planned
+`amount_k` even when they could afford more.
+
+**What exists today (downside only):**
+- `shock_scaling_enabled` + `min_scaling_factor: 0.65` — scales withdrawals
+  down linearly as portfolio drawdown worsens, flooring at `base_k`
+- `makeup_enabled` + `makeup_ratio: 0.3` — recovers 30% of missed withdrawals
+  in subsequent good years (reactive catch-up, not proactive upside)
+
+**What is missing (upside):**
+> When portfolio is significantly ahead of the expected median path (e.g. >15%
+> above baseline), raise the effective withdrawal above `amount_k` up to a
+> configurable ceiling.
+
+**Proposed config in `economicglobal.json`:**
+```json
+"upside_scaling": {
+  "enabled": false,
+  "outperformance_threshold": 0.15,
+  "max_upside_factor": 1.25,
+  "scale_curve": "linear"
+}
+```
+
+**Modes:** `automatic` and `retirement` only. `investment-first` already
+maximizes capital — raising withdrawals defeats the purpose.
+
+**Note:** This is proactive upside, not makeup. The two are additive —
+makeup recovers past shortfalls; upside scaling raises the bar when ahead.
 
 ---
 
