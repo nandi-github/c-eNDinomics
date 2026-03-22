@@ -503,7 +503,49 @@ Usually means the Test profile hit MAX_VERSIONS (50). The tests auto-delete the 
 curl -X DELETE "http://localhost:8000/profile/Test/versions?keep=10"
 ```
 
-### "window.confirm" style popups appearing (shouldn't happen)
+### git push says "Everything up-to-date" but commits exist locally
+The SMB share can corrupt `.git/config` with duplicate `branch.main.merge` entries,
+causing push to think nothing needs sending even when you're ahead of origin.
+
+```bash
+git branch -u origin/main main   # reset to single clean tracking ref
+git push origin main              # now sends correctly
+```
+
+Verify it worked: `git status` should show "Your branch is up to date with 'origin/main'".
+If this recurs frequently, consider migrating the repo to local disk (see below).
+
+---
+
+### Should you move the repo off the SMB share?
+
+**SMB share issues seen in practice:**
+- `git push` silently drops commits (`branch.main.merge` corruption)
+- `git add` sometimes doesn't stage files
+- `PermissionError` on file writes (fixed by temp+replace pattern in api.py)
+- iCloud/Finder interferes with file copies from Downloads
+
+**Recommendation: yes, move to local disk for the git repo.**
+
+```bash
+# Clone fresh to local disk
+cd ~/workspace   # or wherever you want it
+git clone https://github.com/nandi-github/c-eNDinomics.git
+cd c-eNDinomics
+
+# Verify everything is there
+git log --oneline -5
+python3 -B test_flags.py --comprehensive-test
+```
+
+Keep the SMB share as a **backup/archive only** — do all active development
+from the local clone. The SMB share's main value was network accessibility;
+the GitHub remote serves that purpose better.
+
+**After moving:** update the working dir path in this guide:
+```
+Working dir: ~/workspace/c-eNDinomics/
+```
 All destructive actions use inline confirmation — no `window.confirm` anywhere in the codebase. If you see a browser native dialog, it's a regression. Search `App.tsx` for `window.confirm` — should return zero results.
 
 ### G18 snapshot regression fails after intentional change
