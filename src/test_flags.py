@@ -2410,7 +2410,56 @@ def group13_yoy_sanity(paths: int):
                              abs(cagr_nom_sum - geo_nom), 0.0, 10.0,
                              f"summary={cagr_nom_sum:.2f}% brok1_geo={geo_nom:.2f}%"))
 
-    return "G13", "YoY returns sanity (range, inflation gap, variance, shock impact, CAGR)", checks, elapsed
+    # ── 13j: Deflator regression guard — session 25 fix ──────────────────────
+    # BASE_INFLATION defines 30 years.  YEARS=40 (current_age=55, target_age=95),
+    # so years 31-40 use the padded last inflation rate (~2.2% from BASE_INFLATION).
+    # Session 25 bug: without padding, _infl_arr fell back to np.ones() for years
+    # 31+ → real == nominal in that region (gap collapses to 0).
+    # Guard: the gap in years 31-YEARS must remain ~2.2%, never near zero.
+    if YEARS > 30 and len(_inv_nom_raw) == YEARS and len(_inv_real_raw) == YEARS:
+        tail_nom  = np.array([float(v) for v in _inv_nom_raw[30:]], dtype=float)
+        tail_real = np.array([float(v) for v in _inv_real_raw[30:]], dtype=float)
+        tail_gap  = tail_nom - tail_real
+        n_near_zero = int((tail_gap < 0.5).sum())
+        checks.append(chk(
+            f"Deflator guard (session 25): inv real < inv nom in years 31-{YEARS} — padded correctly",
+            n_near_zero == 0,
+            f"{n_near_zero}/{len(tail_gap)} years have gap < 0.5% (regression = deflator fell to np.ones)"
+        ))
+        avg_tail_gap = float(tail_gap.mean())
+        checks.append(chk_range(
+            f"Deflator guard: mean inflation gap years 31-{YEARS} in [1.5%, 4.5%]",
+            avg_tail_gap, 1.5, 4.5,
+            f"mean_gap={avg_tail_gap:.2f}% (last padded rate ~2.2%; 0% → deflator bug returned)"
+        ))
+    else:
+        # If inv_nom/real arrays have wrong length, flag it clearly
+        checks.append(chk(
+            f"Deflator guard: inv arrays length == YEARS ({YEARS}) for tail check",
+            len(_inv_nom_raw) == YEARS and len(_inv_real_raw) == YEARS,
+            f"nom_len={len(_inv_nom_raw)} real_len={len(_inv_real_raw)} expected={YEARS}"
+        ))
+
+    # ── 13k: Pure asset return ≤ Investment CAGR (RMD reinvestment inflates CAGR) ─
+    # summary.pure_asset_return_nom_pct = CAGR from pre-cashflow paths (no RMDs,
+    # withdrawals, or reinvestments baked in).
+    # summary.cagr_nominal_mean         = CAGR from post-cashflow paths which INCLUDES
+    # RMD reinvestment — for large TRAD IRAs this inflates the portfolio final balance
+    # significantly, so pure ≤ cagr_nominal (RMD reinvestment inflates it).
+    pure_ret  = float(res.get("summary", {}).get("pure_asset_return_nom_pct", -999.0))
+    cagr_chk  = float(res.get("summary", {}).get("cagr_nominal_mean", -999.0))
+    checks.append(chk(
+        "summary.pure_asset_return_nom_pct present (not missing)",
+        pure_ret > -100.0,
+        f"pure_ret={pure_ret:.2f}% (missing = simulator_new.py not updated)"
+    ))
+    checks.append(chk(
+        "Pure return ≤ Investment CAGR (RMD reinvestment inflates cagr_nominal)",
+        pure_ret <= cagr_chk + 0.5,   # allow 0.5 ppt noise from different path compositions
+        f"pure={pure_ret:.2f}% cagr_nom={cagr_chk:.2f}% — pure should be ≤ (RMDs inflate cagr)"
+    ))
+
+    return "G13", "YoY returns sanity (range, inflation gap, variance, shock impact, CAGR, deflator guard)", checks, elapsed
 
 
 
@@ -4168,7 +4217,7 @@ def _save(*, profile, paths, mode, elapsed, total_pass, total_fail, scenarios) -
 # ENTRY POINT
 # ===========================================================================
 
-def check_updates(server_url: str = "http://localhost:8000") -> bool:
+def check_updates(server_url: str = "http://localhost:8000", full: bool = False) -> bool:
     """
     --checkupdates: Fetch /manifest from running server and compare against
     local file hashes. Fails if any deployed file differs from the local copy.
@@ -4255,6 +4304,61 @@ def check_updates(server_url: str = "http://localhost:8000") -> bool:
 
     print(f"  Server manifest generated: {manifest.get('generated_at', '?')}")
     print("="*72 + "\n")
+
+    # ── Tier 2: walk all .py/.ts/.tsx in src/ ─────────────────────────────
+    if full:
+        print("\n" + "="*72)
+        print("  --checkupdates --full  |  scanning all .py/.ts/.tsx in src/")
+        print("="*72 + "\n")
+
+        manifest_names = set(manifest.get("files", {}).keys())
+        found_extra    = []
+        found_missing  = []
+        scan_root      = src_root
+
+        for dirpath, dirnames, filenames in os.walk(scan_root):
+            # Skip common non-source dirs
+            dirnames[:] = [d for d in dirnames if d not in (
+                "__pycache__", "node_modules", "playwright-report",
+                "test-results", ".git", "dist", ".versions",
+                "test_results", "profiles", "config",
+            )]
+            for fname in filenames:
+                if not (fname.endswith(".py") or fname.endswith(".ts") or fname.endswith(".tsx")):
+                    continue
+                abs_path = os.path.join(dirpath, fname)
+                # Compute path relative to src_root (same form as manifest keys)
+                rel_path = os.path.relpath(abs_path, src_root).replace(os.sep, "/")
+                if rel_path not in manifest_names:
+                    found_extra.append(rel_path)
+
+        # Check manifest files exist on disk
+        for mname in sorted(manifest_names):
+            local_p = os.path.join(src_root, mname)
+            if not os.path.isfile(local_p):
+                found_missing.append(mname)
+
+        if found_extra:
+            print(f"  ⚠  {len(found_extra)} untracked source file(s) found (not in manifest):")
+            for f in sorted(found_extra):
+                print(f"     {f}")
+            print()
+        else:
+            print("  ✅ No untracked source files found\n")
+
+        if found_missing:
+            print(f"  ❌ {len(found_missing)} manifest file(s) missing from disk:")
+            for f in sorted(found_missing):
+                print(f"     {f}")
+            print()
+
+        if not found_extra and not found_missing:
+            print("  ✅ Tier 2 scan: all files accounted for\n")
+        else:
+            all_match = False
+
+        print("="*72 + "\n")
+
     return all_match
 
 
@@ -4271,6 +4375,8 @@ def main():
                     help="Clear G18 snapshot regression baseline before running")
     ap.add_argument("--checkupdates",       action="store_true",
                     help="Compare local file hashes against running server — catch stale deployments")
+    ap.add_argument("--full",               action="store_true",
+                    help="With --checkupdates: also walk all .py/.ts/.tsx in src/ for untracked files (Tier 2)")
     ap.add_argument("--server",             default="http://localhost:8000",
                     help="Server URL for --checkupdates (default: http://localhost:8000)")
     args = ap.parse_args()
@@ -4278,7 +4384,7 @@ def main():
     paths = 50 if args.fast else args.paths
 
     if args.checkupdates:
-        ok = check_updates(args.server)
+        ok = check_updates(args.server, full=args.full)
         sys.exit(0 if ok else 1)
 
     if args.comprehensive_test:

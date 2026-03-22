@@ -1126,6 +1126,20 @@ def run_accounts_new(
     cagr_real_p10    = float(np.percentile(cagr_real_paths, 10))
     cagr_real_p90    = float(np.percentile(cagr_real_paths, 90))
 
+    # ── Pure Asset Return ─────────────────────────────────────────────────────
+    # CAGR from the pre-cashflow core paths (no RMDs, withdrawals, or reinvestment).
+    # Measures raw portfolio return stripped of all cash flows.
+    # pure_return <= cagr_nominal in most runs because RMD reinvestment inflates
+    # the post-cashflow final balance (G13 check 13k asserts this relationship).
+    _core_start_nom  = np.maximum(total_nom_paths_core[:, 0], 1e-12)
+    _core_end_nom    = np.maximum(total_nom_paths_core[:, -1], 1e-12)
+    _core_start_real = _core_start_nom / float(np.maximum(_deflator_core[0], 1e-12))
+    _core_end_real   = _core_end_nom   / float(np.maximum(_deflator_core[-1], 1e-12))
+    _pure_nom_paths  = (_core_end_nom  / _core_start_nom)  ** (1.0 / n_years) - 1.0
+    _pure_real_paths = (_core_end_real / _core_start_real) ** (1.0 / n_years) - 1.0
+    pure_asset_return_nom_pct  = float(_pure_nom_paths.mean()  * 100.0)
+    pure_asset_return_real_pct = float(_pure_real_paths.mean() * 100.0)
+
     # Drawdown: worst peak-to-trough over the FULL simulation period per path.
     # max_to_date[path, y] = running portfolio peak up to year y.
     # dd_each[path, y] = fractional drawdown from peak at that year.
@@ -1291,6 +1305,11 @@ def run_accounts_new(
         "cagr_real_median":           cagr_real_median,
         "cagr_real_p10":              cagr_real_p10,
         "cagr_real_p90":              cagr_real_p90,
+        # Pure asset return: CAGR from pre-cashflow core paths.
+        # Excludes RMDs, withdrawals, and reinvestment — measures raw investment return.
+        # pure_return <= cagr_nominal because RMD reinvestment inflates final balance.
+        "pure_asset_return_nom_pct":  pure_asset_return_nom_pct,
+        "pure_asset_return_real_pct": pure_asset_return_real_pct,
     }
 
 

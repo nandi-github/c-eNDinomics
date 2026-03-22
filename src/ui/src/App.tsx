@@ -2260,25 +2260,36 @@ const App: React.FC = () => {
                           <td>{formatPct(successRate)}</td>
                         </tr>
 
-                        {/* Secondary — investment mode: reframe instead of showing raw 0% */}
-                        {isInvestmentFirst && (
-                          <tr style={{ fontSize: 11, color: "#6b7280" }}>
-                            <td style={{ paddingLeft: 16 }}>
-                              <Tip label="↳ Withdrawal strategy"
-                                tip="In investment and automatic modes, the simulator prioritizes long-term portfolio growth. In poor market years it may fund only the floor (base spending) rather than the full target — preserving capital for recovery. This is intentional: the floor survival rate above is the meaningful success metric. Full-target-every-year is a retirement-first objective." />
-                            </td>
-                            <td>
-                              <span style={{
-                                background: "#f0fdf4", color: "#15803d",
-                                border: "1px solid #86efac",
-                                borderRadius: 999, padding: "1px 8px",
-                                fontSize: 10, fontWeight: 600,
-                              }}>
-                                Growth-optimized · floor always funded
-                              </span>
-                            </td>
-                          </tr>
-                        )}
+                        {/* Secondary — withdrawal strategy badge (all modes) */}
+                        <tr style={{ fontSize: 11, color: "#6b7280" }}>
+                          <td style={{ paddingLeft: 16 }}>
+                            <Tip label="↳ Withdrawal strategy"
+                              tip={isInvestmentFirst
+                                ? (mode === "investment"
+                                    ? "Investment-first: the simulator always funds only the floor (base_k) to maximise long-term portfolio growth — even in good years. The floor survival rate is the meaningful metric here."
+                                    : mode === "balanced"
+                                    ? "Balanced: the simulator blends floor-only and full-target funding equally. Growth and income security are weighted the same."
+                                    : "Automatic: the simulator funds the full target in good years and falls back to the floor in poor years to preserve growth capital. The blend shifts automatically as you approach retirement.")
+                                : "Retirement-first: the simulator funds the full target (amount_k) whenever the portfolio can sustain it. It falls back to the floor (base_k) only when funding the full amount would put long-term survival at risk."
+                              } />
+                          </td>
+                          <td>
+                            <span style={{
+                              background: "#f0fdf4", color: "#15803d",
+                              border: "1px solid #86efac",
+                              borderRadius: 999, padding: "1px 8px",
+                              fontSize: 10, fontWeight: 600,
+                            }}>
+                              {mode === "investment"
+                                ? "Scales to floor as needed to preserve growth capital"
+                                : mode === "retirement"
+                                ? "Scales to floor when planned withdrawals risk long-term survival"
+                                : mode === "balanced"
+                                ? "Scales to floor when growth or survival goals are at risk"
+                                : "Scales to floor in poor years to balance growth and survival"}
+                            </span>
+                          </td>
+                        </tr>
                         {!isInvestmentFirst && floorRate !== undefined && floorRate !== successRate && (
                           <tr style={{ color: "#6b7280", fontSize: 12 }}>
                             <td style={{ paddingLeft: 16 }}>↳ Floor-only survival rate</td>
