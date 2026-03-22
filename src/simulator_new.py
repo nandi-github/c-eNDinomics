@@ -247,8 +247,19 @@ def run_accounts_new(
     inv_nom_yoy_paths_core = pct_change_paths(total_nom_paths_core,
                                                prior_col=starting_total_nom)
 
-    # Build full deflator inline for real conversion of core paths
-    _deflator_core = np.cumprod(1.0 + _infl_arr[:n_years]) if len(_infl_arr) >= n_years                      else np.ones(n_years, dtype=float)
+    # Build full deflator inline for real conversion of core paths.
+    # MUST pad _infl_arr to n_years (same pattern as main deflator at STEP 1)
+    # to avoid falling back to all-ones (= no deflation = nominal == real bug).
+    if len(_infl_arr) < n_years:
+        _infl_arr_padded = np.concatenate([
+            _infl_arr,
+            np.full(n_years - len(_infl_arr), _infl_arr[-1] if len(_infl_arr) > 0 else 0.0)
+        ])
+    elif len(_infl_arr) > n_years:
+        _infl_arr_padded = _infl_arr[:n_years]
+    else:
+        _infl_arr_padded = _infl_arr
+    _deflator_core = np.cumprod(1.0 + _infl_arr_padded)
     _total_real_paths_core = total_nom_paths_core / np.maximum(_deflator_core, 1e-12)
     # Real prior = starting_total in nominal terms (base year has no deflation yet)
     # real_bal[0] = nom[0]/deflator[0], prior = starting_total
