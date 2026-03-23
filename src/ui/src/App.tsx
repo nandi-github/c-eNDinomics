@@ -203,6 +203,7 @@ type RothScheduleRow = {
   year: number; age: number; conversion: number; tax_cost: number;
   effective_rate: number; irmaa_delta: number;
   cumulative_converted: number; cumulative_tax: number;
+  phase?: string; income_estimate?: number; withdrawal?: number; total_spendable?: number;
 };
 type RothOptimizerResult = {
   timebomb_severity: string;
@@ -220,7 +221,7 @@ type RothOptimizerResult = {
   betr_survivor: number;
   betr_heir_moderate: number;
   betr_heir_high: number;
-  strategies: { conservative: RothStrategy; balanced: RothStrategy; aggressive: RothStrategy; maximum: RothStrategy; };
+  strategies: { conservative: RothStrategy; balanced: RothStrategy; aggressive: RothStrategy; maximum: RothStrategy; betr_optimal?: RothStrategy; };
   savings_matrix: Record<string, Record<string, number>>;
   recommended_strategy: string;
   recommended_reason: string;
@@ -228,6 +229,11 @@ type RothOptimizerResult = {
   conversion_window_years: number;
   years_to_rmd: number;
   warnings: string[];
+  conflicts?: Array<{
+    key: string; title: string; explanation: string;
+    estimated_savings: number; current_setting: string; suggested_setting: string;
+    apply_field: string; apply_value: any; apply_label: string;
+  }>;
   filing_used: string;
   error?: string;
 };
@@ -1969,6 +1975,12 @@ const App: React.FC = () => {
                     borderRadius: 999, padding: "2px 10px", fontSize: "0.68em", fontWeight: 700
                   }}>
                     IRA Timebomb: {R.timebomb_severity}
+                  {R.configured_status === "on_track" && (
+                    <span style={{ background: "#d5e8d4", color: "#166534", borderRadius: 999,
+                      padding: "2px 8px", fontSize: "0.85em", fontWeight: 700, marginLeft: 4 }}>
+                      ✅ strategy applied
+                    </span>
+                  )}
                   </span>
                   {urgency && (
                     <span style={{
@@ -3087,9 +3099,10 @@ const App: React.FC = () => {
                   : "#d5e8d4";
 
                 const strategies = ["conservative", "balanced", "aggressive", "maximum"] as const;
+                const allStrategies = [...strategies, ...(R.strategies.betr_optimal ? ["betr_optimal" as const] : [])] as string[];
                 const scenarios  = ["self_mfj", "self_survivor", "heir_moderate", "heir_high"] as const;
                 const scLabels   = { self_mfj: "Self (MFJ)", self_survivor: "Survivor", heir_moderate: "Heir Moderate", heir_high: "Heir High" };
-                const stratLabels = { conservative: "Conservative (22%)", balanced: "Balanced (24%)", aggressive: "Aggressive (32%)", maximum: "Maximum (37%)" };
+                const stratLabels: Record<string, string> = { conservative: "Conservative (22%)", balanced: "Balanced (24%)", aggressive: "Aggressive (32%)", maximum: "Maximum (37%)", betr_optimal: "BETR-Optimal (phase-aware)" };
                 const rec = R.recommended_strategy as typeof strategies[number];
 
                 const fmtM = (v: number) => v >= 1e6 ? `$${(v/1e6).toFixed(1)}M` : v >= 1000 ? `$${(v/1000).toFixed(0)}K` : `$${v.toFixed(0)}`;
@@ -3131,8 +3144,14 @@ const App: React.FC = () => {
                         borderBottom: `1px solid ${sevColor}22`,
                         display: "flex", alignItems: "center", gap: 10,
                       }}>
-                        <span style={{ fontWeight: 700, fontSize: 13, color: sevColor }}>Current Situation</span>
-                        <span style={{ fontSize: 12, color: "#6b7280" }}>— what happens if you do nothing</span>
+                        <span style={{ fontWeight: 700, fontSize: 13, color: sevColor }}>
+                          {R.configured_status === "on_track" ? "Baseline (do-nothing counterfactual)" : "Current Situation"}
+                        </span>
+                        <span style={{ fontSize: 12, color: "#6b7280" }}>
+                          {R.configured_status === "on_track"
+                            ? "— shows what would happen without your active conversion strategy"
+                            : "— what happens if you do nothing"}
+                        </span>
                       </div>
                       <div style={{ padding: "10px 14px" }}>
                         {/* Key metrics */}
@@ -3175,6 +3194,124 @@ const App: React.FC = () => {
                       </div>
                     </div>
 
+                    {/* ── Optimization Opportunities ─────────────────────── */}
+                    {R.conflicts && R.conflicts.length > 0 && (() => {
+                      const applied  = R.conflicts.filter(c => c.status === "applied");
+                      const pending  = R.conflicts.filter(c => c.status === "pending");
+                      return (
+                        <div style={{ marginBottom: 16 }}>
+                          {/* Applied optimizations — informational */}
+                          {applied.length > 0 && (
+                            <div style={{ marginBottom: 10 }}>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: "#166534",
+                                marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
+                                ✅ Active optimizations applied automatically:
+                              </div>
+                              {applied.map(c => (
+                                <div key={c.key} style={{
+                                  border: "1px solid #86efac", borderRadius: 8,
+                                  marginBottom: 8, overflow: "hidden",
+                                }}>
+                                  <div style={{ background: "#f0fdf4", padding: "6px 14px",
+                                    borderBottom: "1px solid #86efac",
+                                    display: "flex", justifyContent: "space-between",
+                                    alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+                                    <span style={{ fontWeight: 700, fontSize: 12, color: "#166534" }}>
+                                      {c.title}
+                                    </span>
+                                    <span style={{ fontSize: 11, fontWeight: 700, color: "#166534" }}>
+                                      Est. +{c.estimated_savings >= 1000
+                                        ? `$${(c.estimated_savings/1000).toFixed(0)}K`
+                                        : `$${c.estimated_savings}`} lifetime savings
+                                    </span>
+                                  </div>
+                                  <div style={{ padding: "8px 14px", fontSize: 12, color: "#374151" }}>
+                                    {c.explanation}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                          {/* Pending optimizations — actionable */}
+                          {pending.length > 0 && (
+                            <div>
+                              <div style={{ fontSize: 11, fontWeight: 700, color: "#b45309",
+                                marginBottom: 6, display: "flex", alignItems: "center", gap: 6 }}>
+                                ⚡ Additional savings available — review and approve:
+                              </div>
+                              {pending.map(c => (
+                                <div key={c.key} style={{
+                                  border: "1px solid #fed7aa", borderRadius: 8,
+                                  marginBottom: 8, overflow: "hidden",
+                                }}>
+                                  <div style={{ background: "#fff7ed", padding: "6px 14px",
+                                    borderBottom: "1px solid #fed7aa",
+                                    display: "flex", justifyContent: "space-between",
+                                    alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+                                    <span style={{ fontWeight: 700, fontSize: 12, color: "#b45309" }}>
+                                      {c.title}
+                                    </span>
+                                    <span style={{ fontSize: 11, fontWeight: 700, color: "#15803d" }}>
+                                      Est. +{c.estimated_savings >= 1000
+                                        ? `$${(c.estimated_savings/1000).toFixed(0)}K`
+                                        : `$${c.estimated_savings}`} lifetime savings
+                                    </span>
+                                  </div>
+                                  <div style={{ padding: "8px 14px" }}>
+                                    <div style={{ fontSize: 12, color: "#374151", marginBottom: 6 }}>
+                                      {c.explanation}
+                                    </div>
+                                    <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 8 }}>
+                                      <span style={{ color: "#b45309" }}>Current: </span>{c.current_setting}
+                                      {" → "}
+                                      <span style={{ color: "#15803d" }}>Suggested: </span>{c.suggested_setting}
+                                    </div>
+                                    <button
+                                      onClick={async () => {
+                                        if (!selectedProfile) return;
+                                        if (!window.confirm(`Apply: ${c.title}?
+
+Updates ${c.apply_field} → ${JSON.stringify(c.apply_value)} in person.json.
+
+Re-run simulation to see impact.`)) return;
+                                        try {
+                                          const cfg = await apiGet<any>(`/profile-config/${encodeURIComponent(selectedProfile)}/person.json`);
+                                          const person = cfg.content ? JSON.parse(cfg.content) : {};
+                                          if (!person.roth_conversion_policy) person.roth_conversion_policy = {};
+                                          person.roth_conversion_policy[c.apply_field] = c.apply_value;
+                                          person.roth_conversion_policy._optimizer_updated = new Date().toISOString().slice(0,10);
+                                          await apiPost("/profile-config", {
+                                            profile: selectedProfile, name: "person.json",
+                                            content: JSON.stringify(person, null, 2),
+                                            version_note: `optimizer suggestion applied — ${c.title}`,
+                                          });
+                                          loadVersionHistory(selectedProfile);
+                                          alert(`Saved. Re-run simulation to see the impact.`);
+                                        } catch (e: any) {
+                                          alert("Save failed: " + String(e?.message || e));
+                                        }
+                                      }}
+                                      style={{
+                                        background: "#ea580c", color: "#fff",
+                                        border: "none", borderRadius: 6,
+                                        padding: "5px 14px", cursor: "pointer",
+                                        fontWeight: 600, fontSize: 12,
+                                      }}
+                                    >
+                                      {c.apply_label}
+                                    </button>
+                                    <span style={{ fontSize: 11, color: "#9ca3af", marginLeft: 10 }}>
+                                      Updates {c.apply_field} in person.json · re-run to see impact
+                                    </span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+
                     {/* ── Recommendation ────────────────────────────────── */}
                     <div style={{
                       border: `1px solid #1d4ed833`,
@@ -3185,11 +3322,13 @@ const App: React.FC = () => {
                         borderBottom: "1px solid #bfdbfe",
                         display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
                       }}>
-                        <span style={{ fontWeight: 700, fontSize: 13, color: "#1e40af" }}>
-                          ★ Recommendation — {stratLabels[rec] || rec}
+                        <span style={{ fontWeight: 700, fontSize: 13, color: R.configured_status === "on_track" ? "#166534" : "#1e40af" }}>
+                          {R.configured_status === "on_track" ? "✅ Active Strategy" : "★ Recommendation"} — {stratLabels[rec] || rec}
                         </span>
                         <span style={{ fontSize: 12, color: "#6b7280" }}>
-                          optimized for your current profile
+                          {R.configured_status === "on_track"
+                            ? "applied — this is the best achievable outcome given your IRA size"
+                            : "optimized for your current profile"}
                         </span>
                       </div>
                       <div style={{ padding: "10px 14px" }}>
@@ -3254,6 +3393,7 @@ const App: React.FC = () => {
                         {/* Apply button — contextual label */}
                         <div style={{ display: "flex", alignItems: "center", gap: 12,
                           paddingTop: 10, borderTop: "1px solid #e5e7eb", flexWrap: "wrap" }}>
+                          {R.configured_status !== "on_track" && (
                           <button
                             onClick={async () => {
                               if (!selectedProfile) return;
@@ -3262,11 +3402,18 @@ const App: React.FC = () => {
                                 const person = cfg.content ? JSON.parse(cfg.content) : {};
                                 const strat = R.strategies[rec];
                                 const conv_k = Math.round((strat?.annual_conversion ?? 0) / 1000);
+                                // bracket_filled e.g. "32%" — this is what the simulator actually reads
+                                // to determine how much to convert. annual_conversion_k is documentation only.
+                                // For betr_optimal, write "betr_optimal" — simulator will use BETR logic.
+                                const bracketRate = rec === "betr_optimal"
+                                  ? "betr_optimal"
+                                  : (strat?.bracket_filled ?? "fill the bracket");
                                 person.roth_conversion_policy = {
                                   ...(person.roth_conversion_policy || {}),
                                   enabled: true,
                                   recommended_strategy: rec,
                                   annual_conversion_k: conv_k,
+                                  keepit_below_max_marginal_fed_rate: bracketRate,
                                   _optimizer_updated: new Date().toISOString().slice(0,10),
                                 };
                                 await apiPost("/profile-config", {
@@ -3290,9 +3437,12 @@ const App: React.FC = () => {
                           >
                             Apply {stratLabels[rec] || rec} to profile
                           </button>
+                          )}
+                          {R.configured_status !== "on_track" && (
                           <span style={{ fontSize: 11, color: "#9ca3af" }}>
                             Updates roth_conversion_policy in person.json · re-run simulation to see projections
                           </span>
+                          )}
                           {R.configured_status === "on_track" && (
                             <div style={{
                               marginTop: 8, padding: "6px 12px",
@@ -3442,23 +3592,40 @@ const App: React.FC = () => {
                           <table className="table" style={{ fontSize: 12 }}>
                             <thead>
                               <tr>
-                                <th>Yr</th><th>Age</th><th>Convert</th>
+                                <th>Yr</th><th>Age</th><th>Phase</th><th>W2/SS Income</th><th>Withdrawal</th><th>Convert</th>
                                 <th>Tax Cost</th><th>Eff. Rate</th>
-                                <th>IRMAA Δ</th><th>Cumul. Converted</th>
+                                <th>IRMAA Δ</th><th>Total Spendable</th><th>Cumul. Converted</th>
                               </tr>
                             </thead>
                             <tbody>
                               {R.year_by_year_schedule.map(row => (
                                 <tr key={row.year} style={{
-                                  background: row.irmaa_delta > 0 ? "#fff9e6" : undefined
+                                  background: row.irmaa_delta > 0 ? "#fff9e6"
+                                    : row.phase === "working" ? "#f0fdf4"
+                                    : row.phase === "transition" ? "#fefce8"
+                                    : undefined
                                 }}>
                                   <td>{row.year}</td>
                                   <td>{row.age}</td>
+                                  <td style={{ fontSize: 11, color: "#6b7280" }}>
+                                    {row.phase === "working" ? "💼 working"
+                                     : row.phase === "transition" ? "🔄 transition"
+                                     : row.phase ? "🌅 retirement" : "—"}
+                                  </td>
+                                  <td style={{ fontSize: 11, color: "#6b7280" }}>
+                                    {row.income_estimate ? `$${(row.income_estimate/1000).toFixed(0)}K` : "—"}
+                                  </td>
+                                  <td style={{ fontSize: 11, color: "#374151" }}>
+                                    {row.withdrawal ? `$${(row.withdrawal/1000).toFixed(0)}K` : "—"}
+                                  </td>
                                   <td>{fmtM(row.conversion)}</td>
                                   <td>{fmtM(row.tax_cost)}</td>
                                   <td>{(row.effective_rate * 100).toFixed(1)}%</td>
                                   <td style={{ color: row.irmaa_delta > 0 ? "#b45309" : "#6b7280" }}>
                                     {row.irmaa_delta > 0 ? `+${fmtM(row.irmaa_delta)}` : "—"}
+                                  </td>
+                                  <td style={{ fontWeight: 600, color: "#166534" }}>
+                                    {row.total_spendable ? fmtM(row.total_spendable) : "—"}
                                   </td>
                                   <td>{fmtM(row.cumulative_converted)}</td>
                                 </tr>

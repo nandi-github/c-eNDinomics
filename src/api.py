@@ -1412,11 +1412,6 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
             "makeup_cap_per_year":      float(_wd_policy.get("makeup_cap_per_year",   0.1)),
             "p10_signal_enabled":       bool(_bm_policy.get("p10_signal_enabled",     True)),
             "p10_return_threshold_pct": float(_bm_policy.get("p10_return_threshold_pct", -15.0)),
-            # Upside scaling — raise withdrawals when portfolio outperforms
-            "upside_scaling_enabled":           bool(_wd_policy.get("upside_scaling_enabled",           False)),
-            "upside_outperformance_threshold":  float(_wd_policy.get("upside_outperformance_threshold", 0.15)),
-            "upside_max_factor":                float(_wd_policy.get("upside_max_factor",               1.25)),
-            "upside_scale_curve":               str(_wd_policy.get("upside_scale_curve",               "linear")),
         }
 
         # Inject UI-selected simulation_mode into person_cfg
@@ -1515,22 +1510,39 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
         ending_balances_pre = []
     res["ending_balances"] = ending_balances_pre
 
-    # 9a-income) Inject income.json year-1 estimates into person_cfg for optimizer
+    # 9a-income) Inject income.json estimates into person_cfg for optimizer
+    # Use the already-computed per-year arrays (w2_cur etc.) — these correctly
+    # handle both 'ages' and 'years' formats via load_income / build_income_streams.
     try:
-        _ic = income_cfg if isinstance(income_cfg, dict) else {}
-        def _yr1(entries):
-            for e in (entries or []):
-                rng = str(e.get("years","")).strip()
-                if rng.startswith("1-") or rng == "1":
-                    return float(e.get("amount_nom", 0) or 0)
-            return 0.0
+        _ret_age   = int(float((person_cfg or {}).get("retirement_age", 65)))
+        _cur_age_i = int(float(_current_age))
+        _post_ret_start = max(0, _ret_age - _cur_age_i)
+        _post_ret_slice = ordinary_other_cur[_post_ret_start:]
+        _ret_income = float(sum(_post_ret_slice) / max(1, len(_post_ret_slice))) if len(_post_ret_slice) > 0 else 51_000.0
+        _sched_list = ([float(x) for x in sched_arr.tolist()]
+                       if sched_arr is not None and hasattr(sched_arr, '__len__') and len(sched_arr) > 0
+                       else [])
         person_cfg["income_data"] = {
-            "w2_yr1":       _yr1(_ic.get("w2", [])),
-            "rental_yr1":   _yr1(_ic.get("rental", [])),
-            "ordinary_yr1": _yr1(_ic.get("ordinary_other", [])),
+            "w2_yr1":             float(w2_cur[0])             if len(w2_cur) > 0             else 0.0,
+            "rental_yr1":         float(rental_cur[0])         if len(rental_cur) > 0         else 0.0,
+            "ordinary_yr1":       float(ordinary_other_cur[0]) if len(ordinary_other_cur) > 0 else 0.0,
+            "w2_by_year":         [float(x) for x in w2_cur],
+            "ordinary_by_year":   [float(x) for x in ordinary_other_cur],
+            "withdrawal_by_year": _sched_list,
+            "retirement_income":  _ret_income,
         }
-    except Exception:
-        pass
+    except Exception as _inc_exc:
+        logging.warning("income_data injection failed (non-fatal): %s", _inc_exc)
+        try:
+            person_cfg["income_data"] = {
+                "w2_yr1":             float(w2_cur[0]) if len(w2_cur) > 0 else 0.0,
+                "w2_by_year":         [float(x) for x in w2_cur],
+                "ordinary_by_year":   [float(x) for x in ordinary_other_cur],
+                "withdrawal_by_year": [],
+                "retirement_income":  51_000.0,
+            }
+        except Exception:
+            pass
 
     # 9a-roth) Run Roth optimizer inline — attaches to snapshot
     roth_policy = (person_cfg.get("roth_conversion_policy") or {})

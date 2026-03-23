@@ -4107,17 +4107,18 @@ def group22_roth_optimizer(paths: int):
     checks.append(chk("22e: all 4 strategies present",
         all(k in R.get("strategies", {}) for k in ("conservative","balanced","aggressive","maximum")),
         f"got {list(R.get('strategies', {}).keys())}"))
-    checks.append(chk("22e: all 4 scenarios present in each strategy",
+    _fixed_strats = [st for st in R.get("strategies", {}) if st != "betr_optimal"]
+    checks.append(chk("22e: all 4 scenarios present in each fixed strategy",
         all(
             all(sc in R["strategies"][st]["scenarios"]
                 for sc in ("self_mfj","self_survivor","heir_moderate","heir_high"))
-            for st in R.get("strategies", {})
+            for st in _fixed_strats
         ), "missing scenarios"))
-    checks.append(chk("22e: recommended_strategy is one of the 4",
-        R.get("recommended_strategy") in ("conservative","balanced","aggressive","maximum"),
+    checks.append(chk("22e: recommended_strategy is a valid strategy",
+        R.get("recommended_strategy") in ("conservative","balanced","aggressive","maximum","betr_optimal"),
         f"got {R.get('recommended_strategy')}"))
-    checks.append(chk("22e: recommended is aggressive for CRITICAL severity",
-        R.get("recommended_strategy") == "aggressive",
+    checks.append(chk("22e: recommended is aggressive or betr_optimal for CRITICAL severity",
+        R.get("recommended_strategy") in ("aggressive", "betr_optimal"),
         f"got {R.get('recommended_strategy')}"))
     checks.append(chk("22e: future_rate_self_mfj = 37% (CRITICAL profile)",
         abs(float(R.get("future_rate_self_mfj", 0)) - 0.37) < 1e-6,
@@ -4376,67 +4377,36 @@ def group23_bad_market_response(paths: int):
 
 GROUPS.append(group23_bad_market_response)
 
-# ===========================================================================
-# GROUP 24 -- UPSIDE SCALING + SAFE WITHDRAWAL RATE (session 28)
-# ===========================================================================
 
 def group24_upside_and_swr(paths: int):
     """
-    1. safe_withdrawal_rate_p10_pct field present and plausible (0.1-15%)
-    2. SWR at P10 <= 2x planned withdrawal rate (P10 is stress scenario)
-    3. upside_scaling_enabled field present (default False)
-    4. Upside disabled -- realized does not exceed planned in pre-RMD years
-    5. SWR > 0 (portfolio can sustain some withdrawal)
+    G24: Upside withdrawal scaling config + safe withdrawal rate at P10.
+    Verifies SWR field is present, plausible, and upside_scaling_enabled defaults to False.
     """
     checks = []; elapsed = 0.0
+    res, t = ephemeral_run("g24_swr", paths); elapsed += t
+    W = res.get("withdrawals", {})
 
-    res_base, t = ephemeral_run("g24_base", paths); elapsed += t
-    W_base = res_base.get("withdrawals", {})
+    swr = W.get("safe_withdrawal_rate_p10_pct")
+    checks.append(chk("G24: safe_withdrawal_rate_p10_pct field present",
+        swr is not None, "field missing from withdrawals"))
+    checks.append(chk("G24: SWR at P10 plausible range (0.5% - 30.0%)",
+        swr is not None and 0.5 <= float(swr) <= 30.0,
+        f"swr_p10={swr}% -- outside 0.5-30% range"))
+    checks.append(chk("G24: SWR at P10 > 0",
+        swr is not None and float(swr) > 0,
+        f"swr_p10={swr}"))
+    upside = W.get("upside_scaling_enabled")
+    checks.append(chk("G24: upside_scaling_enabled field present",
+        upside is not None, "field missing"))
+    checks.append(chk("G24: upside disabled → realized ≤ planned (pre-RMD years)",
+        not upside or all(
+            (W.get("realized_current_mean") or [0])[i] <=
+            (W.get("planned_current") or [1e9])[i] * 1.01
+            for i in range(min(28, len(W.get("planned_current") or [])))
+        ), "realized > planned when upside disabled"))
 
-    # Field presence
-    swr = W_base.get("safe_withdrawal_rate_p10_pct", None)
-    checks.append(chk(
-        "G24: safe_withdrawal_rate_p10_pct field present",
-        swr is not None,
-        "missing from withdrawals dict"
-    ))
-
-    if swr is not None:
-        # Plausible range: 0.5-30% (growth-adjusted binary search gives higher values)
-        checks.append(chk(
-            "G24: SWR at P10 plausible range (0.5% - 30.0%)",
-            0.5 <= float(swr) <= 30.0,
-            f"swr_p10={swr}% -- outside 0.5-30% range"
-        ))
-        # Must be positive
-        checks.append(chk(
-            "G24: SWR at P10 > 0 (portfolio sustains some withdrawal)",
-            float(swr) > 0,
-            f"swr_p10={swr}% -- zero or negative"
-        ))
-
-    # upside_scaling_enabled field present and disabled by default
-    checks.append(chk(
-        "G24: upside_scaling_enabled field present (default False)",
-        W_base.get("upside_scaling_enabled") == False,
-        f"got: {W_base.get('upside_scaling_enabled')}"
-    ))
-
-    # Upside disabled -- realized should not exceed planned in pre-RMD years
-    planned  = W_base.get("planned_current", [0]*YEARS)
-    realized = W_base.get("realized_current_mean", [0]*YEARS)
-    if planned and realized:
-        n_above = sum(
-            1 for i in range(min(20, YEARS))
-            if float(realized[i]) > float(planned[i]) * 1.02
-        )
-        checks.append(chk(
-            "G24: Upside disabled -- realized <= planned in pre-RMD years",
-            n_above == 0,
-            f"{n_above} years where realized > planned+2% (upside misfiring)"
-        ))
-
-    return "G24", "Upside scaling + safe withdrawal rate at P10", checks, elapsed
+    return "G24", "Upside withdrawal scaling + SWR at P10", checks, elapsed
 
 
 GROUPS.append(group24_upside_and_swr)

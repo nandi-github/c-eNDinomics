@@ -393,7 +393,8 @@ def run_accounts_new(
         _conv_enabled
         and tax_cfg is not None
         and ordinary_income_cur_paths is not None
-        and ("fill" in _keepit_str or _keepit_str.replace("%", "").replace(".", "").isdigit())
+        and ("fill" in _keepit_str or "betr_optimal" in _keepit_str
+             or _keepit_str.replace("%", "").replace(".", "").isdigit())
     )
 
     # Resolve window from policy

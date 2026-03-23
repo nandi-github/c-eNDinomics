@@ -298,82 +298,324 @@ def _trad_ira_at_age(
 
 def _current_income_estimate(person_cfg: Dict[str, Any]) -> float:
     """
-    Estimate current ordinary income for bracket positioning.
-
-    Priority order:
-    1. person_cfg["estimated_annual_income"] — explicitly set by user
-    2. person_cfg["income_data"] — injected by api.py from income.json yr1 totals
-    3. Default $150K — reasonable for a high-net-worth pre-retiree
-
-    Note: dividends/gains/RMDs from portfolio accounts are NOT included here —
-    those are computed separately inside the simulator.
+    Estimate current year ordinary income for bracket positioning.
+    Uses the injected income_data arrays (year 1 = current year).
     """
     if "estimated_annual_income" in person_cfg:
         return float(person_cfg["estimated_annual_income"])
 
     income_data = person_cfg.get("income_data") or {}
-    if income_data:
-        total = sum(float(income_data.get(k, 0) or 0)
-                    for k in ("w2_yr1", "rental_yr1", "ordinary_yr1"))
-        if total > 0:
-            return total
-
-    return 150_000.0
+    total = sum(float(income_data.get(k, 0) or 0)
+                for k in ("w2_yr1", "rental_yr1", "ordinary_yr1"))
+    return total if total > 0 else 150_000.0
 
 
 def _retirement_income_estimate(person_cfg: Dict[str, Any]) -> float:
     """Estimate non-RMD retirement income (SS + pension)."""
-    return float(person_cfg.get("estimated_retirement_income", 60_000.0))
+    income_data = person_cfg.get("income_data") or {}
+    ret = float(income_data.get("retirement_income", 0) or 0)
+    return ret if ret > 0 else float(person_cfg.get("estimated_retirement_income", 60_000.0))
+
+
+def _income_at_age(
+    person_cfg: Dict[str, Any],
+    age: float,
+    current_age: float,
+    retirement_age: float,
+) -> float:
+    """
+    Return best estimate of ordinary income at a given age.
+    Uses injected per-year arrays if available, else phase-based approximation.
+    """
+    income_data = person_cfg.get("income_data") or {}
+    w2_arr       = income_data.get("w2_by_year") or []
+    ord_arr      = income_data.get("ordinary_by_year") or []
+
+    yr_idx = int(round(age - current_age)) - 1  # year index (0-based)
+
+    w2_income  = float(w2_arr[yr_idx])  if 0 <= yr_idx < len(w2_arr)  else 0.0
+    ord_income = float(ord_arr[yr_idx]) if 0 <= yr_idx < len(ord_arr) else 0.0
+
+    if w2_income + ord_income > 0:
+        return w2_income + ord_income
+
+    # Fallback: phase approximation
+    if age <= retirement_age:
+        return _current_income_estimate(person_cfg)
+    else:
+        return _retirement_income_estimate(person_cfg)
+
+
+# ── BETR-Optimal Conversion ───────────────────────────────────────────────────
+
+def compute_betr_optimal_conversion(
+    taxable_income: float,
+    future_rate: float,
+    filing: str = "MFJ",
+    avoid_niit: bool = True,
+    niit_threshold: float = 250_000.0,
+) -> Tuple[float, float]:
+    """
+    Compute maximum conversion where EVERY marginal dollar is favorable:
+    convert up through brackets where (marginal rate + NIIT if applicable) < future_rate.
+
+    Key insight: avoid_niit=True is a user preference, not a hard constraint.
+    If paying 32% + 3.8% NIIT = 35.8% now beats future RMD rate of 37%+,
+    the optimizer should still recommend it — the NIIT cost is already baked
+    into the arbitrage signal.
+
+    Returns (conversion_amount, effective_rate_on_conversion).
+    """
+    NIIT_RATE = 0.038
+    brackets = _brackets(filing)
+    total_conv = 0.0
+    cursor = taxable_income
+
+    for top, rate in brackets:
+        ceiling = top if top is not None else cursor + 10_000_000.0
+        headroom = max(0.0, ceiling - cursor)
+        if headroom <= 0:
+            continue
+
+        # Does this bracket headroom sit above NIIT threshold?
+        # If so, effective rate includes NIIT surcharge
+        niit_applies = (cursor >= niit_threshold) or (taxable_income >= niit_threshold)
+        effective_marginal = rate + (NIIT_RATE if niit_applies else 0.0)
+
+        if effective_marginal >= future_rate:
+            break  # no arbitrage — even with NIIT, not worth converting here
+
+        total_conv += headroom
+        cursor = ceiling
+
+    if total_conv <= 0:
+        return 0.0, 0.0
+
+    eff = effective_rate_on_conversion(taxable_income, total_conv, filing)
+    # Add blended NIIT cost if income + conversion exceeds threshold
+    if taxable_income >= niit_threshold:
+        eff += NIIT_RATE  # entire conversion is in NIIT territory
+    elif taxable_income + total_conv > niit_threshold:
+        niit_portion = taxable_income + total_conv - niit_threshold
+        eff += NIIT_RATE * (niit_portion / total_conv)
+
+    return round(total_conv), round(eff, 4)
 
 
 # ── Year-by-Year Schedule ─────────────────────────────────────────────────────
 
 def _build_schedule(
     strategy_name: str,
-    annual_conversion: float,
+    annual_conversion: float,   # flat amount used for non-betr strategies
     current_age: float,
     retirement_age: float,
     window_years: int,
-    current_income: float,
+    current_income: float,      # kept for compat but overridden by _income_at_age
     filing: str,
+    person_cfg: Optional[Dict[str, Any]] = None,
+    future_rate: float = 0.35,  # used for betr_optimal strategy
 ) -> List[Dict[str, Any]]:
+    """
+    Build year-by-year conversion schedule.
+
+    For 'betr_optimal': each year's conversion is computed individually from
+    actual income at that age vs the future RMD rate — no fixed bracket cap.
+    For other strategies: uses flat annual_conversion with per-year effective rate.
+    """
     std_ded = STD_DED_MFJ if filing == "MFJ" else STD_DED_SINGLE
     schedule = []
     cum_conv = cum_tax = 0.0
+    is_betr  = (strategy_name == "betr_optimal")
 
     for yr in range(1, window_years + 1):
         age = current_age + yr
-        inc = current_income if age <= retirement_age else current_income * 0.10
+
+        # Per-year income — use arrays if available
+        if person_cfg is not None:
+            inc = _income_at_age(person_cfg, age, current_age, retirement_age)
+        else:
+            inc = current_income if age <= retirement_age else current_income * 0.10
+
         taxable = max(0.0, inc - std_ded)
 
-        conv, eff = compute_strategy_conversion(strategy_name, taxable, filing)
-        # Use the fixed annual_conversion (not recomputed) for consistency
-        conv_yr = annual_conversion
-        tax_yr  = round(conv_yr * eff)
+        # Withdrawal from schedule
+        wd_arr = (person_cfg.get("income_data") or {}).get("withdrawal_by_year") or [] if person_cfg else []
+        wd_yr  = float(wd_arr[yr - 1]) if yr - 1 < len(wd_arr) else 0.0
+
+        # Approximate tax on ordinary income alone (no conversion, no RMD)
+        # Used only for total_spendable estimate — rough but directionally correct
+        _inc_tax_approx = taxable * marginal_rate(taxable, filing) * 0.6  # blended approx
+
+        if is_betr:
+            # BETR-optimal: convert everything where marginal rate < future_rate
+            conv_yr, eff = compute_betr_optimal_conversion(taxable, future_rate, filing)
+        else:
+            # Fixed strategy: use flat amount, compute effective rate for this year's income
+            conv_yr = annual_conversion
+            eff = effective_rate_on_conversion(taxable, conv_yr, filing) if conv_yr > 0 else 0.0
+
+        tax_yr   = round(conv_yr * eff)
         cum_conv += conv_yr
         cum_tax  += tax_yr
 
-        irmaa_relevant = (age >= 63)
         irmaa_delta = 0
-        if irmaa_relevant:
+        if age >= 63:
             irmaa_delta = round(
                 irmaa_annual(inc + conv_yr, filing) - irmaa_annual(inc, filing)
             )
 
+        # Phase label for UI
+        if age < retirement_age:
+            phase = "working"
+        elif age < retirement_age + 1:
+            phase = "transition"
+        else:
+            phase = "retirement"
+
         schedule.append({
-            "year":               yr,
-            "age":                round(age, 1),
-            "conversion":         round(conv_yr),
-            "tax_cost":           tax_yr,
-            "effective_rate":     round(eff, 3),
-            "irmaa_delta":        irmaa_delta,
+            "year":                 yr,
+            "age":                  round(age, 1),
+            "phase":                phase,
+            "income_estimate":      round(inc),
+            "withdrawal":           round(wd_yr),
+            "conversion":           round(conv_yr),
+            "tax_cost":             tax_yr,
+            "effective_rate":       round(eff, 3),
+            "irmaa_delta":          irmaa_delta,
             "cumulative_converted": round(cum_conv),
-            "cumulative_tax":     round(cum_tax),
+            "cumulative_tax":       round(cum_tax),
+            # Total spendable = withdrawal (after-tax take-home) + net income after approx tax
+            # Note: withdrawal IS already after-tax; income estimate is pre-tax gross
+            "total_spendable":      round(wd_yr + max(0.0, inc - _inc_tax_approx)),
         })
     return schedule
 
 
 # ── Recommendation Logic ──────────────────────────────────────────────────────
+
+def _compute_conflicts(
+    person_cfg: Dict[str, Any],
+    current_taxable: float,
+    future_rate: float,
+    window_years: int,
+    atr: float,
+    filing: str,
+) -> List[Dict[str, Any]]:
+    """
+    Detect optimization opportunities — both applied (informational) and
+    pending (actionable). We never silently override — we explain everything.
+
+    Status values:
+      "applied"  — already active in the current run, shown as info
+      "pending"  — user setting blocks this, shown with Apply button
+    """
+    NIIT_RATE    = 0.038
+    NIIT_THRESH  = 250_000.0
+    conflicts    = []
+    pol          = (person_cfg.get("roth_conversion_policy") or {})
+    avoid_niit   = bool(pol.get("avoid_niit", False))
+    keepit       = str(pol.get("keepit_below_max_marginal_fed_rate", "")).strip().lower()
+    std_ded      = STD_DED_MFJ if filing == "MFJ" else STD_DED_SINGLE
+    income_data  = (person_cfg.get("income_data") or {})
+    w2_by_year   = income_data.get("w2_by_year") or []
+    current_age  = float(person_cfg.get("current_age") or 59)
+    is_betr      = (keepit == "betr_optimal")
+
+    # ── NIIT during working years ─────────────────────────────────────────────
+    # Compute potential savings from converting with NIIT during working years
+    niit_savings = 0.0
+    for yr_idx, w2 in enumerate(w2_by_year):
+        age = current_age + yr_idx + 1
+        if age > 75:
+            break
+        ord_arr = income_data.get("ordinary_by_year") or []
+        inc = w2 + float(ord_arr[yr_idx] if yr_idx < len(ord_arr) else 0)
+        taxable_y = max(0.0, inc - std_ded)
+        if taxable_y < NIIT_THRESH:
+            continue
+        conv_niit_aware, _ = compute_betr_optimal_conversion(taxable_y, future_rate, filing)
+        blocked = max(0.0, NIIT_THRESH - taxable_y)  # = 0 when already over threshold
+        extra = max(0.0, conv_niit_aware - blocked)
+        if extra > 0:
+            eff_niit = effective_rate_on_conversion(taxable_y, extra, filing) + NIIT_RATE
+            if eff_niit < future_rate:
+                niit_savings += extra * (future_rate - eff_niit)
+
+    if niit_savings > 0:
+        pv_niit = round(niit_savings * ((1 - (1+atr)**(-window_years)) / atr if atr > 0 else window_years))
+        future_pct = int(future_rate * 100)
+        if is_betr:
+            # Already applied — show as informational
+            conflicts.append({
+                "key":    "niit_override",
+                "status": "applied",
+                "title":  "NIIT included in working-year conversions",
+                "explanation": (
+                    f"Your income exceeds the ${int(NIIT_THRESH/1000)}K NIIT threshold during "
+                    f"working years, so NIIT (3.8%) applies to investment income regardless. "
+                    f"BETR-optimal converts through the 32% bracket at ~35.8% effective rate, "
+                    f"which still beats your future RMD rate of {future_pct}% — "
+                    f"saving ~{int((future_rate - 0.358)*100)}% on every converted dollar."
+                ),
+                "estimated_savings": pv_niit,
+                "apply_field": None, "apply_value": None, "apply_label": None,
+            })
+        elif avoid_niit:
+            # Pending — user has avoid_niit:true and non-betr strategy
+            conflicts.append({
+                "key":    "niit_override",
+                "status": "pending",
+                "title":  "Allow NIIT during working-year conversions",
+                "explanation": (
+                    f"Your income already exceeds the ${int(NIIT_THRESH/1000)}K NIIT threshold "
+                    f"during working years — NIIT (3.8%) applies to investment income regardless. "
+                    f"Converting through the 32% bracket costs ~35.8% effective but beats your "
+                    f"future RMD rate of {future_pct}%. Your avoid_niit setting is blocking "
+                    f"profitable conversions in years when NIIT is unavoidable anyway."
+                ),
+                "estimated_savings": pv_niit,
+                "current_setting":   "avoid_niit: true",
+                "suggested_setting": "switch to betr_optimal — converts only where total rate < future rate",
+                "apply_field":       "keepit_below_max_marginal_fed_rate",
+                "apply_value":       "betr_optimal",
+                "apply_label":       "Switch to BETR-Optimal strategy",
+            })
+
+    # ── Bracket extension ─────────────────────────────────────────────────────
+    if keepit not in ("fill the bracket", "none", "", "betr_optimal"):
+        try:
+            cap_rate = float(keepit.replace("%", "")) / 100.0
+        except ValueError:
+            cap_rate = None
+        if cap_rate is not None and future_rate > cap_rate + 0.02:
+            for top, rate in _brackets(filing):
+                if rate > cap_rate and future_rate > rate:
+                    cap_ceiling  = bracket_top(cap_rate, filing) or 0.0
+                    extra_conv   = min((top or 1_500_000) - cap_ceiling, 500_000)
+                    if extra_conv > 0:
+                        pv_sav = round(extra_conv * (future_rate - rate) *
+                                       ((1 - (1+atr)**(-window_years)) / atr if atr > 0 else window_years))
+                        conflicts.append({
+                            "key":    "bracket_extension",
+                            "status": "pending",
+                            "title":  f"Extend conversions through {int(rate*100)}% bracket",
+                            "explanation": (
+                                f"Your policy caps conversions at {int(cap_rate*100)}% but your "
+                                f"future RMD rate is {int(future_rate*100)}%. Converting through "
+                                f"the {int(rate*100)}% bracket now saves {int((future_rate-rate)*100)}% "
+                                f"per dollar vs paying {int(future_rate*100)}% on forced RMDs later."
+                            ),
+                            "estimated_savings": pv_sav,
+                            "current_setting":   f"keepit_below_max_marginal_fed_rate: {int(cap_rate*100)}%",
+                            "suggested_setting": f"{int(rate*100)}% (one bracket higher — still beats future rate)",
+                            "apply_field":       "keepit_below_max_marginal_fed_rate",
+                            "apply_value":       f"{int(rate*100)}%",
+                            "apply_label":       f"Extend to {int(rate*100)}% bracket",
+                        })
+                    break
+
+    return conflicts
+
 
 def _policy_status(
     person_cfg: Dict[str, Any],
@@ -446,8 +688,23 @@ def _recommend(
     }
     base, reason = severity_map.get(severity, ("balanced", "Standard bracket-fill recommended."))
 
+    # Upgrade to betr_optimal if future RMD rate exceeds the aggressive bracket (32%)
+    # i.e. there's meaningful arbitrage in the 35% bracket too
+    betr_data   = strategies.get("betr_optimal", {})
+    betr_future = (betr_data.get("scenarios") or {}).get("self_mfj", {}).get("future_rate", 0)
+    if severity in ("CRITICAL", "SEVERE") and betr_future > 0.35:
+        base   = "betr_optimal"
+        reason = (
+            f"IRA timebomb severity {severity}. Future RMD rate {int(betr_future*100)}% exceeds "
+            f"the 35% bracket — converting at 35% now saves {int((betr_future - 0.35)*100)}% on "
+            f"every dollar vs waiting. Note: even if NIIT (3.8%) applies during working years, "
+            f"35.8% effective still beats {int(betr_future*100)}% RMD rate. "
+            f"BETR-optimal: convert through brackets where (marginal + NIIT) < future rate, "
+            f"varying by year based on actual income."
+        )
+
     # Step down if IRMAA-sensitive and near Medicare age
-    if irmaa_sensitivity == "high" and current_age >= 61:
+    if irmaa_sensitivity == "high" and current_age >= 61 and base != "betr_optimal":
         strat_data = strategies.get(base, {})
         if strat_data.get("irmaa_annual_delta", 0) > 0:
             downgrade = {"maximum": "aggressive", "aggressive": "balanced",
@@ -575,7 +832,7 @@ def optimize_roth_conversion_full(
     betr_heir_m  = compute_betr(fr_heir_mod,  atr, years_to_death)
     betr_heir_h  = compute_betr(fr_heir_high, atr, years_to_death)
 
-    # ── Compute all 4 strategies ──────────────────────────────────────────────
+    # ── Compute all 4 fixed strategies + betr_optimal ────────────────────────
     strategies_out = {}
     for name in ("conservative", "balanced", "aggressive", "maximum"):
         conv_amt, eff_rate = compute_strategy_conversion(name, current_taxable, filing)
@@ -648,6 +905,47 @@ def optimize_roth_conversion_full(
             "betr_primary":         round(betr_self, 4),
         }
 
+    # ── BETR-optimal strategy ─────────────────────────────────────────────────
+    # Convert everything where marginal rate NOW < future RMD effective rate.
+    # This captures arbitrage even into the 35% bracket when future rate ≥ 37%.
+    betr_conv, betr_eff = compute_betr_optimal_conversion(
+        current_taxable, fr_self_mfj, filing
+    )
+    betr_tax_y1 = round(betr_conv * betr_eff)
+    betr_magi   = current_income + betr_conv
+    betr_irmaa  = round(irmaa_annual(betr_magi, filing) -
+                        irmaa_annual(current_income, filing)) if (current_age >= 63) else 0
+    # Find which bracket the BETR strategy fills to
+    betr_bracket_rate = marginal_rate(current_taxable + betr_conv - 1, filing)
+    strategies_out["betr_optimal"] = {
+        "annual_conversion":    round(betr_conv),
+        "bracket_filled":       f"{int(betr_bracket_rate*100)}% (BETR-driven)",
+        "effective_rate":       round(betr_eff, 4),
+        "tax_cost_year1":       betr_tax_y1,
+        "irmaa_annual_delta":   betr_irmaa,
+        "irmaa_notes":          [],
+        "scenarios": {
+            "self_mfj":      {"future_rate": round(fr_self_mfj, 4), "betr": round(betr_self, 4),
+                              "convert_makes_sense": True,
+                              "lifetime_savings": round(pv_tax_savings(betr_conv, betr_eff, fr_self_mfj, window_years, atr)),
+                              "description": "Self — both spouses alive (MFJ)"},
+            "survivor":      {"future_rate": round(fr_survivor, 4), "betr": round(betr_surv, 4),
+                              "convert_makes_sense": True,
+                              "lifetime_savings": round(pv_tax_savings(betr_conv, betr_eff, fr_survivor, window_years, atr)),
+                              "description": "Survivor — single filer after spouse passes"},
+            "heir_moderate": {"future_rate": round(fr_heir_mod, 4), "betr": round(betr_heir_m, 4),
+                              "convert_makes_sense": True,
+                              "lifetime_savings": round(pv_tax_savings(betr_conv, betr_eff, fr_heir_mod, window_years, atr)),
+                              "description": "Heir — moderate income"},
+            "heir_high":     {"future_rate": round(fr_heir_high, 4), "betr": round(betr_heir_h, 4),
+                              "convert_makes_sense": True,
+                              "lifetime_savings": round(pv_tax_savings(betr_conv, betr_eff, fr_heir_high, window_years, atr)),
+                              "description": "Heir — high income"},
+        },
+        "betr_primary": round(betr_self, 4),
+        "phased": True,  # signals UI that this strategy varies by year
+    }
+
     # ── Recommendation ────────────────────────────────────────────────────────
     rec_name, rec_reason = _recommend(severity, strategies_out, irmaa_sensitivity, current_age)
 
@@ -655,13 +953,16 @@ def optimize_roth_conversion_full(
     rec_conv = strategies_out[rec_name]["annual_conversion"]
     schedule = _build_schedule(
         rec_name, rec_conv, current_age, retirement_age,
-        window_years, current_income, filing
+        window_years, current_income, filing,
+        person_cfg=person_cfg,
+        future_rate=fr_self_mfj,
     )
 
-    # ── Savings matrix (flat, for UI table) ──────────────────────────────────
+    # ── Savings matrix (flat, for UI table) — fixed strategies only ──────────
     savings_matrix = {
         strat: {sc: d["lifetime_savings"] for sc, d in sdata["scenarios"].items()}
         for strat, sdata in strategies_out.items()
+        if strat != "betr_optimal"  # betr_optimal is phase-varying — shown in schedule
     }
 
     # ── Global warnings ───────────────────────────────────────────────────────
@@ -672,7 +973,8 @@ def optimize_roth_conversion_full(
             f"forces 37% bracket regardless of other choices. Convert aggressively now."
         )
     if include_heir and fr_heir_high >= 0.37:
-        heir_sav = strategies_out["aggressive"]["scenarios"]["heir_high"]["lifetime_savings"]
+        heir_strat = "betr_optimal" if "betr_optimal" in strategies_out else "aggressive"
+        heir_sav   = strategies_out[heir_strat]["scenarios"]["heir_high"]["lifetime_savings"]
         warnings.append(
             f"High-earning heir faces {int(fr_heir_high*100)}% rate on 10yr forced liquidation. "
             f"Aggressive strategy saves heirs ~${heir_sav:,}."
@@ -717,9 +1019,13 @@ def optimize_roth_conversion_full(
         "recommended_strategy":        rec_name,
         "recommended_reason":          rec_reason,
 
+        # Optimization conflicts — settings blocking better outcomes
+        "conflicts": _compute_conflicts(
+            person_cfg, current_taxable, fr_self_mfj,
+            window_years, atr, filing,
+        ),
+
         # Current policy status — is the recommendation already configured?
-        # Compares existing roth_conversion_policy against the recommendation
-        # so the UI can show "already on track" instead of re-recommending.
         **_policy_status(person_cfg, rec_name, strategies_out),
 
         # Schedule

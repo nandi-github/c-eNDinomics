@@ -203,6 +203,10 @@ def compute_bracket_fill_conversion_paths(
         # Determine target bracket ceiling (scaled nominal $)
         if max_rate_str == "fill the bracket":
             target_ceiling_nom = _find_current_bracket_ceiling(inc_nom, scaled_brackets)
+        elif max_rate_str == "betr_optimal":
+            # BETR-optimal: fill to the top of the 35% bracket (one below 37%)
+            # i.e. convert through every bracket where marginal rate < future RMD rate (37%)
+            target_ceiling_nom = _find_rate_bracket_ceiling(0.35, scaled_brackets)
         else:
             try:
                 rate_val = float(max_rate_str.replace("%", "")) / (
@@ -220,12 +224,12 @@ def compute_bracket_fill_conversion_paths(
 
         # NIIT guard: use inflation-scaled threshold so the guard is consistent
         # across simulation years (same real income level triggers it each year).
-        # Always clamp when avoid_niit=True: if income already exceeds the threshold
-        # (e.g. large RMD), headroom = 0 (any conversion makes NIIT exposure worse).
-        # The old guard "if inc_nom < niit_thresh_scaled" silently skipped this case,
-        # allowing the entire TRAD balance to be converted in one year — causing
-        # 100%+ effective tax rates in RMD years.
-        if avoid_niit:
+        # Always clamp when avoid_niit=True, EXCEPT for betr_optimal mode:
+        # betr_optimal already accounts for NIIT in its marginal rate comparison
+        # (converts only where marginal + 3.8% NIIT < future RMD rate), so
+        # blocking here would double-penalize and miss profitable working-year
+        # conversions. For all other modes, respect the user's avoid_niit setting.
+        if avoid_niit and max_rate_str != "betr_optimal":
             niit_headroom_nom = max(0.0, niit_thresh_scaled - inc_nom)
             headroom_nom = min(headroom_nom, niit_headroom_nom)
 
