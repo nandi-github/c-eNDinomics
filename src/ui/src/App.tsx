@@ -2394,9 +2394,12 @@ const App: React.FC = () => {
                 const fmtM = (v: number) => v >= 1e6 ? `$${(v/1e6).toFixed(1)}M` : `$${(v/1e3).toFixed(0)}K`;
 
                 // Y axis ticks
-                const yStep = Math.pow(10, Math.floor(Math.log10(maxV / 4)));
+                // Target ~5-6 ticks max to avoid cramping
+                const rawStep = Math.pow(10, Math.floor(Math.log10(maxV / 5)));
+                const niceSteps = [1, 2, 2.5, 5, 10];
+                const yStep = niceSteps.map(s => s * rawStep).find(s => maxV / s <= 6) ?? rawStep;
                 const yTicks: number[] = [];
-                for (let v = 0; v <= maxV * 1.05; v += yStep) yTicks.push(v);
+                for (let v = 0; v <= maxV * 1.05; v += yStep) yTicks.push(Math.round(v));
 
                 // X labels every 10 years
                 const xLabels = years.reduce((acc: number[], yr, i) => {
@@ -2418,7 +2421,7 @@ const App: React.FC = () => {
                         <g key={v}>
                           <line x1={PAD.l} x2={W - PAD.r} y1={yPx(v)} y2={yPx(v)}
                             stroke="#e5e7eb" strokeWidth={0.8} />
-                          <text x={PAD.l - 5} y={yPx(v) + 4} textAnchor="end" fontSize={10} fill="#9ca3af">
+                          <text x={PAD.l - 5} y={yPx(v) + 4} textAnchor="end" fontSize={11} fill="#6b7280">
                             {fmtM(v)}
                           </text>
                         </g>
