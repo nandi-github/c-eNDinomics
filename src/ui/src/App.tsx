@@ -3293,6 +3293,56 @@ const App: React.FC = () => {
                           <span style={{ fontSize: 11, color: "#9ca3af" }}>
                             Updates roth_conversion_policy in person.json · re-run simulation to see projections
                           </span>
+                          {R.configured_status === "on_track" && (
+                            <div style={{
+                              marginTop: 8, padding: "6px 12px",
+                              background: "#f0fdf4", border: "1px solid #86efac",
+                              borderRadius: 6, fontSize: 12, color: "#166534",
+                              display: "flex", alignItems: "center", gap: 6,
+                            }}>
+                              ✅ {R.configured_note}
+                            </div>
+                          )}
+                          {R.configured_status === "configured_different" && (
+                            <div style={{
+                              marginTop: 8, padding: "6px 12px",
+                              background: "#fffbeb", border: "1px solid #fde68a",
+                              borderRadius: 6, fontSize: 12, color: "#92400e",
+                              display: "flex", alignItems: "center", gap: 6,
+                            }}>
+                              ⚠️ {R.configured_note}
+                            </div>
+                          )}
+                          {R.configured_status === "under_converting" && (
+                            <div style={{
+                              marginTop: 8, padding: "6px 12px",
+                              background: "#fffbeb", border: "1px solid #fde68a",
+                              borderRadius: 6, fontSize: 12, color: "#92400e",
+                              display: "flex", alignItems: "center", gap: 6,
+                            }}>
+                              ⬆️ {R.configured_note}
+                            </div>
+                          )}
+                          {R.configured_status === "over_converting" && (
+                            <div style={{
+                              marginTop: 8, padding: "6px 12px",
+                              background: "#eff6ff", border: "1px solid #93c5fd",
+                              borderRadius: 6, fontSize: 12, color: "#1e40af",
+                              display: "flex", alignItems: "center", gap: 6,
+                            }}>
+                              ℹ️ {R.configured_note}
+                            </div>
+                          )}
+                          {R.configured_status === "not_configured" && (
+                            <div style={{
+                              marginTop: 8, padding: "6px 12px",
+                              background: "#fef2f2", border: "1px solid #fca5a5",
+                              borderRadius: 6, fontSize: 12, color: "#991b1b",
+                              display: "flex", alignItems: "center", gap: 6,
+                            }}>
+                              ⭕ {R.configured_note}
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>

@@ -375,6 +375,63 @@ def _build_schedule(
 
 # ── Recommendation Logic ──────────────────────────────────────────────────────
 
+def _policy_status(
+    person_cfg: Dict[str, Any],
+    rec_name: str,
+    strategies_out: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Compare the currently configured roth_conversion_policy against the
+    recommendation. Returns fields that let the UI show whether the user
+    has already applied the recommendation or needs to act.
+    """
+    pol = (person_cfg.get("roth_conversion_policy") or {})
+    enabled      = bool(pol.get("enabled", False))
+    annual_k     = float(pol.get("annual_conversion_k") or 0.0)
+    rec_strategy = rec_name  # e.g. "aggressive"
+    rec_data     = strategies_out.get(rec_name) or {}
+    rec_amount_k = float(rec_data.get("annual_conversion", 0) or 0) / 1000.0  # $ → $K
+
+    if not enabled:
+        return {
+            "policy_already_applied": False,
+            "configured_status": "not_configured",
+            "configured_note": "Conversions disabled — click Apply to activate",
+        }
+
+    # Tolerance: within 10% of recommended amount counts as "on track"
+    tolerance = 0.10
+    if rec_amount_k > 0:
+        within_tolerance = abs(annual_k - rec_amount_k) / rec_amount_k <= tolerance
+    else:
+        within_tolerance = annual_k > 0
+
+    if within_tolerance:
+        return {
+            "policy_already_applied": True,
+            "configured_status": "on_track",
+            "configured_note": f"Already configured — {rec_strategy.capitalize()} (${annual_k:.0f}K/yr). Re-run to see updated projections.",
+        }
+    elif annual_k > 0 and annual_k < rec_amount_k * (1 - tolerance):
+        return {
+            "policy_already_applied": False,
+            "configured_status": "under_converting",
+            "configured_note": f"Converting ${annual_k:.0f}K/yr — below recommended ${rec_amount_k:.0f}K/yr. Consider increasing.",
+        }
+    elif annual_k > rec_amount_k * (1 + tolerance):
+        return {
+            "policy_already_applied": False,
+            "configured_status": "over_converting",
+            "configured_note": f"Converting ${annual_k:.0f}K/yr — above recommended ${rec_amount_k:.0f}K/yr. Consider reviewing.",
+        }
+    else:
+        return {
+            "policy_already_applied": False,
+            "configured_status": "configured_different",
+            "configured_note": f"Converting ${annual_k:.0f}K/yr (recommended: ${rec_amount_k:.0f}K/yr)",
+        }
+
+
 def _recommend(
     severity: str,
     strategies: Dict[str, Any],
@@ -659,6 +716,11 @@ def optimize_roth_conversion_full(
         # Recommendation
         "recommended_strategy":        rec_name,
         "recommended_reason":          rec_reason,
+
+        # Current policy status — is the recommendation already configured?
+        # Compares existing roth_conversion_policy against the recommendation
+        # so the UI can show "already on track" instead of re-recommending.
+        **_policy_status(person_cfg, rec_name, strategies_out),
 
         # Schedule
         "year_by_year_schedule":       schedule,
