@@ -4402,11 +4402,11 @@ def group24_upside_and_swr(paths: int):
     ))
 
     if swr is not None:
-        # Plausible range: 0.1-15% (conservative floor, realistic ceiling)
+        # Plausible range: 0.5-30% (growth-adjusted binary search gives higher values)
         checks.append(chk(
-            "G24: SWR at P10 plausible range (0.1% - 15.0%)",
-            0.1 <= float(swr) <= 15.0,
-            f"swr_p10={swr}% -- outside 0.1-15% range"
+            "G24: SWR at P10 plausible range (0.5% - 30.0%)",
+            0.5 <= float(swr) <= 30.0,
+            f"swr_p10={swr}% -- outside 0.5-30% range"
         ))
         # Must be positive
         checks.append(chk(

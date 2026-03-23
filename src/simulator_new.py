@@ -948,27 +948,41 @@ def run_accounts_new(
         withdrawals["min_scaling_factor"]         = _min_scaling_factor
         withdrawals["upside_scaling_enabled"]     = _upside_enabled
 
-        # ── Safe withdrawal rate at P10 ──────────────────────────────────────
-        # Max constant withdrawal (% of starting portfolio) P10 path sustains
-        # without depletion. Conservative: ignores future growth.
-        # W_max = min over all years of (P10_balance[y] / years_remaining[y])
-        try:
-            _start_nom = float(total_nom_paths_core[:, 0].mean())
-            if _start_nom > 1000 and n_years > 0:
-                _p10_bal = np.percentile(total_nom_paths_core, 10, axis=0)
-                _w_candidates = np.array([
-                    _p10_bal[y] / max(n_years - y, 1)
-                    for y in range(n_years)
-                ])
-                _pos = _w_candidates[_w_candidates > 0]
-                _w_max = float(np.min(_pos)) if len(_pos) > 0 else 0.0
-                _swr_p10 = round(_w_max / _start_nom * 100, 2)
-                _swr_p10 = max(0.0, min(15.0, _swr_p10))
-            else:
-                _swr_p10 = 0.0
-        except Exception:
+    # ── Safe withdrawal rate at P10 ───────────────────────────────────────────
+    # What constant nominal withdrawal (as % of starting portfolio) can the P10
+    # path sustain without depletion, ACCOUNTING FOR GROWTH?
+    # Method: binary search — simulate year-by-year:
+    #   balance[y+1] = balance[y] × (1 + P10_return[y]) − W
+    # Find max W where balance never hits zero over n_years.
+    # Uses _p10_return_by_year (already computed above from pre-cashflow paths).
+    try:
+        _start_nom = float(total_nom_paths_core[:, 0].mean())
+        if _start_nom > 1000 and n_years > 0:
+            # P10 annual returns as fractions (already computed above)
+            # inv_nom_yoy_paths_core_shifted is already in fraction form (0.07 = 7%)
+            # No /100 needed — values are fractions not percentages
+            _p10_ret_frac = _p10_return_by_year  # already fractions
+            _lo_w, _hi_w = 0.0, _start_nom * 0.30  # search up to 30% of portfolio
+            for _ in range(50):
+                _w_mid = (_lo_w + _hi_w) / 2.0
+                _bal = _start_nom
+                _solvent = True
+                for _y in range(n_years):
+                    _bal = _bal * (1.0 + float(_p10_ret_frac[_y])) - _w_mid
+                    if _bal <= 0:
+                        _solvent = False
+                        break
+                if _solvent:
+                    _lo_w = _w_mid
+                else:
+                    _hi_w = _w_mid
+            _swr_p10 = round(_lo_w / _start_nom * 100, 2)
+            _swr_p10 = max(0.0, min(30.0, _swr_p10))
+        else:
             _swr_p10 = 0.0
-        withdrawals["safe_withdrawal_rate_p10_pct"] = _swr_p10
+    except Exception:
+        _swr_p10 = 0.0
+    withdrawals["safe_withdrawal_rate_p10_pct"] = _swr_p10
 
     # rmd_extra_current: mean surplus RMD beyond plan (candidate for reinvest).
     # Computed here (not inside apply_withdrawals block) so it's always valid —

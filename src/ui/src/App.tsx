@@ -90,6 +90,7 @@ type SnapshotWithdrawals = {
   total_withdraw_current_mean?: number[];
   total_withdraw_future_mean?: number[];
   safe_withdrawal_rate_p10_pct?: number;
+  base_current?: number[];
   upside_scaling_enabled?: boolean;
   bad_market_frac_by_year?: number[];
   shock_scaling_enabled?: boolean;
@@ -2342,13 +2343,63 @@ const App: React.FC = () => {
                           <td>{formatPct(snapshot.summary?.drawdown_p50)}</td>
                         </tr>
                         {snapshot.withdrawals?.safe_withdrawal_rate_p10_pct !== undefined && (
-                        <tr>
-                          <td><Tip label="Safe withdrawal rate — stress scenario (P10)"
-                            tip="The maximum constant withdrawal rate (as % of starting portfolio) that the 10th-percentile simulation path can sustain without depletion over the full planning horizon. A conservative benchmark — 90% of scenarios do better than this. Compare against your planned withdrawal rate to gauge stress-scenario safety margin." /></td>
-                          <td style={{ fontWeight: 600, color: (snapshot.withdrawals.safe_withdrawal_rate_p10_pct ?? 0) < 2.0 ? "#b91c1c" : "#166534" }}>
-                            {(snapshot.withdrawals.safe_withdrawal_rate_p10_pct ?? 0).toFixed(2)}%
-                          </td>
-                        </tr>
+                        <>
+                        {(() => {
+                          const swr          = snapshot.withdrawals?.safe_withdrawal_rate_p10_pct ?? 0;
+                          const startingTotal = Object.values(snapshot.starting ?? {}).reduce((a: number, b) => a + (b as number), 0);
+                          const plannedArr   = snapshot.withdrawals?.planned_current ?? [];
+                          const floorArr     = snapshot.withdrawals?.base_current ?? [];
+                          const plannedMean  = plannedArr.length > 0 ? plannedArr.reduce((a,b) => a+b, 0) / plannedArr.length : 0;
+                          const floorMean    = floorArr.length   > 0 ? floorArr.reduce((a,b) => a+b, 0)   / floorArr.length   : 0;
+                          const plannedRate  = startingTotal > 0 ? (plannedMean / startingTotal * 100) : 0;
+                          const floorRate    = startingTotal > 0 ? (floorMean   / startingTotal * 100) : 0;
+                          // Dot color: green = planned ≤ SWR | amber = floor ≤ SWR < planned | red = floor > SWR
+                          const dotColor = plannedRate <= swr ? "#16a34a"
+                                         : floorRate   <= swr ? "#d97706"
+                                         : "#dc2626";
+                          const dotTitle = plannedRate <= swr
+                            ? "Planned rate is within stress floor — run objective fully achievable"
+                            : floorRate <= swr
+                            ? "Full target exceeds stress floor — floor spending achievable, plan will scale down in bad markets"
+                            : "Even floor spending exceeds stress sustainability — run objective not achievable at any level";
+                          return (
+                            <>
+                            {plannedMean > 0 && (
+                            <tr>
+                              <td><Tip label="Planned withdrawal rate (after-tax take-home)"
+                                tip="Your planned after-tax take-home per year as % of starting portfolio. Taxes (RMDs, conversions, ordinary income) are computed separately on top. Color shows whether the run objective is achievable: GREEN = planned rate within stress floor. AMBER = full target strains stress floor but floor spending is achievable — bad markets scale you to floor, not depletion. RED = even floor spending exceeds stress sustainability — run objective not achievable." /></td>
+                              <td style={{ fontWeight: 600 }}>
+                                <span style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                                  <span title={dotTitle} style={{
+                                    display: "inline-block", width: 11, height: 11,
+                                    borderRadius: "50%", backgroundColor: dotColor,
+                                    flexShrink: 0, boxShadow: `0 0 0 2px ${dotColor}33`,
+                                  }} />
+                                  {plannedRate.toFixed(2)}% ({formatUSD(plannedMean)}/yr avg, after-tax)
+                                </span>
+                              </td>
+                            </tr>
+                            )}
+                            {floorMean > 0 && (
+                            <tr>
+                              <td><Tip label="Floor withdrawal rate (after-tax minimum)"
+                                tip="Your minimum floor spending as % of starting portfolio — the lowest take-home you have configured. In bad markets the simulator scales down to this floor rather than depleting the portfolio. Compare against the Safe withdrawal rate below to see whether your floor is stress-sustainable." /></td>
+                              <td style={{ fontWeight: 600, color: "#374151" }}>
+                                {floorRate.toFixed(2)}% ({formatUSD(floorMean)}/yr avg, after-tax)
+                              </td>
+                            </tr>
+                            )}
+                            <tr>
+                              <td><Tip label="Safe withdrawal rate — stress scenario (P10)"
+                                tip="The maximum constant withdrawal rate (% of starting portfolio per year) that the worst 10% of simulation paths can sustain without depletion. The younger you are, the smaller this number — a longer horizon means each dollar must stretch further. The reference point for interpreting the planned and floor rates above." /></td>
+                              <td style={{ fontWeight: 600 }}>
+                                {swr.toFixed(2)}%
+                              </td>
+                            </tr>
+                            </>
+                          );
+                        })()}
+                        </>
                         )}
                       </>);
                     })()}
@@ -3761,7 +3812,7 @@ const App: React.FC = () => {
                       <th>Year</th><th>Age</th>
                       <th><Tip label="Federal tax" tip="Federal income tax on ordinary income (wages, IRA withdrawals, conversions) plus any applicable capital gains tax." /></th><th><Tip label="State tax" tip="State income and capital gains tax based on your selected state." /></th><th><Tip label="Investment income tax" tip="3.8% Net Investment Income Tax on investment income above the $250k threshold (MFJ). Applies to capital gains, dividends, and interest." /></th><th><Tip label="Capital gains surcharge" tip="State-specific surcharge on capital gains above threshold (e.g. California 1% mental health surcharge)." /></th>
                       <th><Tip label="Total taxes" tip="Sum of federal, state, NIIT, and excise. All values are current USD mean across simulation paths." /></th>
-                      <th><Tip label="Take-home withdrawal" tip="Your planned withdrawal amount in today's dollars — what you actually spend. Taxes are paid separately from brokerage." /></th>
+                      <th><Tip label="Take-home withdrawal (after-tax)" tip="After-tax take-home — the amount you actually receive and spend, in today's dollars. This is your net spendable cash. Taxes (federal, state, NIIT, shown in the columns to the left) are computed on top of this and paid separately from your brokerage account." /></th>
                       <th><Tip label="Effective tax rate" tip="Total taxes divided by total taxable income — includes W2, RMDs, conversions, capital gains, and dividends. This is your true all-in tax rate on everything the IRS can see." /></th>
                     </tr>
                   </thead>
