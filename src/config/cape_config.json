@@ -1,0 +1,23 @@
+{
+  "cape_current": 35,
+  "cape_historical_mean": 17,
+  "adjustment_config": {
+    "inflation_assumption": 0.025,
+    "earnings_growth_assumption": 0.02
+  },
+  "scenario_bands": {
+    "pessimistic_label": "CAPE-implied (low return)",
+    "optimistic_label": "Historical mean (CAPE 17)"
+  },
+  "readme": {
+    "purpose": "CAPE (Cyclically Adjusted P/E) configuration for portfolio projection scenario bands. Used by the UI to compute deterministic scenario lines alongside Monte Carlo results.",
+    "cape_current": "Current Shiller CAPE ratio. Update periodically to reflect current market valuation. As of early 2026, CAPE ~35. Source: https://www.multpl.com/shiller-pe",
+    "cape_historical_mean": "Long-run historical CAPE mean (~17). Used as the 'optimistic' scenario — assumes valuations revert to mean. Do not change unless you have a strong view on the new normal.",
+    "adjustment_config": {
+      "inflation_assumption": "Annual inflation assumption used to convert CAPE-implied nominal return to real return. Should match core_inflation_pct in economicglobal.json.",
+      "earnings_growth_assumption": "Real earnings growth assumption. Historical average ~2%. Used in Gordon Growth Model: implied_return = earnings_yield + growth."
+    },
+    "how_cape_drives_bands": "CAPE-implied 10yr real return = 1/CAPE - inflation. At CAPE 35: 1/35 = 2.86% nominal - 2.5% inflation = ~0.3% real. At historical mean CAPE 17: 1/17 = 5.9% - 2.5% = ~3.4% real. These become the pessimistic and optimistic scenario lines on the Portfolio Projection chart.",
+    "update_frequency": "Update cape_current quarterly or when CAPE moves more than 5 points. The scenario bands are illustrative — they show what a CAPE-mean-reversion scenario would look like vs pure Monte Carlo."
+  }
+}

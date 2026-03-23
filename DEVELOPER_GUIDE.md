@@ -61,7 +61,9 @@ git push origin main
 cd src && ./vcleanbld_ui
 
 # Start with hot-reload (development — auto-restarts on .py changes)
-cd src && uvicorn api:app --reload --port 8000
+# Requires watchfiles: pip install watchfiles
+# Without watchfiles, --reload crashes when test harness creates/deletes ephemeral profiles
+cd src && pip install watchfiles && uvicorn api:app --reload --port 8000
 
 # Stop
 Ctrl+C

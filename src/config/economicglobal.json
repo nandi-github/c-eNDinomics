@@ -3,7 +3,9 @@
   "defaults": {
     "bad_market": {
       "drawdown_threshold": 0.15,
-      "use_recession_flag": true
+      "use_recession_flag": true,
+      "p10_signal_enabled": true,
+      "p10_return_threshold_pct": -15.0
     },
     "cash_reserve": {
       "months": 6,
@@ -127,7 +129,9 @@
     "purpose": "Global market behavior settings shared across ALL profiles. Overrides section applies year-range-specific changes. Profile economic.json is merged on top for profile-specific differences \u2014 profile values win on any conflict.",
     "bad_market": {
       "drawdown_threshold": "Portfolio decline fraction from peak that triggers bad-market mode. E.g. 0.15 = 15% below peak switches to bad-market withdrawal sequencing and suppresses rebalancing.",
-      "use_recession_flag": "true = also trigger bad-market mode if the stochastic model sets a macro recession flag, even if drawdown threshold has not yet been crossed."
+      "use_recession_flag": "true = also trigger bad-market mode if the stochastic model sets a macro recession flag, even if drawdown threshold has not yet been crossed.",
+      "p10_signal_enabled": "true = also trigger bad-market mode when the cross-sectional P10 annual return across all paths is below p10_return_threshold_pct. This is a leading indicator — catches deteriorating market conditions before any single path hits the drawdown threshold.",
+      "p10_return_threshold_pct": "P10 return level (%) below which bad-market mode triggers. E.g. -2.0 = if the 10th-percentile path is returning worse than -2% this year, treat as bad market even if the median path is still positive."
     },
     "cash_reserve": {
       "months": "Months of withdrawal target kept as liquid cash buffer. E.g. 6 = six-month cash cushion always maintained in brokerage.",

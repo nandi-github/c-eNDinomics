@@ -103,6 +103,8 @@ def run_accounts_new(
     sched_base: Optional[np.ndarray] = None,   # per-year minimum (floor) withdrawal
     apply_withdrawals: bool = False,
     withdraw_sequence: Optional[list] = None,
+    withdraw_sequence_bad: Optional[list] = None,   # bad-market sequence (previously built but unused)
+    econ_scaling_params: Optional[Dict[str, Any]] = None,  # from economicglobal.json — now wired
     tax_cfg: Optional[Dict[str, Any]] = None,
     ordinary_income_cur_paths: Optional[np.ndarray] = None,
     qual_div_cur_paths: Optional[np.ndarray] = None,
@@ -588,6 +590,52 @@ def run_accounts_new(
     planned_cur = np.zeros(n_years, dtype=float)
 
     # =========================================================================
+    # PRE-STEP 3: Bad market detection setup
+    # Extract scaling params from econ_scaling_params (wired from economicglobal.json)
+    # =========================================================================
+    _esp = econ_scaling_params or {}
+    _shock_scaling_enabled   = bool(_esp.get("shock_scaling_enabled",   True))
+    _drawdown_threshold      = float(_esp.get("drawdown_threshold",     0.15))
+    _min_scaling_factor      = float(_esp.get("min_scaling_factor",     0.65))
+    _scale_curve             = str(_esp.get("scale_curve",             "linear"))
+    _scale_poly_alpha        = float(_esp.get("scale_poly_alpha",       1.2))
+    _scale_exp_lambda        = float(_esp.get("scale_exp_lambda",       0.8))
+    _makeup_enabled          = bool(_esp.get("makeup_enabled",          True))
+    _makeup_ratio            = float(_esp.get("makeup_ratio",           0.3))
+    _makeup_cap_per_year     = float(_esp.get("makeup_cap_per_year",    0.1))
+    _p10_signal_enabled      = bool(_esp.get("p10_signal_enabled",      True))
+    _p10_threshold           = float(_esp.get("p10_return_threshold_pct", -15.0)) / 100.0
+
+    # Cross-sectional P10 return per year — computed from pre-cashflow core paths.
+    # One scalar per year shared across all paths: if P10 < threshold, that year
+    # is classified as a bad-market year for ALL paths (leading indicator).
+    import warnings as _bm_w
+    with _bm_w.catch_warnings():
+        _bm_w.simplefilter("ignore", RuntimeWarning)
+        _p10_return_by_year = np.nanpercentile(
+            inv_nom_yoy_paths_core_shifted, 10, axis=0
+        ) if _p10_signal_enabled else np.zeros(n_years, dtype=float)
+
+    # Running portfolio peak per path — for drawdown detection per path per year.
+    # Uses pre-cashflow core paths so peak is not inflated by RMD reinvestment.
+    _running_peak_core = np.maximum.accumulate(total_nom_paths_core, axis=1)
+
+    # Per-path bad market flag (paths × n_years) — True = bad market for this path this year
+    _bad_market_paths = np.zeros((paths, n_years), dtype=bool)
+    for _y in range(n_years):
+        _drawdown_y = 1.0 - total_nom_paths_core[:, _y] / np.maximum(
+            _running_peak_core[:, _y], 1e-12
+        )
+        _p10_bad_y = (_p10_return_by_year[_y] < _p10_threshold)
+        _bad_market_paths[:, _y] = (_drawdown_y > _drawdown_threshold) | _p10_bad_y
+
+    # Pad/normalise bad-market sequence (same structure as _seq_per_year)
+    _fallback_bad_seq = None  # resolved inside the withdrawal block below
+
+    # Cumulative deficit tracker for makeup payments (paths × scalar running total)
+    _cumulative_deficit_nom = np.zeros(paths, dtype=float)
+
+    # =========================================================================
     # STEP 3: Apply discretionary withdrawals (amount above RMD) if enabled
     #
     # RMD was already deducted from TRAD accounts in the RMD block above.
@@ -668,6 +716,23 @@ def run_accounts_new(
             for y in range(n_years)
         ]
 
+        # Bad-market sequence — parallel to _seq_per_year
+        # Falls back to good-market sequence if no bad sequence provided
+        _fallback_bad_seq = list(acct_eoy_nom.keys())
+        if withdraw_sequence_bad is None:
+            _seq_bad_per_year = _seq_per_year   # no bad sequence → same as good
+        elif withdraw_sequence_bad and isinstance(withdraw_sequence_bad[0], list):
+            _seq_bad_per_year = withdraw_sequence_bad
+        else:
+            _seq_bad_per_year = [withdraw_sequence_bad] * n_years
+
+        # Apply age gate to bad sequence too
+        _seq_bad_per_year = [
+            brokerage_only_seq if (owner_age_y0 + y) < 59.5 else
+            (_seq_bad_per_year[y] if y < len(_seq_bad_per_year) else _fallback_bad_seq)
+            for y in range(n_years)
+        ]
+
         # Base (floor) withdrawal schedule — pad/trim to n_years
         if sched_base is not None:
             _sb = np.asarray(sched_base, dtype=float)
@@ -680,14 +745,96 @@ def run_accounts_new(
             _sched_base = np.zeros(n_years, dtype=float)
 
         for y in range(n_years):
-            extra_nom = extra_cur[y] * deflator[y]
-            amount_nom_paths = np.full(paths, extra_nom, dtype=float)
-            seq = _seq_per_year[y] if y < len(_seq_per_year) else _fallback_seq
+            # ── Bad market state for this year ────────────────────────────────
+            bad_flag_y = _bad_market_paths[:, y]           # (paths,) bool
+            frac_bad   = float(bad_flag_y.mean())          # 0-1: fraction of paths in bad market
+
+            # ── Withdrawal sequence: switch to bad-market order when majority bad ─
+            # Majority rule: if >50% of paths are in bad market, use bad sequence.
+            # This is a practical simplification — a per-path switch would require
+            # running withdrawals_core separately per path (expensive).
+            if frac_bad > 0.5:
+                seq = _seq_bad_per_year[y] if y < len(_seq_bad_per_year) else _fallback_seq
+            else:
+                seq = _seq_per_year[y] if y < len(_seq_per_year) else _fallback_seq
+
+            # ── Amount scaling ─────────────────────────────────────────────────
+            # Base nominal target for this year (above-RMD discretionary portion)
+            extra_nom_base = extra_cur[y] * deflator[y]
+
+            if _shock_scaling_enabled:
+                # Drawdown fraction per path (0 = at peak, 1 = total loss)
+                _dd_y = 1.0 - total_nom_paths_core[:, y] / np.maximum(
+                    _running_peak_core[:, y], 1e-12
+                )
+                # Scale factor: linear interpolation from 1.0 at threshold to
+                # min_scaling_factor at 2× threshold (fully bad market).
+                # Good market paths get scale = 1.0.
+                if _scale_curve == "linear":
+                    _scale_y = np.where(
+                        bad_flag_y,
+                        np.clip(
+                            1.0 - (_dd_y - _drawdown_threshold) /
+                            max(_drawdown_threshold, 1e-6) * (1.0 - _min_scaling_factor),
+                            _min_scaling_factor, 1.0
+                        ),
+                        1.0
+                    )
+                elif _scale_curve == "poly":
+                    _norm_dd = np.clip(
+                        (_dd_y - _drawdown_threshold) / max(_drawdown_threshold, 1e-6),
+                        0.0, 1.0
+                    )
+                    _scale_y = np.where(
+                        bad_flag_y,
+                        np.clip(
+                            1.0 - (1.0 - _min_scaling_factor) * (_norm_dd ** _scale_poly_alpha),
+                            _min_scaling_factor, 1.0
+                        ),
+                        1.0
+                    )
+                else:  # exp
+                    _norm_dd = np.clip(
+                        (_dd_y - _drawdown_threshold) / max(_drawdown_threshold, 1e-6),
+                        0.0, 1.0
+                    )
+                    _scale_y = np.where(
+                        bad_flag_y,
+                        np.clip(
+                            1.0 - (1.0 - _min_scaling_factor) * (
+                                1.0 - np.exp(-_scale_exp_lambda * _norm_dd)
+                            ),
+                            _min_scaling_factor, 1.0
+                        ),
+                        1.0
+                    )
+            else:
+                _scale_y = np.ones(paths, dtype=float)
+
+            # ── Makeup: add recovery payment in good years ─────────────────────
+            # When not in bad market and cumulative deficit exists, recover
+            # makeup_ratio of the deficit, capped at makeup_cap_per_year × target.
+            _makeup_y = np.zeros(paths, dtype=float)
+            if _makeup_enabled:
+                _good_paths = ~bad_flag_y
+                _makeup_candidate = np.minimum(
+                    _cumulative_deficit_nom * _makeup_ratio,
+                    extra_nom_base * _makeup_cap_per_year
+                )
+                _makeup_y = np.where(_good_paths, _makeup_candidate, 0.0)
+
+            # ── Effective withdrawal amount per path ───────────────────────────
+            # Floor: base_k × deflator (never go below the hard floor)
+            _floor_nom_y = float(_sched_base[y]) * deflator[y]
+            amount_nom_paths = np.maximum(
+                _floor_nom_y,
+                _scale_y * extra_nom_base + _makeup_y
+            )
 
             if y == 0:
                 logger.debug("[WDEBUG y=0] extra_cur[0]=%.2f deflator[0]=%.4f extra_nom=%.2f",
-                             extra_cur[0], deflator[0], extra_nom)
-                logger.debug("[WDEBUG y=0] seq[:3]=%s", seq[:3])
+                             extra_cur[0], deflator[0], extra_nom_base)
+                logger.debug("[WDEBUG y=0] seq[:3]=%s frac_bad=%.2f", seq[:3], frac_bad)
                 for _a in list(acct_eoy_nom.keys())[:3]:
                     _arr = acct_eoy_nom[_a]
                     logger.debug("[WDEBUG y=0] acct=%s flags=%s mean_y0=%.2f",
@@ -734,6 +881,15 @@ def run_accounts_new(
             realized_nom_paths[:, y]  = realized_total_nom
             shortfall_nom_paths[:, y] = shortfall_total_nom
 
+            # ── Update cumulative deficit for makeup tracking ─────────────────
+            # Deficit this year = planned - realized (per path, nominal)
+            _planned_nom_y = amount_nom_paths  # what we tried to pay
+            _deficit_y = np.maximum(_planned_nom_y - realized_total_nom, 0.0)
+            # In bad years: accumulate deficit; in good years with makeup: reduce it
+            _cumulative_deficit_nom = np.maximum(
+                _cumulative_deficit_nom + _deficit_y - _makeup_y, 0.0
+            )
+
             for acct in acct_eoy_nom.keys():
                 rn = realized_per_acct_nom.get(acct)
                 sn = shortfall_per_acct_nom.get(acct)
@@ -758,6 +914,14 @@ def run_accounts_new(
         _base_cur = _sched_base if '_sched_base' in dir() else np.zeros(n_years, dtype=float)
         withdrawals["base_current"]           = _base_cur.tolist()
         withdrawals["base_future_mean"]       = (_base_cur * deflator).tolist()
+
+        # ── Bad market summary fields ────────────────────────────────────────
+        # Fraction of paths in bad market per year (0-1)
+        _bad_market_frac_by_year = _bad_market_paths.mean(axis=0).tolist()
+        withdrawals["bad_market_frac_by_year"]    = _bad_market_frac_by_year
+        withdrawals["bad_market_drawdown_threshold"] = _drawdown_threshold
+        withdrawals["shock_scaling_enabled"]      = _shock_scaling_enabled
+        withdrawals["min_scaling_factor"]         = _min_scaling_factor
 
     # rmd_extra_current: mean surplus RMD beyond plan (candidate for reinvest).
     # Computed here (not inside apply_withdrawals block) so it's always valid —

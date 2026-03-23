@@ -588,8 +588,14 @@ def get_profile_config(
     name: str = Path(..., description="Config file name, e.g. allocation_yearly.json"),
 ):
     path = _profile_json_path(profile, name)
+    # Fallback: system config files (cape_config.json, assets.json, etc.)
+    # live in src/config/ not in profiles/. Check there before returning 404.
     if not os.path.isfile(path):
-        raise HTTPException(status_code=404, detail=f"{name} not found in profile '{profile}'.")
+        config_path = os.path.join(APP_ROOT, "config", name)
+        if os.path.isfile(config_path):
+            path = config_path
+        else:
+            raise HTTPException(status_code=404, detail=f"{name} not found in profile '{profile}'.")
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -1413,7 +1419,26 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
             seq_good_per_year.append(_expand(order_good, acct_names, allow_trad, allow_roth))
             seq_bad_per_year.append( _expand(order_bad,  acct_names, allow_trad, allow_roth))
 
-        withdraw_seq_per_year = seq_good_per_year
+        withdraw_seq_per_year      = seq_good_per_year
+        withdraw_seq_bad_per_year  = seq_bad_per_year
+
+        # Extract bad market + withdrawal scaling params from econ_policy
+        # These were previously config-only dead code — now wired to simulator.
+        _wd_policy = econ_policy.get("withdrawals", {}) or {}
+        _bm_policy = econ_policy.get("bad_market",  {}) or {}
+        econ_scaling_params = {
+            "shock_scaling_enabled":   bool(_wd_policy.get("shock_scaling_enabled",  True)),
+            "drawdown_threshold":       float(_wd_policy.get("drawdown_threshold",    0.15)),
+            "min_scaling_factor":       float(_wd_policy.get("min_scaling_factor",    0.65)),
+            "scale_curve":              str(_wd_policy.get("scale_curve",            "linear")),
+            "scale_poly_alpha":         float(_wd_policy.get("scale_poly_alpha",      1.2)),
+            "scale_exp_lambda":         float(_wd_policy.get("scale_exp_lambda",      0.8)),
+            "makeup_enabled":           bool(_wd_policy.get("makeup_enabled",         True)),
+            "makeup_ratio":             float(_wd_policy.get("makeup_ratio",          0.3)),
+            "makeup_cap_per_year":      float(_wd_policy.get("makeup_cap_per_year",   0.1)),
+            "p10_signal_enabled":       bool(_bm_policy.get("p10_signal_enabled",     True)),
+            "p10_return_threshold_pct": float(_bm_policy.get("p10_return_threshold_pct", -15.0)),
+        }
 
         # Inject UI-selected simulation_mode into person_cfg
         person_cfg["simulation_mode"] = simulation_mode
@@ -1428,6 +1453,8 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
             sched_base=sched_base_for_modular,
             apply_withdrawals=apply_withdrawals_flag,
             withdraw_sequence=withdraw_seq_per_year,
+            withdraw_sequence_bad=withdraw_seq_bad_per_year,
+            econ_scaling_params=econ_scaling_params,
             tax_cfg=tax_cfg,
             ordinary_income_cur_paths=ordinary_income_cur_paths,
             qual_div_cur_paths=qual_div_cur_paths,

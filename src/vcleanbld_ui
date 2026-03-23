@@ -69,5 +69,9 @@ fi
 echo ""
 
 # ── Start API server ──────────────────────────────────────────────────────────
+# No --reload: StatReload scans all directories including ephemeral test profiles
+# which causes FileNotFoundError crashes during test runs.
+# For hot-reload during active .py development use: uvicorn api:app --reload
+# after installing watchfiles: pip install watchfiles
 echo "== Starting API server =="
-python -m uvicorn api:app --reload
+python -m uvicorn api:app --port 8000

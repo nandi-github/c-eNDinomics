@@ -4229,6 +4229,154 @@ GROUPS.append(group21_asset_weight_sanity)
 GROUPS.append(group22_roth_optimizer)
 
 
+# ===========================================================================
+# GROUP 23 -- BAD MARKET RESPONSE (session 27)
+# Verifies that economicglobal.json bad market settings are now wired:
+#   - Withdrawal amounts scale down during shocks
+#   - Withdrawal sequence switches to bad-market order
+#   - Makeup payments fire in recovery years
+#   - bad_market_frac_by_year field present in withdrawals dict
+# ===========================================================================
+
+def group23_bad_market_response(paths: int):
+    """
+    Verifies that economicglobal.json bad market response is fully wired:
+    1. With severe shock: realized withdrawals < planned in shock years
+    2. bad_market_frac_by_year field present and non-zero in shock years
+    3. Makeup: realized recovers toward planned in years after shock
+    4. No scaling: without shock, realized == planned (full funding)
+    5. min_scaling_factor floor: realized never below floor x planned
+    """
+    checks = []; elapsed = 0.0
+
+    # -- Baseline: no shock -> full funding every year --------------------
+    res_base, t = ephemeral_run("g23_base", paths); elapsed += t
+    W_base = res_base.get("withdrawals", {})
+
+    # bad_market_frac_by_year field must be present
+    bm_frac = W_base.get("bad_market_frac_by_year", None)
+    checks.append(chk(
+        "G23: bad_market_frac_by_year field present in withdrawals",
+        bm_frac is not None and len(bm_frac) == YEARS,
+        f"got {type(bm_frac)} len={len(bm_frac) if bm_frac else 0}"
+    ))
+
+    # Without shock: bad market frac should be LOW (no drawdown on $9.92M portfolio)
+    # P10 signal may fire occasionally from GBM variance; drawdown signal should not.
+    # Store baseline for comparison with shock run.
+    baseline_avg_bm_frac = 0.0
+    if bm_frac and len(bm_frac) == YEARS:
+        baseline_avg_bm_frac = float(np.mean([float(v) for v in bm_frac]))
+        # With no shocks, drawdown > 15% should never fire on $9.92M healthy portfolio.
+        # P10 signal may still fire from GBM variance but should be minority of years.
+        checks.append(chk(
+            "G23: No-shock baseline bad market frac < 0.5 (drawdown not spuriously firing)",
+            baseline_avg_bm_frac < 0.5,
+            f"avg_bad_frac={baseline_avg_bm_frac:.3f} (>0.5 = drawdown threshold misfiring)"
+        ))
+
+    # Realized == planned in no-shock run (full funding expected)
+    planned_base   = W_base.get("planned_current", [0] * YEARS)
+    realized_base  = W_base.get("realized_current_mean", [0] * YEARS)
+    pre_rmd_years  = list(range(min(20, YEARS)))
+    if planned_base and realized_base:
+        n_underfunded = sum(
+            1 for i in pre_rmd_years
+            if float(realized_base[i]) < float(planned_base[i]) * 0.98
+        )
+        checks.append(chk(
+            "G23: No-shock run: realized ~= planned in pre-RMD years (full funding)",
+            n_underfunded == 0,
+            f"{n_underfunded} years underfunded without shock -- scaling misfiring?"
+        ))
+
+    # -- Severe shock run -> scaling must reduce withdrawals ---------------
+    sh_severe = {"mode": "augment", "events": [
+        _base_event(start_year=3, depth=0.40, dip_quarters=4, recovery_quarters=8)
+    ]}
+    res_sh, t = ephemeral_run("g23_shock", paths, shocks=sh_severe); elapsed += t
+    W_sh = res_sh.get("withdrawals", {})
+
+    bm_frac_sh = W_sh.get("bad_market_frac_by_year", [])
+    planned_sh  = W_sh.get("planned_current",       [0] * YEARS)
+    realized_sh = W_sh.get("realized_current_mean", [0] * YEARS)
+
+    # Bad market frac must be meaningfully higher in shock years than baseline
+    if bm_frac_sh and len(bm_frac_sh) >= 7:
+        shock_bm_frac = [float(bm_frac_sh[i]) for i in range(2, 6)]
+        max_shock_bm  = max(shock_bm_frac)
+        checks.append(chk(
+            "G23: Bad market fraction > 0.5 in shock years (yrs 3-6, depth=40%)",
+            max_shock_bm > 0.5,
+            f"max_bad_frac yrs3-6={max_shock_bm:.3f} (low = drawdown detection not firing)"
+        ))
+        # Shock run must have MORE bad market years than no-shock baseline
+        shock_avg_bm = float(np.mean(shock_bm_frac))
+        checks.append(chk(
+            "G23: Shock run bad market frac > no-shock baseline (signal distinguishes shock)",
+            shock_avg_bm > baseline_avg_bm_frac + 0.1,
+            f"shock_avg={shock_avg_bm:.3f} baseline={baseline_avg_bm_frac:.3f}"
+        ))
+
+    # Realized < planned in shock years (scaling working)
+    if planned_sh and realized_sh and len(planned_sh) >= 7:
+        shock_years = range(2, 6)
+        n_scaled = sum(
+            1 for i in shock_years
+            if float(realized_sh[i]) < float(planned_sh[i]) * 0.99
+               and float(planned_sh[i]) > 0
+        )
+        checks.append(chk(
+            "G23: Realized < planned in >= 2 shock years (scaling reduces withdrawals)",
+            n_scaled >= 2,
+            f"{n_scaled}/4 shock years show scaling (0 = shock_scaling not wired)"
+        ))
+
+    # Realized never below min_scaling_factor x planned (floor respected)
+    min_sf = float(W_sh.get("min_scaling_factor", 0.65))
+    if planned_sh and realized_sh:
+        n_below_floor = sum(
+            1 for i in range(YEARS)
+            if float(planned_sh[i]) > 100
+            and float(realized_sh[i]) < float(planned_sh[i]) * min_sf * 0.98
+        )
+        checks.append(chk(
+            f"G23: Realized never below min_scaling_factor ({min_sf:.0%}) x planned",
+            n_below_floor == 0,
+            f"{n_below_floor} years below floor -- min_scaling_factor not clamping"
+        ))
+
+    # -- Makeup: recovery years should trend back toward planned -----------
+    if realized_sh and planned_sh and len(realized_sh) >= 15:
+        post_recovery = range(10, 15)
+        n_recovered = sum(
+            1 for i in post_recovery
+            if float(realized_sh[i]) >= float(planned_sh[i]) * 0.98
+        )
+        checks.append(chk(
+            "G23: Post-shock recovery years (10-15): realized ~= planned (makeup restoring)",
+            n_recovered >= 3,
+            f"{n_recovered}/5 recovery years at ~= planned (0 = makeup not firing)"
+        ))
+
+    # -- Metadata fields present ------------------------------------------
+    checks.append(chk(
+        "G23: bad_market_drawdown_threshold present in withdrawals",
+        "bad_market_drawdown_threshold" in W_sh,
+        "missing -- econ_policy not passed through to simulator"
+    ))
+    checks.append(chk(
+        "G23: shock_scaling_enabled present in withdrawals",
+        "shock_scaling_enabled" in W_sh,
+        "missing"
+    ))
+
+    return "G23", "Bad market response (scaling, sequence, makeup, floor)", checks, elapsed
+
+
+GROUPS.append(group23_bad_market_response)
+
+
 def run_comprehensive(paths: int):
     print(f"\n{'='*72}")
     print(f"  eNDinomics Comprehensive Functional Test  |  paths={paths}")
