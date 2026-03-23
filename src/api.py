@@ -2,6 +2,7 @@
 # --- Begin of file ---
 
 import os
+import logging
 import json
 import shutil
 from typing import Any, Dict, List
@@ -1142,10 +1143,10 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
     floor_k = float(sched_base.min()) if sched_base is not None and sched_base.size > 0 else 0.0
 
     # DEBUG: see what schedule we really loaded
-    print("[DEBUG api] withdraw_path_effective:", withdraw_path_effective)
-    print("[DEBUG api] sched_arr[0:10]:", sched_arr[:10])
-    print("[DEBUG api] sched_base[0:10]:", sched_base[:10])
-    print("[DEBUG api] floor_k (legacy scalar):", floor_k)
+    # debug removed
+    # debug removed
+    # debug removed
+    # debug removed:", floor_k)
 
 
     infl_yearly = load_inflation_yearly(infl_path, years_count=30)
@@ -1193,13 +1194,13 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
     #     print(f"[run] assets refresh skipped: {_e}")
 
     # person_cfg already loaded above (moved before load_sched for current_age)
-    print("[DEBUG api] person_cfg.rmd_policy:", person_cfg.get("rmd_policy") if person_cfg else None)
+    # debug removed if person_cfg else None)
 
     # Dynamic simulation years: target_age - current_age (default target=95, min 10, max 60)
     _current_age = int((person_cfg or {}).get("current_age", 55))
     _target_age  = int((person_cfg or {}).get("target_age",  95))
     _n_years     = max(10, min(60, _target_age - _current_age))
-    print(f"[api] sim years: {_n_years} (age {_current_age} → {_target_age})")
+    # debug removed")
 
     income_cfg = load_income(income_path, current_age=float(_current_age), max_years=int(_n_years))
     econ_policy = load_economic_policy(economic_path_effective, global_path=economic_global_path)
@@ -1213,20 +1214,6 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
     rmds_enabled = not ignore_rmds_flag
     
     # DEBUG: see what the server thinks the flags are
-    print(
-        "[DEBUG api] standard_test inputs:",
-        "shocks_mode_raw:",
-        (shocks_mode or "").lower(),
-        "shocks_mode_raw_req:",
-        (shocks_mode_req or "").lower(),
-        #####################
-        "ignore_withdrawals:",
-        ignore_withdrawals,
-        "ignore_rmds:",
-        ignore_rmds,
-        "ignore_conversions:",
-        ignore_conversions,
-    )
 
     shocks_mode_req_raw = (shocks_mode_req or "").lower()
 
@@ -1292,25 +1279,12 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
     # Always True — run_accounts_new handles all cases
     modular_test = True
 
-    print(
-        "[DEBUG api] modular routing:",
-        "profile:", profile,
-        "shocks_req:", shocks_mode_req_raw,
-        "ignore_withdrawals:", ignore_withdrawals_flag,
-        "ignore_rmds:", ignore_rmds_flag,
-        "ignore_conversions:", ignore_conversions_flag,
-        "modular_core_only_test:", modular_core_only_test,
-        "modular_core_withdrawals_test:", modular_core_withdrawals_test,
-        "modular_rmd_only_test:", modular_rmd_only_test,
-        "modular_withdrawals_rmd_test:", modular_withdrawals_rmd_test,
-        "modular_withdrawals_rmd_conv_test:", modular_withdrawals_rmd_conv_test,
-        "modular_test:", modular_test,
-    )
+    # debug removed
 
 
 
     if modular_test:
-        print("[DEBUG api] Using modular run_accounts_new for Test profile")
+        # debug removed
         rmds_enabled = not ignore_rmds_flag
 
         income_cfg = load_income(f"profiles/{profile}/income.json",
@@ -1478,16 +1452,11 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
     # -- Tax diagnostic (server log -- remove once tax table confirmed working) --
     _wd_d = res.get("withdrawals", {})
     _cx_d = res.get("conversions", {})
-    print("[TAX DIAG] taxes_fed yr20-24:",
-          [round(v, 0) for v in (_wd_d.get("taxes_fed_current_mean") or [0]*30)[20:25]])
-    print("[TAX DIAG] taxes_state yr20-24:",
-          [round(v, 0) for v in (_wd_d.get("taxes_state_current_mean") or [0]*30)[20:25]])
-    print("[TAX DIAG] conv_tax yr0-4:",
-          [round(v, 0) for v in (_cx_d.get("conversion_tax_cur_mean_by_year") or [0]*30)[0:5]])
-    print("[TAX DIAG] ord_income yr0 mean:",
-          round(float(ordinary_income_cur_paths[:, 0].mean()), 2))
-    print("[TAX DIAG] ord_income yr20 mean:",
-          round(float(ordinary_income_cur_paths[:, 20].mean()), 2))
+    # debug removed for v in (_wd_d.get("taxes_fed_current_mean") or [0]*30)[20:25]])
+    # debug removed for v in (_wd_d.get("taxes_state_current_mean") or [0]*30)[20:25]])
+    # debug removed for v in (_cx_d.get("conversion_tax_cur_mean_by_year") or [0]*30)[0:5]])
+    # debug removed), 2))
+    # debug removed), 2))
 
     rmd_table = str(payload.get("rmd_table") or (person_cfg or {}).get("rmd_table", "uniform_lifetime"))
 

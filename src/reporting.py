@@ -1,6 +1,7 @@
 # filename: reporting.py
 
 import os
+import logging
 from typing import Any, Dict, Optional, List
 import numpy as np
 
@@ -8,6 +9,8 @@ import numpy as np
 import matplotlib as mpl
 mpl.use("Agg")
 import matplotlib.pyplot as plt
+
+logger = logging.getLogger(__name__)
 
 INFL_BASELINE_ANNUAL = 0.035
 
@@ -190,11 +193,15 @@ def _plot_aggregate_band(
         ax.grid(True, alpha=0.25)
         ax.legend(loc="best", fontsize=9)
 
-        # Format y-axis ticks as e.g. "$1.2" (unit is in label)
+        # Format y-axis ticks cleanly — no cramped decimals
         import matplotlib.ticker as mticker
-        ax.yaxis.set_major_formatter(
-            mticker.FuncFormatter(lambda x, _: f"${x:,.1f}")
-        )
+        def _ytick_fmt(x, _):
+            if x == 0: return "$0"
+            if abs(x - round(x)) < 0.05: return f"${round(x):,}"
+            return f"${x:,.1f}"
+        ax.yaxis.set_major_formatter(mticker.FuncFormatter(_ytick_fmt))
+        ax.yaxis.set_major_locator(mticker.MaxNLocator(nbins=6, integer=False))
+        ax.tick_params(axis='y', labelsize=9)
 
         fig.tight_layout()
         fig.savefig(out_path)
@@ -240,9 +247,37 @@ def report_and_plot_accounts(
     tax_cfg: Dict[str, Any],
     person_cfg: Dict[str, Any],
     benchmarks_path: Optional[str] = None,
+    verbose: bool = False,
+):
+    # Redirect stdout to suppress all print() output when verbose=False (API server mode).
+    # verbose=True restores full print output for CLI use.
+    import sys, io as _io
+    _orig_stdout = sys.stdout
+    if not verbose:
+        sys.stdout = _io.StringIO()
+    try:
+        _report_impl(
+            res=res, args=args, out_dir=out_dir,
+            alloc_accounts=alloc_accounts, tax_cfg=tax_cfg,
+            person_cfg=person_cfg, benchmarks_path=benchmarks_path,
+            verbose=verbose,
+        )
+    finally:
+        sys.stdout = _orig_stdout
+
+
+def _report_impl(
+    res: Dict[str, Any],
+    args: Any,
+    out_dir: str,
+    alloc_accounts: Dict[str, Any],
+    tax_cfg: Dict[str, Any],
+    person_cfg: Dict[str, Any],
+    benchmarks_path: Optional[str] = None,
+    verbose: bool = False,
 ):
     # High-level debug on input result structure
-    print("\n[DEBUG] report_and_plot_accounts: start")
+    logger.debug("report_and_plot_accounts: start")
     print("[DEBUG] res top-level keys:", list(res.keys()))
     meta = res.get("meta", {}) or {}
     if isinstance(meta, dict):
@@ -370,7 +405,7 @@ def report_and_plot_accounts(
                 f"{float(invReal[i]):.2f}%" if i < len(invReal) else "",
             ]
         )
-    _print_table(header_future, rows_future, title="Total Portfolio (Future USD)")
+    if verbose: _print_table(header_future, rows_future, title="Total Portfolio (Future USD)")
 
     # Console tables: Total Portfolio (Current USD)
     header_current = [
@@ -401,7 +436,7 @@ def report_and_plot_accounts(
                 f"{float(invReal[i]):.2f}%" if i < len(invReal) else "",
             ]
         )
-    _print_table(header_current, rows_current, title="Total Portfolio (Current USD)")
+    if verbose: _print_table(header_current, rows_current, title="Total Portfolio (Current USD)")
 
     # Save totals CSVs
     _save_csv(
@@ -509,7 +544,7 @@ def report_and_plot_accounts(
                 f"{float(yo_real[i]):.2f}%" if i < len(yo_real) else "",
             ]
         rows_acct_future.append(row)
-    _print_table(
+    if verbose: _print_table(
         header_acct_future,
         rows_acct_future,
         title="Accounts — Investment YoY (Future USD)",
@@ -550,7 +585,7 @@ def report_and_plot_accounts(
                 f"{float(yo_real[i]):.2f}%" if i < len(yo_real) else "",
             ]
         rows_acct_current.append(row)
-    _print_table(
+    if verbose: _print_table(
         header_acct_current,
         rows_acct_current,
         title="Accounts — Investment YoY (Current USD)",
@@ -573,7 +608,7 @@ def report_and_plot_accounts(
             [e["account"], int(e["ending_future_mean"]), int(e["ending_current_mean"])]
             for e in ending_balances
         ]
-        _print_table(
+        if verbose: _print_table(
             header_ending,
             ending_rows,
             title="Accounts — Ending Balances (Final Year)",
@@ -585,7 +620,7 @@ def report_and_plot_accounts(
         )
 
     # Aggregate balances (Current USD) — plot with mean/median and P10–P90 band
-    print("[DEBUG] Starting aggregate balance computation (Current USD)")
+    logger.debug("Starting aggregate balance computation (Current USD)")
     print("[DEBUG] accounts list:", accounts)
     try:
         n_years = len(years)
@@ -726,7 +761,7 @@ def report_and_plot_accounts(
         print(f"[WARN] Failed to compute/plot aggregate balances (Current USD): {e}")
 
     # Aggregate balances (Future USD) — plot with mean/median and P10–P90 band
-    print("[DEBUG] Starting aggregate balance computation (Future USD)")
+    logger.debug("Starting aggregate balance computation (Future USD)")
     print("[DEBUG] accounts list:", accounts)
     try:
         n_years = len(years)
@@ -916,7 +951,7 @@ def report_and_plot_accounts(
                     int(rmdShort[i]) if i < len(rmdShort) else "",
                 ]
             )
-        _print_table(header_tax, rows_tax, title="Taxes & RMDs (Current USD)")
+        if verbose: _print_table(header_tax, rows_tax, title="Taxes & RMDs (Current USD)")
         _save_csv(
             os.path.join(out_dir, "taxes_rmd_current_by_year.csv"),
             header_tax,
