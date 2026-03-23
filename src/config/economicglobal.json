@@ -29,7 +29,11 @@
       "use_recession_flag": true,
       "makeup_enabled": true,
       "makeup_ratio": 0.3,
-      "makeup_cap_per_year": 0.1
+      "makeup_cap_per_year": 0.1,
+      "upside_scaling_enabled": false,
+      "upside_outperformance_threshold": 0.15,
+      "upside_max_factor": 1.25,
+      "upside_scale_curve": "linear"
     },
     "core_inflation_pct": 2.5
   },
@@ -157,7 +161,11 @@
       "use_recession_flag": "Same as bad_market \u2014 also scale withdrawals when recession flag is set.",
       "makeup_enabled": "true = in good years following a scaled-down year, make up a portion of the missed take-home.",
       "makeup_ratio": "Fraction of the cumulative missed withdrawal recovered per good year. E.g. 0.3 = recover 30% of the deficit each year.",
-      "makeup_cap_per_year": "Maximum makeup payment as fraction of that year's target. E.g. 0.1 = makeup never exceeds 10% of the year's planned withdrawal."
+      "makeup_cap_per_year": "Maximum makeup payment as fraction of that year's target. E.g. 0.1 = makeup never exceeds 10% of the year's planned withdrawal.",
+      "upside_scaling_enabled": "false = withdrawals never exceed amount_k (default). true = when portfolio outperforms baseline median path by outperformance_threshold, scale withdrawals up toward upside_max_factor × amount_k. Only applies in automatic and retirement modes.",
+      "upside_outperformance_threshold": "Portfolio outperformance fraction above which upside scaling begins. E.g. 0.15 = portfolio must be >15% above expected median before withdrawals are raised.",
+      "upside_max_factor": "Maximum upside withdrawal as a multiple of amount_k. E.g. 1.25 = cap at 125% of planned withdrawal in the best years.",
+      "upside_scale_curve": "Shape of upside scaling: linear (default), poly, or exp. Same semantics as scale_curve for downside."
     },
     "overrides_note": "Time-bounded only. Each override applies for its years range then reverts to the defaults block. To make a permanent change, update the defaults block instead of adding a permanent override.",
     "core_inflation_pct": "Long-run core inflation assumption (%). Used as the fallback rate when inflation_yearly.json does not cover a simulation year. Fed long-run target is ~2.0%; recent 2022-2024 experience was 4-9%; 2.5% is a reasonable baseline. Override in inflation_yearly.json for specific year ranges."

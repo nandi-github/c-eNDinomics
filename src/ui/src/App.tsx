@@ -89,6 +89,11 @@ type SnapshotWithdrawals = {
   rmd_extra_future?: number[];
   total_withdraw_current_mean?: number[];
   total_withdraw_future_mean?: number[];
+  safe_withdrawal_rate_p10_pct?: number;
+  upside_scaling_enabled?: boolean;
+  bad_market_frac_by_year?: number[];
+  shock_scaling_enabled?: boolean;
+  min_scaling_factor?: number;
 };
 
 type SnapshotSummary = {
@@ -2336,6 +2341,15 @@ const App: React.FC = () => {
                               : "The median path's worst dip below its prior portfolio peak. Half of scenarios had a smaller decline. Classic financial drawdown — not a measure of failure or whether withdrawals were met. Higher number = worse outcome."} /></td>
                           <td>{formatPct(snapshot.summary?.drawdown_p50)}</td>
                         </tr>
+                        {snapshot.withdrawals?.safe_withdrawal_rate_p10_pct !== undefined && (
+                        <tr>
+                          <td><Tip label="Safe withdrawal rate — stress scenario (P10)"
+                            tip="The maximum constant withdrawal rate (as % of starting portfolio) that the 10th-percentile simulation path can sustain without depletion over the full planning horizon. A conservative benchmark — 90% of scenarios do better than this. Compare against your planned withdrawal rate to gauge stress-scenario safety margin." /></td>
+                          <td style={{ fontWeight: 600, color: (snapshot.withdrawals.safe_withdrawal_rate_p10_pct ?? 0) < 2.0 ? "#b91c1c" : "#166534" }}>
+                            {(snapshot.withdrawals.safe_withdrawal_rate_p10_pct ?? 0).toFixed(2)}%
+                          </td>
+                        </tr>
+                        )}
                       </>);
                     })()}
                   </tbody>

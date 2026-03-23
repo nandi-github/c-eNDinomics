@@ -1412,6 +1412,11 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
             "makeup_cap_per_year":      float(_wd_policy.get("makeup_cap_per_year",   0.1)),
             "p10_signal_enabled":       bool(_bm_policy.get("p10_signal_enabled",     True)),
             "p10_return_threshold_pct": float(_bm_policy.get("p10_return_threshold_pct", -15.0)),
+            # Upside scaling — raise withdrawals when portfolio outperforms
+            "upside_scaling_enabled":           bool(_wd_policy.get("upside_scaling_enabled",           False)),
+            "upside_outperformance_threshold":  float(_wd_policy.get("upside_outperformance_threshold", 0.15)),
+            "upside_max_factor":                float(_wd_policy.get("upside_max_factor",               1.25)),
+            "upside_scale_curve":               str(_wd_policy.get("upside_scale_curve",               "linear")),
         }
 
         # Inject UI-selected simulation_mode into person_cfg

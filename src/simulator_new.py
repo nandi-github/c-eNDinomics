@@ -605,6 +605,10 @@ def run_accounts_new(
     _makeup_cap_per_year     = float(_esp.get("makeup_cap_per_year",    0.1))
     _p10_signal_enabled      = bool(_esp.get("p10_signal_enabled",      True))
     _p10_threshold           = float(_esp.get("p10_return_threshold_pct", -15.0)) / 100.0
+    # Upside scaling params
+    _upside_enabled          = bool(_esp.get("upside_scaling_enabled",          False))
+    _upside_threshold        = float(_esp.get("upside_outperformance_threshold", 0.15))
+    _upside_max_factor       = float(_esp.get("upside_max_factor",              1.25))
 
     # Cross-sectional P10 return per year — computed from pre-cashflow core paths.
     # One scalar per year shared across all paths: if P10 < threshold, that year
@@ -628,6 +632,9 @@ def run_accounts_new(
         )
         _p10_bad_y = (_p10_return_by_year[_y] < _p10_threshold)
         _bad_market_paths[:, _y] = (_drawdown_y > _drawdown_threshold) | _p10_bad_y
+
+    # Expected median portfolio level per year — baseline for upside scaling.
+    _median_baseline_core = np.median(total_nom_paths_core, axis=0)  # (n_years,)
 
     # Pad/normalise bad-market sequence (same structure as _seq_per_year)
     _fallback_bad_seq = None  # resolved inside the withdrawal block below
@@ -811,7 +818,24 @@ def run_accounts_new(
             else:
                 _scale_y = np.ones(paths, dtype=float)
 
-            # ── Makeup: add recovery payment in good years ─────────────────────
+            # ── Upside scaling: raise withdrawals when portfolio outperforms ──
+            # Only fires in automatic/retirement modes when upside_scaling_enabled=true.
+            _sim_mode = str((person_cfg or {}).get("simulation_mode", "automatic")).lower()
+            _upside_eligible = _upside_enabled and _sim_mode in ("automatic", "retirement")
+            if _upside_eligible:
+                _median_y = float(_median_baseline_core[y]) if y < len(_median_baseline_core) else 1e-12
+                _outperf_y = (total_nom_paths_core[:, y] - _median_y) / np.maximum(_median_y, 1e-12)
+                _upside_flag_y = (_outperf_y > _upside_threshold) & (~bad_flag_y)
+                _upside_scale_y = np.where(
+                    _upside_flag_y,
+                    np.clip(
+                        1.0 + (_outperf_y - _upside_threshold) /
+                        max(_upside_threshold, 1e-6) * (_upside_max_factor - 1.0),
+                        1.0, _upside_max_factor
+                    ),
+                    1.0
+                )
+                _scale_y = np.where(_upside_flag_y, _upside_scale_y, _scale_y)
             # When not in bad market and cumulative deficit exists, recover
             # makeup_ratio of the deficit, capped at makeup_cap_per_year × target.
             _makeup_y = np.zeros(paths, dtype=float)
@@ -922,6 +946,29 @@ def run_accounts_new(
         withdrawals["bad_market_drawdown_threshold"] = _drawdown_threshold
         withdrawals["shock_scaling_enabled"]      = _shock_scaling_enabled
         withdrawals["min_scaling_factor"]         = _min_scaling_factor
+        withdrawals["upside_scaling_enabled"]     = _upside_enabled
+
+        # ── Safe withdrawal rate at P10 ──────────────────────────────────────
+        # Max constant withdrawal (% of starting portfolio) P10 path sustains
+        # without depletion. Conservative: ignores future growth.
+        # W_max = min over all years of (P10_balance[y] / years_remaining[y])
+        try:
+            _start_nom = float(total_nom_paths_core[:, 0].mean())
+            if _start_nom > 1000 and n_years > 0:
+                _p10_bal = np.percentile(total_nom_paths_core, 10, axis=0)
+                _w_candidates = np.array([
+                    _p10_bal[y] / max(n_years - y, 1)
+                    for y in range(n_years)
+                ])
+                _pos = _w_candidates[_w_candidates > 0]
+                _w_max = float(np.min(_pos)) if len(_pos) > 0 else 0.0
+                _swr_p10 = round(_w_max / _start_nom * 100, 2)
+                _swr_p10 = max(0.0, min(15.0, _swr_p10))
+            else:
+                _swr_p10 = 0.0
+        except Exception:
+            _swr_p10 = 0.0
+        withdrawals["safe_withdrawal_rate_p10_pct"] = _swr_p10
 
     # rmd_extra_current: mean surplus RMD beyond plan (candidate for reinvest).
     # Computed here (not inside apply_withdrawals block) so it's always valid —

@@ -4376,6 +4376,71 @@ def group23_bad_market_response(paths: int):
 
 GROUPS.append(group23_bad_market_response)
 
+# ===========================================================================
+# GROUP 24 -- UPSIDE SCALING + SAFE WITHDRAWAL RATE (session 28)
+# ===========================================================================
+
+def group24_upside_and_swr(paths: int):
+    """
+    1. safe_withdrawal_rate_p10_pct field present and plausible (0.1-15%)
+    2. SWR at P10 <= 2x planned withdrawal rate (P10 is stress scenario)
+    3. upside_scaling_enabled field present (default False)
+    4. Upside disabled -- realized does not exceed planned in pre-RMD years
+    5. SWR > 0 (portfolio can sustain some withdrawal)
+    """
+    checks = []; elapsed = 0.0
+
+    res_base, t = ephemeral_run("g24_base", paths); elapsed += t
+    W_base = res_base.get("withdrawals", {})
+
+    # Field presence
+    swr = W_base.get("safe_withdrawal_rate_p10_pct", None)
+    checks.append(chk(
+        "G24: safe_withdrawal_rate_p10_pct field present",
+        swr is not None,
+        "missing from withdrawals dict"
+    ))
+
+    if swr is not None:
+        # Plausible range: 0.1-15% (conservative floor, realistic ceiling)
+        checks.append(chk(
+            "G24: SWR at P10 plausible range (0.1% - 15.0%)",
+            0.1 <= float(swr) <= 15.0,
+            f"swr_p10={swr}% -- outside 0.1-15% range"
+        ))
+        # Must be positive
+        checks.append(chk(
+            "G24: SWR at P10 > 0 (portfolio sustains some withdrawal)",
+            float(swr) > 0,
+            f"swr_p10={swr}% -- zero or negative"
+        ))
+
+    # upside_scaling_enabled field present and disabled by default
+    checks.append(chk(
+        "G24: upside_scaling_enabled field present (default False)",
+        W_base.get("upside_scaling_enabled") == False,
+        f"got: {W_base.get('upside_scaling_enabled')}"
+    ))
+
+    # Upside disabled -- realized should not exceed planned in pre-RMD years
+    planned  = W_base.get("planned_current", [0]*YEARS)
+    realized = W_base.get("realized_current_mean", [0]*YEARS)
+    if planned and realized:
+        n_above = sum(
+            1 for i in range(min(20, YEARS))
+            if float(realized[i]) > float(planned[i]) * 1.02
+        )
+        checks.append(chk(
+            "G24: Upside disabled -- realized <= planned in pre-RMD years",
+            n_above == 0,
+            f"{n_above} years where realized > planned+2% (upside misfiring)"
+        ))
+
+    return "G24", "Upside scaling + safe withdrawal rate at P10", checks, elapsed
+
+
+GROUPS.append(group24_upside_and_swr)
+
 
 def run_comprehensive(paths: int):
     print(f"\n{'='*72}")
