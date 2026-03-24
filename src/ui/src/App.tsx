@@ -3608,9 +3608,12 @@ Re-run simulation to see impact.`)) return;
                                   <td>{row.year}</td>
                                   <td>{row.age}</td>
                                   <td style={{ fontSize: 11, color: "#6b7280" }}>
-                                    {row.phase === "working" ? "💼 working"
-                                     : row.phase === "transition" ? "🔄 transition"
-                                     : row.phase ? "🌅 retirement" : "—"}
+                                    {row.phase === "working"       ? "💼 working"
+                                     : row.phase === "transition"   ? "🔄 transition"
+                                     : row.phase === "retirement_gap" ? "🌅 retire gap"
+                                     : row.phase === "ss_active"   ? "📬 SS active"
+                                     : row.phase === "rmd_era"     ? "📋 RMD era"
+                                     : row.phase ? row.phase : "—"}
                                   </td>
                                   <td style={{ fontSize: 11, color: "#6b7280" }}>
                                     {row.income_estimate ? `$${(row.income_estimate/1000).toFixed(0)}K` : "—"}

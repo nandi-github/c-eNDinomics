@@ -82,26 +82,69 @@ import hashlib as _hashlib
 # Key source files to track — relative to APP_ROOT
 # All files Claude may provide during a session.
 # If any of these are stale on the server, --checkupdates will flag them.
-MANIFEST_FILES = [
-    # Python backend
-    "api.py",
-    "loaders.py",
-    "simulator_new.py",
-    "snapshot.py",
-    "roth_optimizer.py",
-    "test_flags.py",
-    # UI
-    "ui/src/App.tsx",
-    "ui/tests/smoke.spec.ts",
-    # Test profile configs (Claude sometimes provides updated versions)
-    "profiles/Test/person.json",
-    "profiles/Test/withdrawal_schedule.json",
-    "profiles/Test/income.json",
-    "profiles/Test/allocation_yearly.json",
-    "profiles/Test/inflation_yearly.json",
-    "profiles/Test/shocks_yearly.json",
-    "profiles/Test/economic.json",
-]
+def _load_manifest_lock() -> List[str]:
+    """
+    Load tracked file list from src/manifest.lock.
+    Verifies _self_crc (SHA256 of tracked list) to detect corruption.
+    Falls back to empty list if missing or corrupt — checkupdates reports nothing.
+    To add a new tracked file: edit manifest.lock + update _self_crc. No api.py change needed.
+    The external asset model updater must also update manifest.lock after writing config/assets.json.
+    """
+    lock_path = os.path.join(APP_ROOT, "manifest.lock")
+    try:
+        with open(lock_path) as f:
+            data = json.load(f)
+        tracked = data.get("tracked", [])
+        # Self-CRC: SHA256 of the tracked list (JSON, sort_keys=True), first 16 hex chars
+        expected_crc = data.get("_self_crc", "")
+        if expected_crc:
+            actual_crc = _hashlib.sha256(
+                json.dumps(tracked, sort_keys=True).encode()
+            ).hexdigest()[:16]
+            if actual_crc != expected_crc:
+                print(
+                    f"WARNING: manifest.lock self-CRC mismatch "
+                    f"(expected={expected_crc}, got={actual_crc}). "
+                    f"File may be corrupted or manually edited. "
+                    f"Run: python3 -B test_flags.py --reset-manifest to rebuild.",
+                    flush=True
+                )
+        return tracked
+    except FileNotFoundError:
+        print(f"WARNING: manifest.lock not found at {lock_path} — "
+              f"no files tracked. Run: python3 -B test_flags.py --reset-manifest",
+              flush=True)
+        return []
+    except Exception as e:
+        print(f"WARNING: manifest.lock load error ({e}) — no files tracked.", flush=True)
+        return []
+
+MANIFEST_FILES = _load_manifest_lock()
+
+
+def update_manifest_lock(app_root: str = None) -> bool:
+    """
+    Recompute _self_crc and write back to manifest.lock.
+    Called by the external asset model updater after writing config/assets.json.
+    Also called by test_flags.py --reset-manifest.
+    Returns True on success.
+    """
+    root = app_root or APP_ROOT
+    lock_path = os.path.join(root, "manifest.lock")
+    try:
+        with open(lock_path) as f:
+            data = json.load(f)
+        tracked = data.get("tracked", [])
+        data["_self_crc"] = _hashlib.sha256(
+            json.dumps(tracked, sort_keys=True).encode()
+        ).hexdigest()[:16]
+        with open(lock_path, "w") as f:
+            json.dump(data, f, indent=2)
+        return True
+    except Exception as e:
+        print(f"WARNING: update_manifest_lock failed: {e}", flush=True)
+        return False
+
 
 def _file_sha256(path: str) -> str:
     """Return hex SHA256 of a file, or 'missing' if not found."""
@@ -1511,8 +1554,7 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
     res["ending_balances"] = ending_balances_pre
 
     # 9a-income) Inject income.json estimates into person_cfg for optimizer
-    # Use the already-computed per-year arrays (w2_cur etc.) — these correctly
-    # handle both 'ages' and 'years' formats via load_income / build_income_streams.
+    # Use already-computed per-year arrays — handles 'ages' format correctly.
     try:
         _ret_age   = int(float((person_cfg or {}).get("retirement_age", 65)))
         _cur_age_i = int(float(_current_age))

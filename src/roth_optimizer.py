@@ -464,13 +464,29 @@ def _build_schedule(
                 irmaa_annual(inc + conv_yr, filing) - irmaa_annual(inc, filing)
             )
 
-        # Phase label for UI
+        # Phase label derived from person.json signals — not just retirement_age boundary
+        # rmd_start_age: born 1960+ = 75, born 1951-1959 = 73, born ≤1950 = 72
+        _birth_year   = int((person_cfg or {}).get("birth_year", 1970)) if person_cfg else 1970
+        _rmd_start    = 75 if _birth_year >= 1960 else (73 if _birth_year >= 1951 else 72)
+
+        # SS start age: first age in ordinary_by_year where income > 0 (post retirement)
+        _ord_arr = (person_cfg.get("income_data") or {}).get("ordinary_by_year") or [] if person_cfg else []
+        _ss_start_age = None
+        for _i, _v in enumerate(_ord_arr):
+            if float(_v) > 0:
+                _ss_start_age = current_age + _i + 1
+                break
+
         if age < retirement_age:
             phase = "working"
-        elif age < retirement_age + 1:
+        elif age <= retirement_age:
             phase = "transition"
+        elif _ss_start_age and age < _ss_start_age:
+            phase = "retirement_gap"     # post-work, pre-SS (Roth conversion prime window)
+        elif age < _rmd_start:
+            phase = "ss_active"          # SS started, no RMDs yet
         else:
-            phase = "retirement"
+            phase = "rmd_era"            # forced RMDs active
 
         schedule.append({
             "year":                 yr,

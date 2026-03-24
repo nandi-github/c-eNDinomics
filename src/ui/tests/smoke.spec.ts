@@ -23,8 +23,8 @@ import { test, expect, Page, Locator } from "@playwright/test";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const PROFILE = "Test";
-const EXPECTED_ROWS = 49;         // target_age=95, current_age=46 → 49 sim years
+const PROFILE = "__system__";
+const EXPECTED_ROWS = 49;         // __system__: current_age=46, target_age=95 → 49 sim years
 const RMD_START_ROW = 30;         // age 75 = sim year 30 (birth_year=1980 → SECURE 2.0 age 75)
 const SIM_TIMEOUT_MS = 90_000;    // generous budget for 200-path run
 
@@ -33,7 +33,7 @@ const COLS = {
   summary:           2,   // Metric | Value
   aggregateBalances: 4,   // Aggregate | Starting | Current median | Future median
   accountBalances:   5,   // Account | Type | Starting | Current median | Future median
-  portfolio:        12,   // Year | Age | Median | Today$ | Mean | P10 | P90 | Growth(mean) | RealGrowth(mean) | StressP10 | NomInv | RealInv
+  portfolio:        12,   // Year | Age | Median | Today$ | Mean | Floor | Ceiling | Growth | RealGrowth | StressReturn | NomInv | RealInv
   withdrawals:      14,   // Year | Age | Planned | ForSpending | Diff | FutureSpend | RMD | RMDFut | Total | TotalFut | RMDReinvCur | RMDReinvFut | Conv | ConvTax
   taxes:             9,   // Year | Age | Fed | State | NIIT | Excise | Total | TakeHome | EffRate
 };
@@ -184,7 +184,7 @@ test("page loads with correct title and tabs", async ({ page }) => {
 
 // ─── Test 2: Results load ─────────────────────────────────────────────────────
 
-test("results load for Test profile", async ({ page }) => {
+test("results load for __system__ profile", async ({ page }) => {
   expect(simulationDone).toBe(true);
 
   await page.goto("/");
