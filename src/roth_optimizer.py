@@ -695,7 +695,24 @@ def _recommend(
     strategies: Dict[str, Any],
     irmaa_sensitivity: str,
     current_age: float,
+    current_marg: float = 0.0,
+    betr_self: float = 0.0,
 ) -> Tuple[str, str]:
+    # ── BETR gate — primary decision ─────────────────────────────────────────
+    # If BETR < current marginal rate, converting NOW destroys value.
+    # The timebomb is still real — but the right action is to WAIT until income
+    # drops (retirement), then convert aggressively in the lower-rate window.
+    if betr_self > 0 and current_marg > 0 and current_marg > betr_self + 0.01:
+        # Deferring is better — but still need a strategy for post-retirement years
+        # The schedule will show low/zero conversion now and ramp up at retirement
+        return "aggressive", (
+            f"IRA timebomb severity {severity} — but your current {int(current_marg*100)}% "
+            f"marginal rate exceeds BETR {int(betr_self*100)}%. Converting now destroys value. "
+            f"Defer conversions while working. At retirement (when W2 drops), your marginal rate "
+            f"falls and conversion becomes strongly optimal. The schedule below shows the "
+            f"phase-aware plan — low conversion now, aggressive from retirement onward."
+        )
+
     severity_map = {
         "CRITICAL":   ("aggressive", "IRA timebomb severity CRITICAL. Projected RMDs force 37% bracket. IRMAA is negligible vs bracket savings. Convert aggressively at 32% now."),
         "SEVERE":     ("aggressive", "IRA timebomb severity SEVERE. Projected RMDs likely 32-35%. Converting to 32% now captures major bracket arbitrage."),
@@ -705,7 +722,6 @@ def _recommend(
     base, reason = severity_map.get(severity, ("balanced", "Standard bracket-fill recommended."))
 
     # Upgrade to betr_optimal if future RMD rate exceeds the aggressive bracket (32%)
-    # i.e. there's meaningful arbitrage in the 35% bracket too
     betr_data   = strategies.get("betr_optimal", {})
     betr_future = (betr_data.get("scenarios") or {}).get("self_mfj", {}).get("future_rate", 0)
     if severity in ("CRITICAL", "SEVERE") and betr_future > 0.35:
@@ -715,8 +731,7 @@ def _recommend(
             f"the 35% bracket — converting at 35% now saves {int((betr_future - 0.35)*100)}% on "
             f"every dollar vs waiting. Note: even if NIIT (3.8%) applies during working years, "
             f"35.8% effective still beats {int(betr_future*100)}% RMD rate. "
-            f"BETR-optimal: convert through brackets where (marginal + NIIT) < future rate, "
-            f"varying by year based on actual income."
+            f"BETR-optimal: convert through brackets where (marginal + NIIT) < future rate."
         )
 
     # Step down if IRMAA-sensitive and near Medicare age
@@ -963,7 +978,10 @@ def optimize_roth_conversion_full(
     }
 
     # ── Recommendation ────────────────────────────────────────────────────────
-    rec_name, rec_reason = _recommend(severity, strategies_out, irmaa_sensitivity, current_age)
+    rec_name, rec_reason = _recommend(
+        severity, strategies_out, irmaa_sensitivity, current_age,
+        current_marg=current_marg, betr_self=betr_self,
+    )
 
     # ── Year-by-year schedule for recommended strategy ────────────────────────
     rec_conv = strategies_out[rec_name]["annual_conversion"]
@@ -983,11 +1001,21 @@ def optimize_roth_conversion_full(
 
     # ── Global warnings ───────────────────────────────────────────────────────
     warnings = []
+    _deferring_better = (betr_self > 0 and current_marg > betr_self + 0.01)
+
     if severity in ("CRITICAL", "SEVERE"):
-        warnings.append(
-            f"IRA Timebomb {severity}: projected RMD yr1 ~${int(projected_rmd_y1):,} "
-            f"forces 37% bracket regardless of other choices. Convert aggressively now."
-        )
+        if _deferring_better:
+            warnings.append(
+                f"IRA Timebomb {severity}: projected RMD yr1 ~${int(projected_rmd_y1):,} "
+                f"forces 37% bracket regardless of other choices. "
+                f"However your current {int(current_marg*100)}% rate exceeds BETR {int(betr_self*100)}% — "
+                f"defer conversions until retirement when your rate drops, then convert aggressively."
+            )
+        else:
+            warnings.append(
+                f"IRA Timebomb {severity}: projected RMD yr1 ~${int(projected_rmd_y1):,} "
+                f"forces 37% bracket regardless of other choices. Convert aggressively now."
+            )
     if include_heir and fr_heir_high >= 0.37:
         heir_strat = "betr_optimal" if "betr_optimal" in strategies_out else "aggressive"
         heir_sav   = strategies_out[heir_strat]["scenarios"]["heir_high"]["lifetime_savings"]

@@ -3327,7 +3327,9 @@ Re-run simulation to see impact.`)) return;
                         </span>
                         <span style={{ fontSize: 12, color: "#6b7280" }}>
                           {R.configured_status === "on_track"
-                            ? "applied — this is the best achievable outcome given your IRA size"
+                            ? (R.current_marginal_rate > R.betr_self_mfj + 0.01
+                              ? "applied — defer now, convert aggressively at retirement when your rate drops"
+                              : "applied — this is the best achievable outcome given your IRA size")
                             : "optimized for your current profile"}
                         </span>
                       </div>
@@ -4024,23 +4026,21 @@ Re-run simulation to see impact.`)) return;
                   NIIT&nbsp;=&nbsp;3.8% on net investment income above threshold.
                   Excise&nbsp;=&nbsp;state capital gains surcharge where applicable.
                   Total&nbsp;=&nbsp;sum of all four.
-                  Effective rate&nbsp;=&nbsp;total taxes&nbsp;÷&nbsp;total taxable income (W2 + RMDs + conversions + cap gains + dividends).
+                  Effective rate&nbsp;=&nbsp;total taxes&nbsp;÷&nbsp;taxable income (gross income minus standard deduction for your filing status).
                 </p>
                 <div style={{ overflowX: "auto" }}>
                 <table className="table" style={{ fontSize: 12, width: "100%", minWidth: 900 }}>
                   <thead>
                     <tr>
-                      <th style={{ width: 36 }}>Year</th>
-                      <th style={{ width: 36 }}>Age</th>
-                      <th style={{ width: 88 }}><Tip label="Federal tax" tip="Federal income tax on ordinary income (wages, IRA withdrawals, conversions) plus any applicable capital gains tax." /></th>
-                      <th style={{ width: 80 }}><Tip label="State tax" tip="State income and capital gains tax based on your selected state." /></th>
-                      <th style={{ width: 72 }}><Tip label="NIIT" tip="3.8% Net Investment Income Tax on investment income above the $250k threshold (MFJ). Applies to capital gains, dividends, and interest." /></th>
-                      <th style={{ width: 64 }}><Tip label="Excise" tip="State-specific surcharge on capital gains above threshold (e.g. California 1% mental health surcharge)." /></th>
-                      <th style={{ width: 80 }}><Tip label="Total taxes" tip="Sum of federal, state, NIIT, and excise. All values are current USD mean across simulation paths." /></th>
-                      <th style={{ width: 96 }}><Tip label="Taxable Income" tip="Total income subject to tax: W2 wages + TRAD IRA withdrawals + RMDs + Roth conversions + SS + dividends + capital gains. This is the denominator for the effective tax rate." /></th>
-                      <th style={{ width: 88 }}><Tip label="Portfolio WD" tip="After-tax cash withdrawn from your investment accounts — the amount deposited to your bank from portfolios. This is your withdrawal_schedule target. Taxes are paid separately from brokerage on top of this." /></th>
-                      <th style={{ width: 88 }}><Tip label="Total take-home" tip="Everything you actually pocket: portfolio withdrawal + net W2/SS/rental income after taxes. This is your true spendable cash — the full picture of what you live on each year." /></th>
-                      <th style={{ width: 72 }}><Tip label="Eff. rate" tip="Total taxes divided by total taxable income — includes W2, RMDs, conversions, capital gains, and dividends. This is your true all-in tax rate on everything the IRS can see." /></th>
+                      <th>Year</th>
+                      <th>Age</th>
+                      <th><Tip label="Federal tax" tip="Federal income tax on ordinary income (wages, IRA withdrawals, conversions) plus capital gains tax." /></th>
+                      <th><Tip label="State tax" tip="State income and capital gains tax based on your selected state." /></th>
+                      <th><Tip label="NIIT" tip="3.8% Net Investment Income Tax on investment income above the $250K threshold (MFJ)." /></th>
+                      <th><Tip label="Excise" tip="State-specific capital gains surcharge (e.g. California 1% mental health surcharge)." /></th>
+                      <th><Tip label="Total taxes" tip="Sum of federal, state, NIIT, and excise." /></th>
+                      <th><Tip label="Portfolio WD (after-tax)" tip="After-tax cash withdrawn from investment accounts — your configured withdrawal_schedule target. Taxes are paid separately from brokerage on top of this." /></th>
+                      <th><Tip label="Eff. rate" tip="Total taxes ÷ taxable income. Your true all-in tax rate on everything the IRS can see." /></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -4087,25 +4087,8 @@ Re-run simulation to see impact.`)) return;
                           <td style={{ textAlign: "right" }}>{niit     > 0 ? formatUSD(niit)     : dash}</td>
                           <td style={{ textAlign: "right" }}>{excise   > 0 ? formatUSD(excise)   : dash}</td>
                           <td style={{ textAlign: "right", fontWeight: 600 }}>{total    > 0 ? formatUSD(total)    : dash}</td>
+
                           <td style={{ textAlign: "right" }}>{planned  > 0 ? formatUSD(planned)  : dash}</td>
-                          <td style={{ fontWeight: 600, color: "#166534" }}>
-                            {(() => {
-                              // Total take-home = portfolio withdrawal + net non-portfolio income
-                              // Net income = gross ordinary income - taxes on it (approx: total tax - tax on withdrawal)
-                              // Simpler: planned withdrawal + (totalOrdIncome - withdrawal income - taxes)
-                              // = planned + gross_external_income - taxes_on_external
-                              // We approximate: total_take_home = planned + max(0, totalOrdIncome - wdE - cvE - rmdE) * (1 - effRate)
-                              const externalIncome = Math.max(0, totalOrdIncome - wdE - cvE - rmdE);
-                              const netExternal = effRate !== null
-                                ? externalIncome * (1 - effRate)
-                                : externalIncome * 0.75; // fallback 25% blended tax
-                              const totalTakeHome = planned + netExternal;
-                              return totalTakeHome > 0 ? formatUSD(totalTakeHome) : dash;
-                            })()}
-                          </td>
-                          <td style={{ textAlign: "right", color: "#374151" }}>
-                            {totalOrdIncome > 0 ? formatUSD(totalOrdIncome) : dash}
-                          </td>
                           <td style={{ textAlign: "right", fontWeight: 600 }}>{effRate  !== null && total > 0
                                ? (effRate * 100).toFixed(1) + "%"
                                : dash}</td>

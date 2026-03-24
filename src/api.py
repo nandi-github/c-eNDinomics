@@ -82,69 +82,26 @@ import hashlib as _hashlib
 # Key source files to track — relative to APP_ROOT
 # All files Claude may provide during a session.
 # If any of these are stale on the server, --checkupdates will flag them.
-def _load_manifest_lock() -> List[str]:
-    """
-    Load tracked file list from src/manifest.lock.
-    Verifies _self_crc (SHA256 of tracked list) to detect corruption.
-    Falls back to empty list if missing or corrupt — checkupdates reports nothing.
-    To add a new tracked file: edit manifest.lock + update _self_crc. No api.py change needed.
-    The external asset model updater must also update manifest.lock after writing config/assets.json.
-    """
-    lock_path = os.path.join(APP_ROOT, "manifest.lock")
-    try:
-        with open(lock_path) as f:
-            data = json.load(f)
-        tracked = data.get("tracked", [])
-        # Self-CRC: SHA256 of the tracked list (JSON, sort_keys=True), first 16 hex chars
-        expected_crc = data.get("_self_crc", "")
-        if expected_crc:
-            actual_crc = _hashlib.sha256(
-                json.dumps(tracked, sort_keys=True).encode()
-            ).hexdigest()[:16]
-            if actual_crc != expected_crc:
-                print(
-                    f"WARNING: manifest.lock self-CRC mismatch "
-                    f"(expected={expected_crc}, got={actual_crc}). "
-                    f"File may be corrupted or manually edited. "
-                    f"Run: python3 -B test_flags.py --reset-manifest to rebuild.",
-                    flush=True
-                )
-        return tracked
-    except FileNotFoundError:
-        print(f"WARNING: manifest.lock not found at {lock_path} — "
-              f"no files tracked. Run: python3 -B test_flags.py --reset-manifest",
-              flush=True)
-        return []
-    except Exception as e:
-        print(f"WARNING: manifest.lock load error ({e}) — no files tracked.", flush=True)
-        return []
-
-MANIFEST_FILES = _load_manifest_lock()
-
-
-def update_manifest_lock(app_root: str = None) -> bool:
-    """
-    Recompute _self_crc and write back to manifest.lock.
-    Called by the external asset model updater after writing config/assets.json.
-    Also called by test_flags.py --reset-manifest.
-    Returns True on success.
-    """
-    root = app_root or APP_ROOT
-    lock_path = os.path.join(root, "manifest.lock")
-    try:
-        with open(lock_path) as f:
-            data = json.load(f)
-        tracked = data.get("tracked", [])
-        data["_self_crc"] = _hashlib.sha256(
-            json.dumps(tracked, sort_keys=True).encode()
-        ).hexdigest()[:16]
-        with open(lock_path, "w") as f:
-            json.dump(data, f, indent=2)
-        return True
-    except Exception as e:
-        print(f"WARNING: update_manifest_lock failed: {e}", flush=True)
-        return False
-
+MANIFEST_FILES = [
+    # Python backend
+    "api.py",
+    "loaders.py",
+    "simulator_new.py",
+    "snapshot.py",
+    "roth_optimizer.py",
+    "test_flags.py",
+    # UI
+    "ui/src/App.tsx",
+    "ui/tests/smoke.spec.ts",
+    # Test profile configs (Claude sometimes provides updated versions)
+    "profiles/Test/person.json",
+    "profiles/Test/withdrawal_schedule.json",
+    "profiles/Test/income.json",
+    "profiles/Test/allocation_yearly.json",
+    "profiles/Test/inflation_yearly.json",
+    "profiles/Test/shocks_yearly.json",
+    "profiles/Test/economic.json",
+]
 
 def _file_sha256(path: str) -> str:
     """Return hex SHA256 of a file, or 'missing' if not found."""
@@ -538,10 +495,7 @@ def list_profiles():
     names = []
     for d in os.listdir(PROFILES_ROOT):
         p = os.path.join(PROFILES_ROOT, d)
-        # All double-underscore profiles are hidden from the UI dropdown.
-        # __ftest__* = ephemeral test fixtures, __system__ = Playwright fixture.
-        # These are accessible via direct API calls but not shown to users.
-        if os.path.isdir(p) and not d.startswith("__"):
+        if os.path.isdir(p):
             names.append(d)
     names.sort()
     return {"profiles": names}
@@ -1336,6 +1290,88 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
         income_cfg = load_income(f"profiles/{profile}/income.json",
                          current_age=float((person_cfg or {}).get("current_age", 55)),
                          max_years=max(10, min(60, int((person_cfg or {}).get("target_age", 95)) - int((person_cfg or {}).get("current_age", 55)))))
+
+        # ── Social Security injection from person.json ────────────────────────
+        # If person.json has a 'social_security' block, compute SS income per year
+        # and inject into income_cfg, overriding any manual ordinary_other entries.
+        # This ensures correct start age, benefit amount, and 85% inclusion rule.
+        _ss_cfg = (person_cfg or {}).get("social_security") or {}
+        if _ss_cfg and not _ss_cfg.get("exclude_from_plan", False):
+            _ca   = float(_current_age)
+            _ta   = float((person_cfg or {}).get("target_age", 95))
+            _ny   = int(_ta - _ca)
+            _filing = str((person_cfg or {}).get("filing_status", "MFJ")).upper()
+
+            # Self SS
+            _self_monthly  = float(_ss_cfg.get("self_benefit_monthly", 0) or 0)
+            _self_start    = int(_ss_cfg.get("self_start_age", 67) or 67)
+            # Spouse SS
+            _spouse_monthly = float(_ss_cfg.get("spouse_benefit_monthly", 0) or 0)
+            _spouse_start   = int(_ss_cfg.get("spouse_start_age", 67) or 67)
+
+            # Early/delayed adjustment: FRA=67 for born 1960+, 66 for born 1943-1954
+            # Reduction: 5/9% per month early (first 36mo), 5/12% beyond
+            # Credit: 8%/yr delayed past FRA up to age 70
+            _birth_year = int((person_cfg or {}).get("birth_year", 1960) or 1960)
+            _fra = 67 if _birth_year >= 1960 else (66 if _birth_year >= 1943 else 65)
+
+            def _ss_adjustment(start_age, fra):
+                months_diff = (start_age - fra) * 12
+                if months_diff >= 0:
+                    # Delayed: +8%/yr credit
+                    return 1.0 + min(months_diff, 36) * 0.08 / 12
+                else:
+                    # Early: -5/9% per month first 36mo, -5/12% beyond
+                    early_mo = abs(months_diff)
+                    first36  = min(early_mo, 36)
+                    beyond36 = max(0, early_mo - 36)
+                    return 1.0 - (first36 * 5/9/100) - (beyond36 * 5/12/100)
+
+            _self_adj   = _ss_adjustment(_self_start, _fra)
+            _spouse_fra = 67 if int((_ss_cfg.get("spouse_birth_year") or
+                          (person_cfg or {}).get("spouse", {}).get("birth_year", 1960)) or 1960) >= 1960 else 66
+            _spouse_adj = _ss_adjustment(_spouse_start, _spouse_fra)
+
+            _self_annual   = _self_monthly  * 12 * _self_adj
+            _spouse_annual = _spouse_monthly * 12 * _spouse_adj
+
+            # Build per-year SS array
+            _ss_by_year = []
+            for _y in range(_ny):
+                _age = _ca + _y + 1
+                _ss_gross = 0.0
+                if _age >= _self_start:
+                    _ss_gross += _self_annual
+                if _age >= _spouse_start:
+                    _ss_gross += _spouse_annual
+
+                # 85% inclusion rule (simplified — full computation requires provisional income)
+                # Provisional income = AGI + 50% SS; for most retirees with IRA income, 85% applies
+                # We default to 85% and note in README that this is conservative
+                _ss_taxable = _ss_gross * 0.85
+
+                _ss_by_year.append(_ss_taxable)
+
+            # Inject into income_cfg as ordinary_other (overrides manual entry if SS block present)
+            if "ordinary_other" in income_cfg and hasattr(income_cfg["ordinary_other"], "__len__"):
+                # Replace with computed SS values
+                _arr = np.asarray(income_cfg["ordinary_other"], dtype=float)
+                if len(_arr) < _ny:
+                    _arr = np.concatenate([_arr, np.zeros(_ny - len(_arr))])
+                # Override years where SS is active
+                for _y, _ss in enumerate(_ss_by_year):
+                    if _y < len(_arr):
+                        _arr[_y] = _ss
+                income_cfg["ordinary_other"] = _arr.tolist()
+            else:
+                income_cfg["ordinary_other"] = _ss_by_year
+
+        elif _ss_cfg.get("exclude_from_plan", False):
+            # Zero out SS entirely — portfolio-only sufficiency test
+            if "ordinary_other" in income_cfg:
+                _arr = np.asarray(income_cfg.get("ordinary_other", [0.0] * _n_years), dtype=float)
+                income_cfg["ordinary_other"] = np.zeros_like(_arr).tolist()
+        # ── End SS injection ──────────────────────────────────────────────────
         (
             w2_cur,
             rental_cur,
@@ -1556,38 +1592,22 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
         ending_balances_pre = []
     res["ending_balances"] = ending_balances_pre
 
-    # 9a-income) Inject income.json estimates into person_cfg for optimizer
-    # Use already-computed per-year arrays — handles 'ages' format correctly.
+    # 9a-income) Inject income.json year-1 estimates into person_cfg for optimizer
     try:
-        _ret_age   = int(float((person_cfg or {}).get("retirement_age", 65)))
-        _cur_age_i = int(float(_current_age))
-        _post_ret_start = max(0, _ret_age - _cur_age_i)
-        _post_ret_slice = ordinary_other_cur[_post_ret_start:]
-        _ret_income = float(sum(_post_ret_slice) / max(1, len(_post_ret_slice))) if len(_post_ret_slice) > 0 else 51_000.0
-        _sched_list = ([float(x) for x in sched_arr.tolist()]
-                       if sched_arr is not None and hasattr(sched_arr, '__len__') and len(sched_arr) > 0
-                       else [])
+        _ic = income_cfg if isinstance(income_cfg, dict) else {}
+        def _yr1(entries):
+            for e in (entries or []):
+                rng = str(e.get("years","")).strip()
+                if rng.startswith("1-") or rng == "1":
+                    return float(e.get("amount_nom", 0) or 0)
+            return 0.0
         person_cfg["income_data"] = {
-            "w2_yr1":             float(w2_cur[0])             if len(w2_cur) > 0             else 0.0,
-            "rental_yr1":         float(rental_cur[0])         if len(rental_cur) > 0         else 0.0,
-            "ordinary_yr1":       float(ordinary_other_cur[0]) if len(ordinary_other_cur) > 0 else 0.0,
-            "w2_by_year":         [float(x) for x in w2_cur],
-            "ordinary_by_year":   [float(x) for x in ordinary_other_cur],
-            "withdrawal_by_year": _sched_list,
-            "retirement_income":  _ret_income,
+            "w2_yr1":       _yr1(_ic.get("w2", [])),
+            "rental_yr1":   _yr1(_ic.get("rental", [])),
+            "ordinary_yr1": _yr1(_ic.get("ordinary_other", [])),
         }
-    except Exception as _inc_exc:
-        logging.warning("income_data injection failed (non-fatal): %s", _inc_exc)
-        try:
-            person_cfg["income_data"] = {
-                "w2_yr1":             float(w2_cur[0]) if len(w2_cur) > 0 else 0.0,
-                "w2_by_year":         [float(x) for x in w2_cur],
-                "ordinary_by_year":   [float(x) for x in ordinary_other_cur],
-                "withdrawal_by_year": [],
-                "retirement_income":  51_000.0,
-            }
-        except Exception:
-            pass
+    except Exception:
+        pass
 
     # 9a-roth) Run Roth optimizer inline — attaches to snapshot
     roth_policy = (person_cfg.get("roth_conversion_policy") or {})

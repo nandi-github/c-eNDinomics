@@ -35,7 +35,7 @@ const COLS = {
   accountBalances:   5,   // Account | Type | Starting | Current median | Future median
   portfolio:        12,   // Year | Age | Median | Today$ | Mean | Floor | Ceiling | Growth | RealGrowth | StressReturn | NomInv | RealInv
   withdrawals:      14,   // Year | Age | Planned | ForSpending | Diff | FutureSpend | RMD | RMDFut | Total | TotalFut | RMDReinvCur | RMDReinvFut | Conv | ConvTax
-  taxes:             11,  // Year | Age | Federal | State | NIIT | Excise | Total | Taxable Income | Portfolio WD | Total Take-Home | Eff. rate
+  taxes:             9,   // Year | Age | Federal | State | NIIT | Excise | Total | Portfolio WD | Eff. rate
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -397,7 +397,7 @@ test("Withdrawals table: 14 columns, 49 rows, no bad values", async ({ page }) =
 
 // ─── Test 8: Taxes by Type table ─────────────────────────────────────────────
 
-test("Taxes table: 11 columns, 49 rows, effective rate ≤ 100%", async ({ page }) => {
+test("Taxes table: 9 columns, 49 rows, effective rate ≤ 100%", async ({ page }) => {
   await loadResults(page);
   const section = page.locator("section.results-section", { hasText: "Taxes by Type" });
   const table = section.locator("table.table");
@@ -412,7 +412,7 @@ test("Taxes table: 11 columns, 49 rows, effective rate ≤ 100%", async ({ page 
   // Effective rate (last col): must be ≤ 100% or "—" — never > 100%
   const badRateRows: string[] = [];
   for (let i = 0; i < cells.length; i++) {
-    const rateStr = cells[i][10];
+    const rateStr = cells[i][8];
     const rate = parsePct(rateStr);
     if (rate !== null && rate > 100) {
       badRateRows.push(`row ${i + 1} (age ${cells[i][1]}): ${rateStr}`);
@@ -425,7 +425,7 @@ test("Taxes table: 11 columns, 49 rows, effective rate ≤ 100%", async ({ page 
 
   // Pre-RMD effective rates: should be < 30% (small conversion-only taxes)
   for (let i = 0; i < RMD_START_ROW - 1; i++) {
-    const rate = parsePct(cells[i][10]);
+    const rate = parsePct(cells[i][8]);
     if (rate !== null) {
       expect(
         rate,
@@ -445,7 +445,7 @@ test("Taxes table: 11 columns, 49 rows, effective rate ≤ 100%", async ({ page 
   // (simulator_new.py must call withdrawals.update(_taxes_median_path)).
   const dashInRmdRows: string[] = [];
   for (let i = RMD_START_ROW - 1; i < EXPECTED_ROWS; i++) {
-    const rateStr = cells[i][10].trim();
+    const rateStr = cells[i][8].trim();
     if (rateStr === "—" || rateStr === "" || rateStr === "-") {
       dashInRmdRows.push(`row ${i + 1} (age ${cells[i][1]})`);
     }

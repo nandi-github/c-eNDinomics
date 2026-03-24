@@ -544,6 +544,16 @@ def run_accounts_new(
                 ytd_income_nom_paths[:, y],
             )
 
+    # Snapshot ordinary_income_cur_paths immediately after tax computation.
+    # This is the exact income base the tax engine used — W2 + SS + RMDs + conversions.
+    # Snapshotting here (not later) ensures we capture the correct denominator for
+    # effective tax rate, before any further simulation steps modify the array.
+    _taxable_income_snapshot = (
+        ordinary_income_cur_paths.copy()
+        if ordinary_income_cur_paths is not None
+        else None
+    )
+
 
     # =========================================================================
     # STEP 1: Build deflator once — used by withdrawals, reinvestment, and stats
@@ -881,20 +891,7 @@ def run_accounts_new(
             realized_nom_paths[:, y]  = realized_total_nom
             shortfall_nom_paths[:, y] = shortfall_total_nom
 
-            # TRAD IRA discretionary withdrawals are ordinary income — add to income paths
-            # so the effective tax rate denominator includes the full taxable income stack.
-            # RMDs were already added at line ~371. This captures the extra TRAD withdrawals
-            # pulled to meet the spending plan (good-market sequence: TRAD first).
-            if ordinary_income_cur_paths is not None:
-                for acct, sold_arr in sold_per_acct_nom.items():
-                    _acct_type = next(
-                        (a.get("type","") for a in alloc_accounts.get("accounts",[]) if a.get("name")==acct),
-                        ""
-                    )
-                    if _acct_type == "traditional_ira":
-                        # Convert nominal to current USD and add to ordinary income
-                        _trad_wd_cur = sold_arr / max(deflator[y], 1e-12)
-                        ordinary_income_cur_paths[:, y] += _trad_wd_cur
+
 
             # ── Update cumulative deficit for makeup tracking ─────────────────
             # Deficit this year = planned - realized (per path, nominal)
@@ -1092,13 +1089,23 @@ def run_accounts_new(
     # This is the correct denominator for effective tax rate.
     # NOTE: ordinary_income_cur_paths has RMDs and conversions added to it inside the
     # simulation loop (lines ~368-441), so by this point it contains the full picture.
+    # Use the tax-computation snapshot as the authoritative income basis.
+    # This is what the tax engine actually taxed — consistent with the tax output.
     _ord_income_med = None
-    if ordinary_income_cur_paths is not None:
+    if _taxable_income_snapshot is not None:
+        _ord_income_med = _med_path(_taxable_income_snapshot).tolist()
+    elif ordinary_income_cur_paths is not None:
         _ord_income_med = _med_path(ordinary_income_cur_paths).tolist()
 
     # Compute effective tax rate in the backend so both App.tsx and API consumers
     # get the same number without duplicating logic on the client side.
-    # Denominator: total ordinary income (preferred) → fallback to total withdrawals + conversions
+    # Denominator: taxable income = ordinary income MINUS standard deduction
+    # (same base the tax engine uses — gross income overstates the denominator).
+    # Standard deduction is inflation-adjusted per the tax config; we use a
+    # conservative fixed value that matches roth_optimizer.py constants.
+    _filing = str((_pcfg or {}).get("filing_status", "MFJ")).upper()
+    _std_ded = 31_500.0 if _filing == "MFJ" else 15_750.0  # matches roth_optimizer.py
+
     _taxes_fed_med   = _med_path(taxes_fed_cur_paths)
     _taxes_state_med = _med_path(taxes_state_cur_paths)
     _taxes_niit_med  = _med_path(taxes_niit_cur_paths)
@@ -1107,17 +1114,19 @@ def run_accounts_new(
 
     _eff_rate_med = [0.0] * n_years
     for _y in range(n_years):
-        _denom = float(_ord_income_med[_y]) if _ord_income_med and _ord_income_med[_y] > 0 else 0.0
-        if _denom <= 0:
-            # Fallback: planned withdrawal + conversion (less accurate but prevents div/0)
+        _gross = float(_ord_income_med[_y]) if _ord_income_med and _ord_income_med[_y] > 0 else 0.0
+        # Subtract standard deduction to get taxable income (same base as tax engine)
+        _taxable = max(0.0, _gross - _std_ded)
+        if _taxable <= 0:
+            # Fallback: planned withdrawal + conversion minus std deduction
             _wd = float(planned_cur[_y]) if planned_cur is not None and _y < len(planned_cur) else 0.0
             _cv = 0.0
             if conversion_nom_paths is not None:
                 _cv = float(_med_path(conversion_nom_paths)[_y]) if hasattr(conversion_nom_paths, 'shape') else 0.0
-            _denom = _wd + _cv
+            _taxable = max(0.0, _wd + _cv - _std_ded)
         _tax = float(_total_taxes_med[_y])
-        if _denom > 0 and _tax >= 0:
-            _rate = _tax / _denom
+        if _taxable > 0 and _tax >= 0:
+            _rate = _tax / _taxable
             _eff_rate_med[_y] = round(min(_rate, 1.0), 4)  # cap at 100%, 4dp
 
     _taxes_median_path = {
