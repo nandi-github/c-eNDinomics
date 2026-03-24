@@ -30,3 +30,4 @@ logs/
 !src/test_results/regression_baseline.json
 src/profiles/*/.versions/
 src/ui/package-lock.json
+src/test_results/
