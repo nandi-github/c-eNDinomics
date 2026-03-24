@@ -3593,7 +3593,7 @@ Re-run simulation to see impact.`)) return;
                             <thead>
                               <tr>
                                 <th>Yr</th><th>Age</th><th>Phase</th><th>W2/SS Income</th><th>Withdrawal</th><th>Convert</th>
-                                <th>Tax Cost</th><th>Eff. Rate</th>
+                                <th>Conv. Tax</th><th>Eff. Rate</th>
                                 <th>IRMAA Δ</th><th>Total Spendable</th><th>Cumul. Converted</th>
                               </tr>
                             </thead>

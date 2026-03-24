@@ -881,6 +881,21 @@ def run_accounts_new(
             realized_nom_paths[:, y]  = realized_total_nom
             shortfall_nom_paths[:, y] = shortfall_total_nom
 
+            # TRAD IRA discretionary withdrawals are ordinary income — add to income paths
+            # so the effective tax rate denominator includes the full taxable income stack.
+            # RMDs were already added at line ~371. This captures the extra TRAD withdrawals
+            # pulled to meet the spending plan (good-market sequence: TRAD first).
+            if ordinary_income_cur_paths is not None:
+                for acct, sold_arr in sold_per_acct_nom.items():
+                    _acct_type = next(
+                        (a.get("type","") for a in alloc_accounts.get("accounts",[]) if a.get("name")==acct),
+                        ""
+                    )
+                    if _acct_type == "traditional_ira":
+                        # Convert nominal to current USD and add to ordinary income
+                        _trad_wd_cur = sold_arr / max(deflator[y], 1e-12)
+                        ordinary_income_cur_paths[:, y] += _trad_wd_cur
+
             # ── Update cumulative deficit for makeup tracking ─────────────────
             # Deficit this year = planned - realized (per path, nominal)
             _planned_nom_y = amount_nom_paths  # what we tried to pay
