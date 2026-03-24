@@ -31,3 +31,4 @@ logs/
 src/profiles/*/.versions/
 src/ui/package-lock.json
 src/test_results/
+src/test_results/
