@@ -4054,16 +4054,18 @@ Re-run simulation to see impact.`)) return;
                       const wdE  = W?.realized_current_median_path?.[i] ?? W?.realized_current_mean?.[i] ?? 0;
                       const twE  = W?.total_withdraw_current_median_path?.[i] ?? W?.total_withdraw_current_mean?.[i] ?? (wdE + rmdE);
                       const cvE  = C?.conversion_cur_median_path_by_year?.[i] ?? C?.conversion_cur_mean_by_year?.[i] ?? 0;
-                      // Correct denominator = total ordinary income (W2 + RMD + conversions + cap gains + dividends)
-                      // This prevents rates >100% caused by investment income taxed beyond just the withdrawal amount
-                      // Denominator = total taxable income on median path.
-                      // Guard: never display >100% (shows dash for old snapshots or edge cases).
+                      // Effective rate — pre-computed in backend (simulator_new.py)
+                      // using the correct denominator: W2 + SS + RMDs + conversions + cap gains
+                      // Do NOT recompute here — keeps API consumers and App.tsx in sync.
+                      const effRateBackend = W?.effective_tax_rate_median_path?.[i] ?? null;
+                      // Legacy fallback for old snapshots that predate this field
                       const totalOrdIncome = W?.total_ordinary_income_median_path?.[i] ?? 0;
                       const denom = totalOrdIncome > 0
                         ? totalOrdIncome
                         : (twE + cvE > 0 ? twE + cvE : null);
                       const effRateRaw = (denom !== null && denom > 0) ? total / denom : null;
-                      const effRate = (effRateRaw !== null && effRateRaw <= 1.0) ? effRateRaw : null;
+                      const effRateLegacy = (effRateRaw !== null && effRateRaw <= 1.0) ? effRateRaw : null;
+                      const effRate = effRateBackend !== null ? effRateBackend : effRateLegacy;
 
                       const startAge = snapshot.person?.current_age ?? snapshot.person?.age ?? undefined;
                       const ageDisplay = startAge !== undefined ? Math.floor(startAge + i) : "";

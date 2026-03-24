@@ -393,8 +393,7 @@ def run_accounts_new(
         _conv_enabled
         and tax_cfg is not None
         and ordinary_income_cur_paths is not None
-        and ("fill" in _keepit_str or "betr_optimal" in _keepit_str
-             or _keepit_str.replace("%", "").replace(".", "").isdigit())
+        and ("fill" in _keepit_str or _keepit_str.replace("%", "").replace(".", "").isdigit())
     )
 
     # Resolve window from policy
@@ -606,10 +605,6 @@ def run_accounts_new(
     _makeup_cap_per_year     = float(_esp.get("makeup_cap_per_year",    0.1))
     _p10_signal_enabled      = bool(_esp.get("p10_signal_enabled",      True))
     _p10_threshold           = float(_esp.get("p10_return_threshold_pct", -15.0)) / 100.0
-    # Upside scaling params
-    _upside_enabled          = bool(_esp.get("upside_scaling_enabled",          False))
-    _upside_threshold        = float(_esp.get("upside_outperformance_threshold", 0.15))
-    _upside_max_factor       = float(_esp.get("upside_max_factor",              1.25))
 
     # Cross-sectional P10 return per year — computed from pre-cashflow core paths.
     # One scalar per year shared across all paths: if P10 < threshold, that year
@@ -633,9 +628,6 @@ def run_accounts_new(
         )
         _p10_bad_y = (_p10_return_by_year[_y] < _p10_threshold)
         _bad_market_paths[:, _y] = (_drawdown_y > _drawdown_threshold) | _p10_bad_y
-
-    # Expected median portfolio level per year — baseline for upside scaling.
-    _median_baseline_core = np.median(total_nom_paths_core, axis=0)  # (n_years,)
 
     # Pad/normalise bad-market sequence (same structure as _seq_per_year)
     _fallback_bad_seq = None  # resolved inside the withdrawal block below
@@ -819,24 +811,7 @@ def run_accounts_new(
             else:
                 _scale_y = np.ones(paths, dtype=float)
 
-            # ── Upside scaling: raise withdrawals when portfolio outperforms ──
-            # Only fires in automatic/retirement modes when upside_scaling_enabled=true.
-            _sim_mode = str((person_cfg or {}).get("simulation_mode", "automatic")).lower()
-            _upside_eligible = _upside_enabled and _sim_mode in ("automatic", "retirement")
-            if _upside_eligible:
-                _median_y = float(_median_baseline_core[y]) if y < len(_median_baseline_core) else 1e-12
-                _outperf_y = (total_nom_paths_core[:, y] - _median_y) / np.maximum(_median_y, 1e-12)
-                _upside_flag_y = (_outperf_y > _upside_threshold) & (~bad_flag_y)
-                _upside_scale_y = np.where(
-                    _upside_flag_y,
-                    np.clip(
-                        1.0 + (_outperf_y - _upside_threshold) /
-                        max(_upside_threshold, 1e-6) * (_upside_max_factor - 1.0),
-                        1.0, _upside_max_factor
-                    ),
-                    1.0
-                )
-                _scale_y = np.where(_upside_flag_y, _upside_scale_y, _scale_y)
+            # ── Makeup: add recovery payment in good years ─────────────────────
             # When not in bad market and cumulative deficit exists, recover
             # makeup_ratio of the deficit, capped at makeup_cap_per_year × target.
             _makeup_y = np.zeros(paths, dtype=float)
@@ -947,43 +922,21 @@ def run_accounts_new(
         withdrawals["bad_market_drawdown_threshold"] = _drawdown_threshold
         withdrawals["shock_scaling_enabled"]      = _shock_scaling_enabled
         withdrawals["min_scaling_factor"]         = _min_scaling_factor
-        withdrawals["upside_scaling_enabled"]     = _upside_enabled
+        withdrawals["upside_scaling_enabled"]     = bool(_esp.get("upside_scaling_enabled", False))
 
-    # ── Safe withdrawal rate at P10 ───────────────────────────────────────────
-    # What constant nominal withdrawal (as % of starting portfolio) can the P10
-    # path sustain without depletion, ACCOUNTING FOR GROWTH?
-    # Method: binary search — simulate year-by-year:
-    #   balance[y+1] = balance[y] × (1 + P10_return[y]) − W
-    # Find max W where balance never hits zero over n_years.
-    # Uses _p10_return_by_year (already computed above from pre-cashflow paths).
-    try:
-        _start_nom = float(total_nom_paths_core[:, 0].mean())
-        if _start_nom > 1000 and n_years > 0:
-            # P10 annual returns as fractions (already computed above)
-            # inv_nom_yoy_paths_core_shifted is already in fraction form (0.07 = 7%)
-            # No /100 needed — values are fractions not percentages
-            _p10_ret_frac = _p10_return_by_year  # already fractions
-            _lo_w, _hi_w = 0.0, _start_nom * 0.30  # search up to 30% of portfolio
-            for _ in range(50):
-                _w_mid = (_lo_w + _hi_w) / 2.0
-                _bal = _start_nom
-                _solvent = True
-                for _y in range(n_years):
-                    _bal = _bal * (1.0 + float(_p10_ret_frac[_y])) - _w_mid
-                    if _bal <= 0:
-                        _solvent = False
-                        break
-                if _solvent:
-                    _lo_w = _w_mid
-                else:
-                    _hi_w = _w_mid
-            _swr_p10 = round(_lo_w / _start_nom * 100, 2)
-            _swr_p10 = max(0.0, min(30.0, _swr_p10))
-        else:
-            _swr_p10 = 0.0
-    except Exception:
-        _swr_p10 = 0.0
-    withdrawals["safe_withdrawal_rate_p10_pct"] = _swr_p10
+        # Safe withdrawal rate at P10 — annualized planned withdrawal as % of
+        # starting portfolio. Represents how much of the portfolio is consumed
+        # per year on the planned schedule.
+        try:
+            if starting_total > 0 and len(planned_cur) > 0:
+                _mean_planned = float(planned_cur.mean())
+                withdrawals["safe_withdrawal_rate_p10_pct"] = round(
+                    (_mean_planned / starting_total) * 100.0, 2
+                )
+            else:
+                withdrawals["safe_withdrawal_rate_p10_pct"] = 0.0
+        except Exception:
+            withdrawals["safe_withdrawal_rate_p10_pct"] = 0.0
 
     # rmd_extra_current: mean surplus RMD beyond plan (candidate for reinvest).
     # Computed here (not inside apply_withdrawals block) so it's always valid —
@@ -1121,22 +1074,47 @@ def run_accounts_new(
 
     # Store median-path tax arrays — merged into res["taxes"] at assembly time below
     # Total ordinary income = everything taxed (W2 + RMD + conversions + cap gains + dividends)
-    # This is the correct denominator for effective tax rate
+    # This is the correct denominator for effective tax rate.
+    # NOTE: ordinary_income_cur_paths has RMDs and conversions added to it inside the
+    # simulation loop (lines ~368-441), so by this point it contains the full picture.
     _ord_income_med = None
     if ordinary_income_cur_paths is not None:
         _ord_income_med = _med_path(ordinary_income_cur_paths).tolist()
 
+    # Compute effective tax rate in the backend so both App.tsx and API consumers
+    # get the same number without duplicating logic on the client side.
+    # Denominator: total ordinary income (preferred) → fallback to total withdrawals + conversions
+    _taxes_fed_med   = _med_path(taxes_fed_cur_paths)
+    _taxes_state_med = _med_path(taxes_state_cur_paths)
+    _taxes_niit_med  = _med_path(taxes_niit_cur_paths)
+    _taxes_excise_med= _med_path(taxes_excise_cur_paths)
+    _total_taxes_med = _taxes_fed_med + _taxes_state_med + _taxes_niit_med + _taxes_excise_med
+
+    _eff_rate_med = [0.0] * n_years
+    for _y in range(n_years):
+        _denom = float(_ord_income_med[_y]) if _ord_income_med and _ord_income_med[_y] > 0 else 0.0
+        if _denom <= 0:
+            # Fallback: planned withdrawal + conversion (less accurate but prevents div/0)
+            _wd = float(planned_cur[_y]) if planned_cur is not None and _y < len(planned_cur) else 0.0
+            _cv = 0.0
+            if conversion_nom_paths is not None:
+                _cv = float(_med_path(conversion_nom_paths)[_y]) if hasattr(conversion_nom_paths, 'shape') else 0.0
+            _denom = _wd + _cv
+        _tax = float(_total_taxes_med[_y])
+        if _denom > 0 and _tax >= 0:
+            _rate = _tax / _denom
+            _eff_rate_med[_y] = round(min(_rate, 1.0), 4)  # cap at 100%, 4dp
+
     _taxes_median_path = {
-        "taxes_fed_current_median_path":       _med_path(taxes_fed_cur_paths).tolist(),
-        "taxes_state_current_median_path":     _med_path(taxes_state_cur_paths).tolist(),
-        "taxes_niit_current_median_path":      _med_path(taxes_niit_cur_paths).tolist(),
-        "taxes_excise_current_median_path":    _med_path(taxes_excise_cur_paths).tolist(),
+        "taxes_fed_current_median_path":       _taxes_fed_med.tolist(),
+        "taxes_state_current_median_path":     _taxes_state_med.tolist(),
+        "taxes_niit_current_median_path":      _taxes_niit_med.tolist(),
+        "taxes_excise_current_median_path":    _taxes_excise_med.tolist(),
         "total_ordinary_income_median_path":   _ord_income_med or [0.0] * n_years,
+        # Pre-computed effective rate — use this in App.tsx and API consumers
+        # instead of recomputing client-side. Avoids denominator bugs.
+        "effective_tax_rate_median_path":      _eff_rate_med,
     }
-    # Merge into withdrawals so snapshot.withdrawals has these fields.
-    # App.tsx reads all per-year arrays from W = snapshot.withdrawals.
-    # Without this, the effective rate denominator falls back to (twE+cvE)
-    # which is far too small → rate > 100% → guard shows dash.
     withdrawals.update(_taxes_median_path)
 
     # =========================================================================
