@@ -23,8 +23,8 @@ import { test, expect, Page, Locator } from "@playwright/test";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const PROFILE = "__system__";
-const EXPECTED_ROWS = 49;         // __system__: current_age=46, target_age=95 → 49 sim years
+const PROFILE = "Test";
+const EXPECTED_ROWS = 49;         // Test profile: current_age=46, target_age=95 → 49 sim years
 const RMD_START_ROW = 30;         // age 75 = sim year 30 (birth_year=1980 → SECURE 2.0 age 75)
 const SIM_TIMEOUT_MS = 90_000;    // generous budget for 200-path run
 
@@ -35,7 +35,7 @@ const COLS = {
   accountBalances:   5,   // Account | Type | Starting | Current median | Future median
   portfolio:        12,   // Year | Age | Median | Today$ | Mean | Floor | Ceiling | Growth | RealGrowth | StressReturn | NomInv | RealInv
   withdrawals:      14,   // Year | Age | Planned | ForSpending | Diff | FutureSpend | RMD | RMDFut | Total | TotalFut | RMDReinvCur | RMDReinvFut | Conv | ConvTax
-  taxes:             9,   // Year | Age | Fed | State | NIIT | Excise | Total | TakeHome | EffRate
+  taxes:             11,  // Year | Age | Federal | State | NIIT | Excise | Total | Taxable Income | Portfolio WD | Total Take-Home | Eff. rate
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -184,7 +184,7 @@ test("page loads with correct title and tabs", async ({ page }) => {
 
 // ─── Test 2: Results load ─────────────────────────────────────────────────────
 
-test("results load for __system__ profile", async ({ page }) => {
+test("results load for Test profile", async ({ page }) => {
   expect(simulationDone).toBe(true);
 
   await page.goto("/");
@@ -397,7 +397,7 @@ test("Withdrawals table: 14 columns, 49 rows, no bad values", async ({ page }) =
 
 // ─── Test 8: Taxes by Type table ─────────────────────────────────────────────
 
-test("Taxes table: 9 columns, 49 rows, effective rate ≤ 100%", async ({ page }) => {
+test("Taxes table: 11 columns, 49 rows, effective rate ≤ 100%", async ({ page }) => {
   await loadResults(page);
   const section = page.locator("section.results-section", { hasText: "Taxes by Type" });
   const table = section.locator("table.table");
@@ -412,7 +412,7 @@ test("Taxes table: 9 columns, 49 rows, effective rate ≤ 100%", async ({ page }
   // Effective rate (last col): must be ≤ 100% or "—" — never > 100%
   const badRateRows: string[] = [];
   for (let i = 0; i < cells.length; i++) {
-    const rateStr = cells[i][8];
+    const rateStr = cells[i][10];
     const rate = parsePct(rateStr);
     if (rate !== null && rate > 100) {
       badRateRows.push(`row ${i + 1} (age ${cells[i][1]}): ${rateStr}`);
@@ -425,7 +425,7 @@ test("Taxes table: 9 columns, 49 rows, effective rate ≤ 100%", async ({ page }
 
   // Pre-RMD effective rates: should be < 30% (small conversion-only taxes)
   for (let i = 0; i < RMD_START_ROW - 1; i++) {
-    const rate = parsePct(cells[i][8]);
+    const rate = parsePct(cells[i][10]);
     if (rate !== null) {
       expect(
         rate,
@@ -445,7 +445,7 @@ test("Taxes table: 9 columns, 49 rows, effective rate ≤ 100%", async ({ page }
   // (simulator_new.py must call withdrawals.update(_taxes_median_path)).
   const dashInRmdRows: string[] = [];
   for (let i = RMD_START_ROW - 1; i < EXPECTED_ROWS; i++) {
-    const rateStr = cells[i][8].trim();
+    const rateStr = cells[i][10].trim();
     if (rateStr === "—" || rateStr === "" || rateStr === "-") {
       dashInRmdRows.push(`row ${i + 1} (age ${cells[i][1]})`);
     }

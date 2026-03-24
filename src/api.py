@@ -538,7 +538,10 @@ def list_profiles():
     names = []
     for d in os.listdir(PROFILES_ROOT):
         p = os.path.join(PROFILES_ROOT, d)
-        if os.path.isdir(p):
+        # All double-underscore profiles are hidden from the UI dropdown.
+        # __ftest__* = ephemeral test fixtures, __system__ = Playwright fixture.
+        # These are accessible via direct API calls but not shown to users.
+        if os.path.isdir(p) and not d.startswith("__"):
             names.append(d)
     names.sort()
     return {"profiles": names}

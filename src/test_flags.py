@@ -3779,17 +3779,12 @@ def group19_playwright(paths: int):
         checks.append((PASS, "G19: SKIPPED — server not reachable on :8000", ""))
         return "G19", "Playwright UI smoke tests (skipped — server offline)", checks, time.time() - t0
 
-    # Ensure __system__ profile exists and trim its versions (Playwright writes versions)
+    # Ensure __system__ profile exists (used by Python test suite)
     seed_system_profile(force=False)
-    try:
-        import urllib.request as _ur
-        _ur.urlopen("http://localhost:8000/profile/__system__/versions?keep=10",
-                    data=b"", method="DELETE" if False else None)
-    except Exception:
-        pass
+    # Prune Test profile versions before Playwright writes more (prevents MAX_VERSIONS failure)
     try:
         import urllib.request as _ur2
-        req = urllib.request.Request("http://localhost:8000/profile/__system__/versions?keep=10",
+        req = urllib.request.Request("http://localhost:8000/profile/Test/versions?keep=10",
                                       method="DELETE")
         _ur2.urlopen(req, timeout=5)
     except Exception:
