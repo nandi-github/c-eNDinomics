@@ -4,22 +4,25 @@
  *
  * Assumes the FastAPI server is already running on localhost:8000.
  * Start it before running tests:
- *   cd root/src && source venv/bin/activate && uvicorn api:app --reload
+ *   cd src && ./vcleanbld_ui
  *
- * Run tests:
- *   cd root/src/ui && npx playwright test
+ * Run tests (both work):
+ *   cd src && python3 -B test_flags.py --comprehensive-test   ← recommended
+ *   cd src/ui && npx playwright test                          ← standalone, globalSetup creates PlaywrightTest
  *
- * Run with UI (headed, for debugging):
- *   cd root/src/ui && npx playwright test --headed
+ * Run with visible browser (debugging):
+ *   cd src/ui && npx playwright test --headed
  *
  * Run a single test file:
- *   cd root/src/ui && npx playwright test tests/smoke.spec.ts
+ *   cd src/ui && npx playwright test tests/smoke.spec.ts
  */
 
 import { defineConfig, devices } from "@playwright/test";
 
 export default defineConfig({
   testDir: "./tests",
+  globalSetup:    require.resolve("./tests/global-setup"),
+  globalTeardown: require.resolve("./tests/global-teardown"),
   fullyParallel: false,       // run sequentially — tests share server state
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
@@ -47,5 +50,4 @@ export default defineConfig({
   ],
 
   // Do NOT start a webServer here — the FastAPI server must already be running.
-  // See run-ui-tests.sh for a wrapper that handles server startup.
 });

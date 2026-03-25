@@ -435,6 +435,436 @@ def system_profile_n_years() -> int:
     return int(p["target_age"]) - int(p["current_age"])
 
 # ===========================================================================
+# SYSTEM PROFILES — EXTENDED SCENARIO FIXTURES
+# ===========================================================================
+#
+# All __system__* profiles are hidden from the UI dropdown (list_profiles
+# filters __*). All are seeded by: python3 -B test_flags.py --reset-system-profiles
+#
+# __testui__ is also hidden — it holds the canonical Playwright fixture data.
+# Playwright creates an ephemeral "PlaywrightTest" profile by cloning __testui__
+# at test start and deletes it after. This means:
+#   - No persistent visible test profile for users to accidentally edit/delete
+#   - Versioning tests work (PlaywrightTest is a real visible profile)
+#   - Fresh clean state every Playwright run
+#   - __testui__ is the authoritative fixture; PlaywrightTest is the disposable copy
+#
+# Profile               Birth Year  Age  n_years  Primary axis
+# __system__            1980        46   49       Baseline MFJ CA (existing)
+# __system__noss        1980        46   49       No Social Security
+# __system__single      1980        46   49       Single filer
+# __system__texas       1980        46   49       Texas — no state income tax
+# __system__rmd73       1953        73   22       RMD era (born 1951-1959 → age 73)
+# __system__rmd75       1960        66   29       SECURE 2.0 born 1960 → RMD at 75
+# __testui__            1980        46   49       Playwright browser fixture
+# ===========================================================================
+
+_SYSTEM_NOSS_FILES = {
+    "person.json": {
+        "_comment": "SYSTEM FIXTURE: no_ss — exclude_from_plan=true",
+        "current_age": 46, "birth_year": 1980, "assumed_death_age": 88,
+        "filing_status": "MFJ", "state": "California",
+        "target_age": 95, "retirement_age": 65, "simulation_mode": "retirement",
+        "spouse": {"name": "Spouse", "birth_year": 1985, "sole_beneficiary_for_ira": True},
+        "beneficiaries": {
+            "primary": [{"name": "Spouse", "relationship": "spouse", "share_percent": 100}],
+            "contingent": [
+                {"name": "Child A", "relationship": "child", "birth_year": 2001,
+                 "share_percent": 50, "eligible_designated_beneficiary": False, "per_stirpes": True,
+                 "estimated_income_moderate": 150000, "estimated_income_high": 300000, "filing_status": "MFJ"},
+                {"name": "Child B", "relationship": "child", "birth_year": 2005,
+                 "share_percent": 50, "eligible_designated_beneficiary": False, "per_stirpes": True,
+                 "estimated_income_moderate": 150000, "estimated_income_high": 300000, "filing_status": "MFJ"},
+            ]
+        },
+        "rmd_policy": {"extra_handling": "reinvest_in_brokerage"},
+        "roth_conversion_policy": {
+            "enabled": True, "window_years": ["now-75"],
+            "keepit_below_max_marginal_fed_rate": "fill the bracket",
+            "avoid_niit": True, "rmd_assist": "convert",
+            "tax_payment_source": "BROKERAGE", "irmaa_guard": {"enabled": False},
+        },
+        "rmd_table": "uniform_lifetime",
+        "roth_optimizer_config": {
+            "include_survivor_scenario": True, "include_heir_scenario": True,
+            "irmaa_sensitivity": "low", "window_years": 29,
+        },
+        "social_security": {
+            "self_benefit_monthly": 2000, "self_start_age": 67,
+            "spouse_benefit_monthly": 1500, "spouse_start_age": 67,
+            "exclude_from_plan": True,    # KEY: SS excluded
+        },
+    },
+    "withdrawal_schedule.json": {"floor_k": 100, "schedule": [
+        {"ages": "47-64", "amount_k": 150, "base_k": 100},
+        {"ages": "65-74", "amount_k": 200, "base_k": 120},
+        {"ages": "75-95", "amount_k": 200, "base_k": 120},
+    ]},
+    "income.json": {
+        "w2":            [{"ages": "47-64", "amount_nom": 120000}],
+        "ordinary_other":[{"ages": "47-95", "amount_nom": 0}],
+        "rental":        [{"ages": "47-95", "amount_nom": 0}],
+        "interest":      [{"ages": "47-95", "amount_nom": 0}],
+        "qualified_div": [{"ages": "47-95", "amount_nom": 0}],
+        "cap_gains":     [{"ages": "47-95", "amount_nom": 0}],
+    },
+    "inflation_yearly.json": copy.deepcopy(BASE_INFLATION),
+    "economic.json":          copy.deepcopy(BASE_ECONOMIC),
+    "shocks_yearly.json":     copy.deepcopy(BASE_SHOCKS),
+    "allocation_yearly.json": copy.deepcopy(BASE_ALLOCATION),
+}
+
+_SYSTEM_SINGLE_FILES = {
+    "person.json": {
+        "_comment": "SYSTEM FIXTURE: single filer — different brackets + std deduction $15,750",
+        "current_age": 46, "birth_year": 1980, "assumed_death_age": 88,
+        "filing_status": "single",    # KEY: single filer
+        "state": "California",
+        "target_age": 95, "retirement_age": 65, "simulation_mode": "retirement",
+        "spouse": {},
+        "beneficiaries": {
+            "primary": [{"name": "Child A", "relationship": "child", "birth_year": 2001,
+                         "share_percent": 100, "eligible_designated_beneficiary": False, "per_stirpes": True}],
+            "contingent": [],
+        },
+        "rmd_policy": {"extra_handling": "reinvest_in_brokerage"},
+        "roth_conversion_policy": {
+            "enabled": True, "window_years": ["now-75"],
+            "keepit_below_max_marginal_fed_rate": "fill the bracket",
+            "avoid_niit": True, "rmd_assist": "convert",
+            "tax_payment_source": "BROKERAGE", "irmaa_guard": {"enabled": False},
+        },
+        "rmd_table": "uniform_lifetime",
+        "roth_optimizer_config": {
+            "include_survivor_scenario": False, "include_heir_scenario": True,
+            "irmaa_sensitivity": "low", "window_years": 29,
+        },
+        "social_security": {
+            "self_benefit_monthly": 2000, "self_start_age": 67,
+            "spouse_benefit_monthly": 0, "spouse_start_age": 67,
+            "exclude_from_plan": False,
+        },
+    },
+    "withdrawal_schedule.json": {"floor_k": 80, "schedule": [
+        {"ages": "47-64", "amount_k": 100, "base_k": 80},
+        {"ages": "65-74", "amount_k": 130, "base_k": 100},
+        {"ages": "75-95", "amount_k": 130, "base_k": 100},
+    ]},
+    "income.json": {
+        "w2":            [{"ages": "47-64", "amount_nom": 120000}],
+        "ordinary_other":[{"ages": "66-95", "amount_nom": 20000}],
+        "rental":        [{"ages": "47-95", "amount_nom": 0}],
+        "interest":      [{"ages": "47-95", "amount_nom": 0}],
+        "qualified_div": [{"ages": "47-95", "amount_nom": 0}],
+        "cap_gains":     [{"ages": "47-95", "amount_nom": 0}],
+    },
+    "inflation_yearly.json": copy.deepcopy(BASE_INFLATION),
+    "economic.json":          copy.deepcopy(BASE_ECONOMIC),
+    "shocks_yearly.json":     copy.deepcopy(BASE_SHOCKS),
+    "allocation_yearly.json": copy.deepcopy(BASE_ALLOCATION),
+}
+
+_SYSTEM_TEXAS_FILES = {
+    "person.json": {
+        "_comment": "SYSTEM FIXTURE: Texas — no state income tax (STATE_TYPE=none)",
+        "current_age": 46, "birth_year": 1980, "assumed_death_age": 88,
+        "filing_status": "MFJ",
+        "state": "Texas",    # KEY: no state income tax
+        "target_age": 95, "retirement_age": 65, "simulation_mode": "retirement",
+        "spouse": {"name": "Spouse", "birth_year": 1985, "sole_beneficiary_for_ira": True},
+        "beneficiaries": {
+            "primary": [{"name": "Spouse", "relationship": "spouse", "share_percent": 100}],
+            "contingent": [
+                {"name": "Child A", "relationship": "child", "birth_year": 2001,
+                 "share_percent": 50, "eligible_designated_beneficiary": False, "per_stirpes": True,
+                 "estimated_income_moderate": 150000, "estimated_income_high": 300000, "filing_status": "MFJ"},
+                {"name": "Child B", "relationship": "child", "birth_year": 2005,
+                 "share_percent": 50, "eligible_designated_beneficiary": False, "per_stirpes": True,
+                 "estimated_income_moderate": 150000, "estimated_income_high": 300000, "filing_status": "MFJ"},
+            ]
+        },
+        "rmd_policy": {"extra_handling": "reinvest_in_brokerage"},
+        "roth_conversion_policy": {
+            "enabled": True, "window_years": ["now-75"],
+            "keepit_below_max_marginal_fed_rate": "fill the bracket",
+            "avoid_niit": True, "rmd_assist": "convert",
+            "tax_payment_source": "BROKERAGE", "irmaa_guard": {"enabled": False},
+        },
+        "rmd_table": "uniform_lifetime",
+        "roth_optimizer_config": {
+            "include_survivor_scenario": True, "include_heir_scenario": True,
+            "irmaa_sensitivity": "low", "window_years": 29,
+        },
+        "social_security": {
+            "self_benefit_monthly": 2000, "self_start_age": 67,
+            "spouse_benefit_monthly": 1500, "spouse_start_age": 67,
+            "exclude_from_plan": False,
+        },
+    },
+    "withdrawal_schedule.json": {"floor_k": 100, "schedule": [
+        {"ages": "47-64", "amount_k": 150, "base_k": 100},
+        {"ages": "65-74", "amount_k": 200, "base_k": 120},
+        {"ages": "75-95", "amount_k": 200, "base_k": 120},
+    ]},
+    "income.json":             copy.deepcopy(BASE_INCOME),
+    "inflation_yearly.json":   copy.deepcopy(BASE_INFLATION),
+    "economic.json":           copy.deepcopy(BASE_ECONOMIC),
+    "shocks_yearly.json":      copy.deepcopy(BASE_SHOCKS),
+    "allocation_yearly.json":  copy.deepcopy(BASE_ALLOCATION),
+}
+
+_SYSTEM_RMD73_FILES = {
+    "person.json": {
+        "_comment": "SYSTEM FIXTURE: RMD73 — born 1953 (age 73). SECURE 2.0: born 1951-1959 → RMD starts at 73. RMD fires from year 1.",
+        "current_age": 73, "birth_year": 1953, "assumed_death_age": 88,
+        "filing_status": "MFJ", "state": "California",
+        "target_age": 95, "retirement_age": 65, "simulation_mode": "retirement",
+        "spouse": {"name": "Spouse", "birth_year": 1957, "sole_beneficiary_for_ira": True},
+        "beneficiaries": {
+            "primary": [{"name": "Spouse", "relationship": "spouse", "share_percent": 100}],
+            "contingent": [
+                {"name": "Child A", "relationship": "child", "birth_year": 1980,
+                 "share_percent": 50, "eligible_designated_beneficiary": False, "per_stirpes": True,
+                 "estimated_income_moderate": 120000, "estimated_income_high": 200000, "filing_status": "MFJ"},
+                {"name": "Child B", "relationship": "child", "birth_year": 1983,
+                 "share_percent": 50, "eligible_designated_beneficiary": False, "per_stirpes": True,
+                 "estimated_income_moderate": 120000, "estimated_income_high": 200000, "filing_status": "MFJ"},
+            ]
+        },
+        "rmd_policy": {"extra_handling": "reinvest_in_brokerage"},
+        "roth_conversion_policy": {
+            "enabled": True, "window_years": ["now-75"],
+            "keepit_below_max_marginal_fed_rate": "fill the bracket",
+            "avoid_niit": True, "rmd_assist": "convert",
+            "tax_payment_source": "BROKERAGE", "irmaa_guard": {"enabled": False},
+        },
+        "rmd_table": "uniform_lifetime",
+        "roth_optimizer_config": {
+            "include_survivor_scenario": True, "include_heir_scenario": True,
+            "irmaa_sensitivity": "low", "window_years": 22,
+        },
+        "social_security": {
+            "self_benefit_monthly": 2800, "self_start_age": 67,
+            "spouse_benefit_monthly": 2000, "spouse_start_age": 67,
+            "exclude_from_plan": False,
+        },
+    },
+    "withdrawal_schedule.json": {"floor_k": 100, "schedule": [
+        {"ages": "73-95", "amount_k": 200, "base_k": 140},
+    ]},
+    "income.json": {
+        "w2":            [{"ages": "73-95", "amount_nom": 0}],
+        "ordinary_other":[{"ages": "73-95", "amount_nom": 58000}],
+        "rental":        [{"ages": "73-95", "amount_nom": 0}],
+        "interest":      [{"ages": "73-95", "amount_nom": 0}],
+        "qualified_div": [{"ages": "73-95", "amount_nom": 0}],
+        "cap_gains":     [{"ages": "73-95", "amount_nom": 0}],
+    },
+    "inflation_yearly.json": copy.deepcopy(BASE_INFLATION),
+    "economic.json":          copy.deepcopy(BASE_ECONOMIC),
+    "shocks_yearly.json":     copy.deepcopy(BASE_SHOCKS),
+    "allocation_yearly.json": {
+        "accounts": [
+            {"name": "BROKERAGE-1", "type": "taxable"},
+            {"name": "TRAD_IRA-1",  "type": "traditional_ira"},
+            {"name": "ROTH_IRA-1",  "type": "roth_ira"},
+        ],
+        "starting": {"BROKERAGE-1": 400000, "TRAD_IRA-1": 2500000, "ROTH_IRA-1": 300000},
+        "deposits_yearly": [{"years": "1-22", "BROKERAGE-1": 0, "TRAD_IRA-1": 0, "ROTH_IRA-1": 0}],
+        "overrides": [],
+        "global_allocation": {
+            "BROKERAGE-1": {"portfolios": {
+                "GROWTH":       {"weight_pct": 40, "classes_pct": {"US_STOCKS": 70, "INTL_STOCKS": 30}},
+                "FOUNDATIONAL": {"weight_pct": 60, "classes_pct": {"LONG_TREAS": 40, "INT_TREAS": 30, "TIPS": 30}},
+            }},
+            "TRAD_IRA-1": {"portfolios": {
+                "GROWTH":       {"weight_pct": 50, "classes_pct": {"US_STOCKS": 70, "INTL_STOCKS": 30}},
+                "FOUNDATIONAL": {"weight_pct": 50, "classes_pct": {"LONG_TREAS": 40, "INT_TREAS": 30, "TIPS": 30}},
+            }},
+            "ROTH_IRA-1": {"portfolios": {
+                "GROWTH":       {"weight_pct": 60, "classes_pct": {"US_STOCKS": 75, "INTL_STOCKS": 25}},
+                "FOUNDATIONAL": {"weight_pct": 40, "classes_pct": {"TIPS": 50, "INT_TREAS": 50}},
+            }},
+        },
+    },
+}
+
+_SYSTEM_RMD75_FILES = {
+    "person.json": {
+        "_comment": "SYSTEM FIXTURE: RMD75 — born 1960 (age 66). SECURE 2.0: born >=1960 → RMD starts at 75. Tests zero-RMD for years 1-8, non-zero from year 9.",
+        "current_age": 66, "birth_year": 1960, "assumed_death_age": 88,
+        "filing_status": "MFJ", "state": "California",
+        "target_age": 95, "retirement_age": 65, "simulation_mode": "retirement",
+        "spouse": {"name": "Spouse", "birth_year": 1963, "sole_beneficiary_for_ira": True},
+        "beneficiaries": {
+            "primary": [{"name": "Spouse", "relationship": "spouse", "share_percent": 100}],
+            "contingent": [
+                {"name": "Child A", "relationship": "child", "birth_year": 1990,
+                 "share_percent": 100, "eligible_designated_beneficiary": False, "per_stirpes": True,
+                 "estimated_income_moderate": 100000, "estimated_income_high": 180000, "filing_status": "MFJ"},
+            ]
+        },
+        "rmd_policy": {"extra_handling": "reinvest_in_brokerage"},
+        "roth_conversion_policy": {
+            "enabled": True, "window_years": ["now-75"],
+            "keepit_below_max_marginal_fed_rate": "fill the bracket",
+            "avoid_niit": True, "rmd_assist": "convert",
+            "tax_payment_source": "BROKERAGE", "irmaa_guard": {"enabled": False},
+        },
+        "rmd_table": "uniform_lifetime",
+        "roth_optimizer_config": {
+            "include_survivor_scenario": True, "include_heir_scenario": True,
+            "irmaa_sensitivity": "low", "window_years": 29,
+        },
+        "social_security": {
+            "self_benefit_monthly": 2200, "self_start_age": 67,
+            "spouse_benefit_monthly": 1600, "spouse_start_age": 67,
+            "exclude_from_plan": False,
+        },
+    },
+    "withdrawal_schedule.json": {"floor_k": 100, "schedule": [
+        {"ages": "66-74", "amount_k": 180, "base_k": 130},
+        {"ages": "75-95", "amount_k": 220, "base_k": 160},
+    ]},
+    "income.json": {
+        "w2":            [{"ages": "66-95", "amount_nom": 0}],
+        "ordinary_other":[{"ages": "67-95", "amount_nom": 46000}],
+        "rental":        [{"ages": "66-95", "amount_nom": 0}],
+        "interest":      [{"ages": "66-95", "amount_nom": 0}],
+        "qualified_div": [{"ages": "66-95", "amount_nom": 0}],
+        "cap_gains":     [{"ages": "66-95", "amount_nom": 0}],
+    },
+    "inflation_yearly.json": copy.deepcopy(BASE_INFLATION),
+    "economic.json":          copy.deepcopy(BASE_ECONOMIC),
+    "shocks_yearly.json":     copy.deepcopy(BASE_SHOCKS),
+    "allocation_yearly.json": copy.deepcopy(BASE_ALLOCATION),
+}
+
+# ── __testui__ — Playwright fixture data (hidden, never visible in UI) ────────
+# Playwright creates "PlaywrightTest" by cloning this at test start, deletes after.
+# birth_year=1980 is load-bearing: Playwright derives n_years from person.json.
+_TESTUI_PROFILE = "__testui__"
+_TESTUI_FILES = {
+    "person.json": {
+        "_comment": "TESTUI FIXTURE — managed by test_flags.py --reset-system-profiles. birth_year=1980 is CRITICAL — Playwright derives expected row counts from this. DO NOT EDIT MANUALLY.",
+        "current_age": "compute",
+        "birth_year": 1980,
+        "assumed_death_age": 88,
+        "filing_status": "MFJ", "state": "California",
+        "target_age": 95, "retirement_age": 65, "simulation_mode": "retirement",
+        "spouse": {"name": "Spouse", "birth_year": 1985, "sole_beneficiary_for_ira": True},
+        "beneficiaries": {
+            "primary": [{"name": "Spouse", "relationship": "spouse", "share_percent": 100}],
+            "contingent": [
+                {"name": "Child A", "relationship": "child", "birth_year": 2001,
+                 "share_percent": 50, "eligible_designated_beneficiary": False, "per_stirpes": True,
+                 "estimated_income_moderate": 150000, "estimated_income_high": 300000, "filing_status": "MFJ"},
+                {"name": "Child B", "relationship": "child", "birth_year": 2005,
+                 "share_percent": 50, "eligible_designated_beneficiary": False, "per_stirpes": True,
+                 "estimated_income_moderate": 150000, "estimated_income_high": 300000, "filing_status": "MFJ"},
+            ]
+        },
+        "rmd_policy": {"extra_handling": "reinvest_in_brokerage"},
+        "roth_conversion_policy": {
+            "enabled": True, "window_years": ["now-75"],
+            "keepit_below_max_marginal_fed_rate": "fill the bracket",
+            "avoid_niit": True, "rmd_assist": "convert",
+            "tax_payment_source": "BROKERAGE", "irmaa_guard": {"enabled": False},
+        },
+        "rmd_table": "uniform_lifetime",
+        "roth_optimizer_config": {
+            "include_survivor_scenario": True, "include_heir_scenario": True,
+            "irmaa_sensitivity": "low", "window_years": 29,
+        },
+        "social_security": {
+            "self_benefit_monthly": 2000, "self_start_age": 67,
+            "spouse_benefit_monthly": 1500, "spouse_start_age": 67,
+            "exclude_from_plan": False,
+        },
+    },
+    "withdrawal_schedule.json": {"floor_k": 100, "schedule": [
+        {"ages": "47-64", "amount_k": 150, "base_k": 100},
+        {"ages": "65-74", "amount_k": 200, "base_k": 120},
+        {"ages": "75-95", "amount_k": 200, "base_k": 120},
+    ]},
+    "income.json":             copy.deepcopy(BASE_INCOME),
+    "inflation_yearly.json":   copy.deepcopy(BASE_INFLATION),
+    "economic.json":           copy.deepcopy(BASE_ECONOMIC),
+    "shocks_yearly.json":      copy.deepcopy(BASE_SHOCKS),
+    "allocation_yearly.json":  copy.deepcopy(BASE_ALLOCATION),
+}
+
+# Map of all additional __system__* scenarios
+_ALL_SYSTEM_SCENARIOS = {
+    "__system__noss":   _SYSTEM_NOSS_FILES,
+    "__system__single": _SYSTEM_SINGLE_FILES,
+    "__system__texas":  _SYSTEM_TEXAS_FILES,
+    "__system__rmd73":  _SYSTEM_RMD73_FILES,
+    "__system__rmd75":  _SYSTEM_RMD75_FILES,
+}
+
+
+def seed_system_profiles(force: bool = True) -> None:
+    """
+    Seed ALL __system__* scenario profiles and __testui__ from pinned fixtures.
+    Always force-resets. Called by: python3 -B test_flags.py --reset-system-profiles
+    """
+    seed_system_profile(force=force)
+    for profile_name, files in _ALL_SYSTEM_SCENARIOS.items():
+        d = _pdir(profile_name)
+        if os.path.exists(d):
+            shutil.rmtree(d)
+        os.makedirs(d, exist_ok=True)
+        for fname, data in files.items():
+            with open(os.path.join(d, fname), "w") as f:
+                json.dump(data, f, indent=2)
+        print(f"  ✅ Scenario profile seeded: {profile_name}")
+    _seed_testui_profile(force=True)
+    total = 1 + len(_ALL_SYSTEM_SCENARIOS)
+    print(f"\n  ✅ Seeded {total} __system__* profiles + __testui__")
+    print("  Next: python3 -B test_flags.py --reset-manifest  (pin new hashes)")
+    print("        ./vcleanbld_ui                              (restart server)")
+
+
+def _seed_testui_profile(force: bool = True) -> None:
+    """Seed __testui__ from pinned fixtures. Always hidden from UI dropdown."""
+    d = _pdir(_TESTUI_PROFILE)
+    if os.path.exists(d) and not force:
+        try:
+            with open(os.path.join(d, "person.json")) as f:
+                p = json.load(f)
+            if int(p.get("birth_year", 0)) == 1980:
+                print(f"  ✅ __testui__ profile OK")
+                return
+            print(f"  ⚠  __testui__ person.json has wrong birth_year={p.get('birth_year')}, resetting...")
+        except Exception:
+            pass
+    if os.path.exists(d):
+        shutil.rmtree(d)
+    os.makedirs(d, exist_ok=True)
+    os.makedirs(os.path.join(d, "reports"), exist_ok=True)
+    for fname, data in _TESTUI_FILES.items():
+        with open(os.path.join(d, fname), "w") as f:
+            json.dump(data, f, indent=2)
+    print(f"  ✅ __testui__ profile seeded (birth_year=1980)")
+
+
+def validate_testui_profile() -> bool:
+    """
+    Validate __testui__/person.json has birth_year=1980.
+    Called by G19 before Playwright runs. Returns True if valid.
+    """
+    path = os.path.join(_pdir(_TESTUI_PROFILE), "person.json")
+    if not os.path.isfile(path):
+        return False
+    try:
+        with open(path) as f:
+            return int(json.load(f).get("birth_year", 0)) == 1980
+    except Exception:
+        return False
+
+
+# ===========================================================================
 # CONFIG LOADER + RUNNER
 # ===========================================================================
 
@@ -3779,16 +4209,49 @@ def group19_playwright(paths: int):
         checks.append((PASS, "G19: SKIPPED — server not reachable on :8000", ""))
         return "G19", "Playwright UI smoke tests (skipped — server offline)", checks, time.time() - t0
 
-    # Ensure __system__ profile exists (used by Python test suite)
+    # Ensure __system__ base profile exists (Python test suite G1-G18, G20-G24)
     seed_system_profile(force=False)
-    # Prune Test profile versions before Playwright writes more (prevents MAX_VERSIONS failure)
-    try:
-        import urllib.request as _ur2
-        req = urllib.request.Request("http://localhost:8000/profile/Test/versions?keep=10",
-                                      method="DELETE")
-        _ur2.urlopen(req, timeout=5)
-    except Exception:
-        pass
+
+    # Validate __testui__ profile — auto-reset if missing or contaminated.
+    # __testui__ holds the canonical fixture data. Playwright clones it into
+    # "PlaywrightTest" (a fresh visible profile) at test start, deletes after.
+    if not validate_testui_profile():
+        print("  ⚠  G19: __testui__ missing or contaminated — auto-resetting...")
+        _seed_testui_profile(force=True)
+    checks.append(chk("G19a: __testui__/person.json has birth_year=1980",
+                       validate_testui_profile(),
+                       "__testui__ contaminated — run --reset-system-profiles to fix"))
+
+    # Create fresh PlaywrightTest profile by cloning __testui__.
+    # This gives Playwright a real visible profile it can freely edit/delete.
+    # We delete it after tests complete (cleanup below).
+    _pw_profile = "PlaywrightTest"
+    import urllib.request as _ur2, urllib.error as _ue2
+    def _api(path, method="POST", body=None):
+        req = urllib.request.Request(
+            f"http://localhost:8000{path}", method=method,
+            headers={"Content-Type": "application/json"},
+            data=json.dumps(body).encode() if body else None,
+        )
+        try:
+            with _ur2.urlopen(req, timeout=10) as r:
+                return json.loads(r.read())
+        except Exception as e:
+            return {"error": str(e)}
+
+    # Delete any leftover PlaywrightTest from a previous failed run
+    _api(f"/profiles/delete", "POST", {"profile": _pw_profile})
+
+    # Clone __testui__ → PlaywrightTest
+    _create_result = _api("/profiles/create", "POST", {
+        "name": _pw_profile, "source": _TESTUI_PROFILE
+    })
+    checks.append(chk("G19b: PlaywrightTest profile created from __testui__",
+                       _create_result.get("ok") is True,
+                       str(_create_result)))
+
+    # Clear any old reports from PlaywrightTest to start clean
+    _api(f"/reports/clear", "POST", {"profile": _pw_profile})
 
     result = subprocess.run(
         ["npx", "playwright", "test", "--config=playwright.config.ts", "--reporter=line"],
@@ -3796,6 +4259,14 @@ def group19_playwright(paths: int):
     )
     elapsed = time.time() - t0
     output = result.stdout + result.stderr
+
+    # Clean up PlaywrightTest profile — always, regardless of test outcome
+    _cleanup = _api(f"/profiles/delete", "POST", {"profile": _pw_profile})
+    if _cleanup.get("ok"):
+        print(f"  [G19] PlaywrightTest profile deleted (cleanup)")
+    else:
+        print(f"  [G19] WARNING: could not delete PlaywrightTest: {_cleanup}")
+
     passed = failed = 0
     for line in output.splitlines():
         if " passed" in line:
@@ -3804,20 +4275,29 @@ def group19_playwright(paths: int):
         if " failed" in line:
             import re; m = re.search(r"(\d+) failed", line)
             if m: failed = int(m.group(1))
+
+    # Parse individual Playwright test results (✓/✘ lines)
+    # Note: checks already has G19a and G19b pre-checks from above.
+    # Track playwright-specific results separately so the "if not pw_checks" guard
+    # works correctly — otherwise G19a/G19b prevent the fallback from ever firing.
+    pw_checks = []
     for line in output.splitlines():
         line = line.strip()
-        if line.startswith("\u2713") or line.startswith("\u2718") or line.startswith("\u2713") or "\u2713" in line[:3] or "\u2718" in line[:3]:
-            pass
-        if line.startswith("\u2713") or line.startswith("\u2718"):
-            name_part = line.split("\u203a")[-1].strip() if "\u203a" in line else line[2:].strip()
-            status = PASS if line.startswith("\u2713") else FAIL
-            checks.append((status, f"G19: {name_part}", ""))
-    if not checks:
+        if line.startswith("✓") or line.startswith("✘"):
+            name_part = line.split("›")[-1].strip() if "›" in line else line[2:].strip()
+            status = PASS if line.startswith("✓") else FAIL
+            pw_checks.append((status, f"G19: {name_part}", ""))
+
+    if pw_checks:
+        checks.extend(pw_checks)
+    else:
+        # Fallback: no individual lines parsed — add single pass/fail summary
         if result.returncode == 0:
             checks.append((PASS, f"G19: Playwright suite passed ({passed} tests)", ""))
         else:
             checks.append((FAIL, "G19: Playwright suite failed",
                            output[-500:] if len(output) > 500 else output))
+
     return "G19", f"Playwright UI smoke tests ({passed} passed, {failed} failed)", checks, elapsed
 
 
@@ -4766,7 +5246,9 @@ def main():
     ap.add_argument("--reset-manifest", action="store_true",
                     help="Recompute manifest.lock self-CRC and exit")
     ap.add_argument("--reset-system-profile", action="store_true",
-                    help="Re-seed __system__ profile from pinned fixtures and exit")
+                    help="Re-seed __system__ (base) profile from pinned fixtures and exit")
+    ap.add_argument("--reset-system-profiles", action="store_true",
+                    help="Re-seed ALL __system__* profiles + __testui__ and exit. Run --reset-manifest afterwards.")
     ap.add_argument("--ensure-system-profile", action="store_true",
                     help="Seed __system__ profile if missing, then continue")
     ap.add_argument("--paths",     type=int, default=200,   help="MC paths (default: 200)")
@@ -4793,21 +5275,54 @@ def main():
             with open(lock_path) as f:
                 data = _j.load(f)
             tracked = data.get("tracked", [])
+
+            # Compute actual SHA256 short hash for every tracked file.
+            # manifest.lock is intentionally NOT in tracked (can't hash itself).
+            hashes = {}
+            missing = []
+            for fname in tracked:
+                fpath = os.path.join(APP_ROOT, fname)
+                if os.path.isfile(fpath):
+                    h = _h.sha256()
+                    with open(fpath, "rb") as fh:
+                        for chunk in iter(lambda: fh.read(65536), b""):
+                            h.update(chunk)
+                    hashes[fname] = h.hexdigest()[:16]
+                else:
+                    missing.append(fname)
+
+            data["hashes"] = hashes
+            # Recompute _self_crc (integrity check for the tracked list itself)
             data["_self_crc"] = _h.sha256(
                 _j.dumps(tracked, sort_keys=True).encode()
             ).hexdigest()[:16]
+
             with open(lock_path, "w") as f:
                 _j.dump(data, f, indent=2)
-            print(f"  ✅ manifest.lock updated: {len(tracked)} files tracked, _self_crc={data['_self_crc']}")
+
+            print(f"  ✅ manifest.lock updated: {len(hashes)} files pinned, _self_crc={data['_self_crc']}")
+            if missing:
+                print(f"  ⚠  {len(missing)} file(s) not found on disk (skipped):")
+                for m in missing:
+                    print(f"     {m}")
+            else:
+                print(f"  ✅ All {len(hashes)} tracked files present and hashed")
+            print()
+            print("  Restart server — startup will verify these pinned hashes.")
         except Exception as e:
             print(f"  ❌ manifest.lock update failed: {e}")
         sys.exit(0)
 
     # Handle system profile management commands
     if args.reset_system_profile:
-        print("\n  Resetting __system__ profile from pinned fixtures...")
+        print("\n  Resetting __system__ (base) profile from pinned fixtures...")
         seed_system_profile(force=True)
-        print("  Done. Re-run tests to use updated fixtures.")
+        print("  Done.")
+        sys.exit(0)
+
+    if args.reset_system_profiles:
+        print("\n  Resetting ALL __system__* profiles + __testui__ from pinned fixtures...")
+        seed_system_profiles(force=True)
         sys.exit(0)
 
     if args.ensure_system_profile or args.comprehensive_test:
