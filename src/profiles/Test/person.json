@@ -1,6 +1,6 @@
 {
   "current_age": "compute",
-  "birth_year": 1980,
+  "birth_year": 1967,
   "assumed_death_age": 88,
   "filing_status": "MFJ",
   "spouse": {
@@ -49,13 +49,16 @@
     "window_years": [
       "now-75"
     ],
-    "keepit_below_max_marginal_fed_rate": "fill the bracket",
+    "keepit_below_max_marginal_fed_rate": "32%",
     "avoid_niit": true,
     "rmd_assist": "convert",
     "tax_payment_source": "BROKERAGE",
     "irmaa_guard": {
       "enabled": false
-    }
+    },
+    "recommended_strategy": "aggressive",
+    "annual_conversion_k": 83,
+    "_optimizer_updated": "2026-03-24"
   },
   "state": "California",
   "rmd_table": "uniform_lifetime",
@@ -105,6 +108,21 @@
       "include_heir_scenario": "true = model 10-year forced liquidation for non-spouse beneficiaries (SECURE Act 2.0). Uses beneficiaries.contingent for heir income profiles.",
       "irmaa_sensitivity": "low = IRMAA flagged but does not tip recommendation (appropriate when IRA timebomb savings dwarf IRMAA cost). high = IRMAA cliff treated as near-hard constraint (appropriate for moderate IRA).",
       "window_years": "Number of years in the conversion window. Defaults to min(29, 75 - current_age). Conversions run for this many years starting from current_age."
+    },
+    "social_security": {
+      "self_benefit_monthly": "Gross monthly SS benefit at full retirement age (FRA). Simulator adjusts for early/delayed collection.",
+      "self_start_age": "Age to start collecting: 62=early (reduced ~25-30%), 67=full retirement age, 70=delayed (+24%). Must be 62-70.",
+      "spouse_benefit_monthly": "Spouse gross monthly SS benefit at their FRA.",
+      "spouse_start_age": "Age spouse starts collecting SS.",
+      "exclude_from_plan": "true = zero out SS income entirely. Use to test if portfolio alone is sufficient without SS."
     }
+  },
+  "social_security": {
+    "self_benefit_monthly": 2500,
+    "self_start_age": 67,
+    "spouse_benefit_monthly": 1800,
+    "spouse_start_age": 67,
+    "exclude_from_plan": false,
+    "_note": "SS benefit at full retirement age. start_age: 62=early(reduced), 67=full, 70=delayed(+24%). exclude_from_plan=true tests portfolio-only sufficiency."
   }
 }
