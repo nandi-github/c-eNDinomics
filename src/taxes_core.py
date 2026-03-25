@@ -19,21 +19,26 @@ def compute_annual_taxes(
     cap_gains_cur: float,
     tax_cfg: Dict[str, any],
     ytd_income_nom: float,
+    w2_income_cur: float = 0.0,
 ) -> Tuple[float, float, float, float]:
     """
     Compute annual taxes in CURRENT USD given:
       - ordinary income (wages, interest, rental, other + RMD + conversions),
       - qualified dividends,
       - capital gains (realized from withdrawals/rebalancing/conversions),
+      - w2_income_cur: W2 wages for this year (for Additional Medicare Tax 0.9%)
     and a given year-to-date income figure (ytd_income_nom) for bracket calculations.
 
-    Uses the same logic as the legacy simulator, but wrapped in one function.
-
     Returns:
-        taxes_fed_cur:     federal income + CG taxes
+        taxes_fed_cur:     federal income + CG taxes + Additional Medicare Tax (if applicable)
         taxes_state_cur:   state income + CG taxes
-        taxes_niit_cur:    net investment income tax
+        taxes_niit_cur:    net investment income tax (3.8% on NII above NIIT threshold)
         taxes_excise_cur:  state CG excise tax (if configured)
+
+    Additional Medicare Tax (IRC §3101(b)(2)):
+        0.9% on W2 wages above $200K (single) / $250K (MFJ).
+        Distinct from NIIT — applies to earned wages, not investment income.
+        Only computed when w2_income_cur > 0.
     """
 
     # Extract needed config from tax_cfg
@@ -117,6 +122,16 @@ def compute_annual_taxes(
     taxes_state_cur = taxes_state_div_cur + taxes_state_gains_cur
     taxes_niit_cur = taxes_niit_div_cur + taxes_niit_gains_cur
 
+    # ── Additional Medicare Tax (0.9% on wages above threshold) ──────────────
+    # IRC §3101(b)(2). Applies to W2 wages above $200K (single) / $250K (MFJ).
+    # Distinct from NIIT (3.8%) which applies to net investment income.
+    # Uses ADDL_MEDICARE_THRESH from tax_cfg; falls back to MFJ default $250K.
+    if w2_income_cur > 0.0:
+        _addl_med_thresh = float(tax_cfg.get("ADDL_MEDICARE_THRESH", 250_000.0))
+        _addl_med_rate   = float(tax_cfg.get("ADDL_MEDICARE_RATE",   0.009))
+        _addl_med_tax    = max(0.0, float(w2_income_cur) - _addl_med_thresh) * _addl_med_rate
+        taxes_fed_cur   += _addl_med_tax
+
     return taxes_fed_cur, taxes_state_cur, taxes_niit_cur, taxes_excise_cur
 
 
@@ -127,11 +142,15 @@ def compute_annual_taxes_paths(
     cap_gains_cur_paths: np.ndarray,        # shape (paths,)
     tax_cfg: Dict[str, any],
     ytd_income_nom_paths: np.ndarray,       # shape (paths,)
+    w2_income_cur_paths: np.ndarray = None, # shape (paths,) — for Additional Medicare Tax
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
-    Vectorized wrapper around compute_annual_taxes for one year:
-    takes per-path arrays of current USD incomes and returns per-path arrays
+    Vectorized wrapper around compute_annual_taxes for one year.
+    Takes per-path arrays of current USD incomes and returns per-path arrays
     of fed, state, NIIT, excise taxes (current USD).
+
+    w2_income_cur_paths: optional W2 wages per path for Additional Medicare Tax (0.9%).
+    When None or all-zero, AMT is not computed (backward compatible).
     """
     ordinary_income_cur_paths = np.asarray(ordinary_income_cur_paths, dtype=float)
     qual_div_cur_paths = np.asarray(qual_div_cur_paths, dtype=float)
@@ -139,6 +158,12 @@ def compute_annual_taxes_paths(
     ytd_income_nom_paths = np.asarray(ytd_income_nom_paths, dtype=float)
 
     paths = ordinary_income_cur_paths.shape[0]
+
+    # Handle optional w2 array — default to zeros (no AMT) for backward compatibility
+    if w2_income_cur_paths is None:
+        w2_income_cur_paths = np.zeros(paths, dtype=float)
+    else:
+        w2_income_cur_paths = np.asarray(w2_income_cur_paths, dtype=float)
 
     taxes_fed_cur_paths = np.zeros(paths, dtype=float)
     taxes_state_cur_paths = np.zeros(paths, dtype=float)
@@ -152,6 +177,7 @@ def compute_annual_taxes_paths(
             cap_gains_cur=float(cap_gains_cur_paths[p]),
             tax_cfg=tax_cfg,
             ytd_income_nom=float(ytd_income_nom_paths[p]),
+            w2_income_cur=float(w2_income_cur_paths[p]),
         )
 
     return taxes_fed_cur_paths, taxes_state_cur_paths, taxes_niit_cur_paths, taxes_excise_cur_paths

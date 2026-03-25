@@ -2,14 +2,17 @@
   "_comment": "Source file integrity manifest. Startup reads this and verifies hashes for all files in the hashes dict. Server REFUSES TO START if any pinned file does not match. Claude ships this pre-populated \u2014 no manual steps required. Copy all Claude-provided files + this manifest.lock, then restart.",
   "_workflow": "1. Copy all Claude-provided files (including this manifest.lock). 2. Restart server. Done.",
   "_self_crc_field": "SHA256 of the tracked list (JSON, sorted keys). Verified at startup to detect manifest.lock corruption.",
-  "_self_crc": "0afbd0974d419c4b",
+  "_self_crc": "9fe104fd720e286c",
   "hashes": {
-    "api.py": "b8a58a1794099826",
-    "test_flags.py": "7c7845717a312064",
+    "api.py": "f977353259f89a1c",
+    "test_flags.py": "34ad97535469ffe7",
     "ui/tests/smoke.spec.ts": "f92d2bc58b1f1099",
     "ui/tests/global-setup.ts": "16b4790e640b153e",
     "ui/tests/global-teardown.ts": "b49600b2b2430ec2",
-    "ui/playwright.config.ts": "b4d013b46bf7ddb4"
+    "ui/playwright.config.ts": "b4d013b46bf7ddb4",
+    "roth_optimizer.py": "c98f14dbe9019ee3",
+    "ui/src/App.tsx": "190fb24fd5d1c694",
+    "taxes_core.py": "ef276bce9b4992b7"
   },
   "tracked": [
     "api.py",
@@ -43,6 +46,7 @@
     "profiles/default/allocation_yearly.json",
     "profiles/default/inflation_yearly.json",
     "profiles/default/shocks_yearly.json",
-    "profiles/default/economic.json"
+    "profiles/default/economic.json",
+    "taxes_core.py"
   ]
 }

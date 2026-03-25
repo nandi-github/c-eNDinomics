@@ -3168,7 +3168,7 @@ const App: React.FC = () => {
                             {R.current_marginal_rate < R.betr_self_mfj ? "✓ Converting now is optimal" : "✗ Deferring may be better"}
                           </span>
                         </div>
-                        {/* Situation insights */}
+                        {/* Situation insights — generated from structured data fields, always accurate */}
                         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                           {[
                             { ok: false, text: `IRA timebomb ${R.timebomb_severity}: forced RMDs of ${fmtM(R.projected_rmd_year1)}/yr will push into ${(R.future_rate_self_mfj*100).toFixed(0)}% bracket regardless of other choices` },
@@ -3182,12 +3182,6 @@ const App: React.FC = () => {
                                 {item.ok ? "✓" : "⚠"}
                               </span>
                               <span style={{ color: "#374151" }}>{item.text}</span>
-                            </div>
-                          ))}
-                          {R.warnings.map((w, i) => (
-                            <div key={`w${i}`} style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "flex-start" }}>
-                              <span style={{ color: "#b91c1c", flexShrink: 0 }}>⚠</span>
-                              <span style={{ color: "#374151" }}>{w}</span>
                             </div>
                           ))}
                         </div>
@@ -3335,12 +3329,22 @@ Re-run simulation to see impact.`)) return;
                       </div>
                       <div style={{ padding: "10px 14px" }}>
                         {/* Key metrics */}
-                        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+                        {(() => {
+                          const selfSav = R.savings_matrix[rec]?.self_mfj ?? 0;
+                          const heirSav = R.savings_matrix[rec]?.heir_high ?? 0;
+                          const isHeirDriven = (R as any).heir_driven_recommendation === true
+                            || (selfSav <= 0 && heirSav > 0);
+                          return (<>
+                          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: isHeirDriven ? 6 : 12 }}>
                           {[
                             { label: "Annual conversion", value: fmtM(R.strategies[rec]?.annual_conversion ?? 0), sub: `${R.strategies[rec]?.bracket_filled ?? ""} bracket`, color: "#1e40af", bg: "#dbeafe" },
                             { label: "Tax cost yr 1",     value: fmtM(R.strategies[rec]?.tax_cost_year1 ?? 0),   sub: `${((R.strategies[rec]?.effective_rate ?? 0)*100).toFixed(1)}% effective rate`, color: "#374151", bg: "#f3f4f6" },
-                            { label: "Self savings",      value: `+${fmtM(R.savings_matrix[rec]?.self_mfj ?? 0)}`,  sub: "vs doing nothing", color: "#15803d", bg: "#d5e8d4" },
-                            { label: "Heir savings",      value: `+${fmtM(R.savings_matrix[rec]?.heir_high ?? 0)}`, sub: "10yr liquidation avoided", color: "#15803d", bg: "#d5e8d4" },
+                            { label: "Self savings",
+                              value: selfSav > 0 ? `+${fmtM(selfSav)}` : "—",
+                              sub: isHeirDriven ? "heir savings drive this" : "vs doing nothing",
+                              color: selfSav > 0 ? "#15803d" : "#6b7280",
+                              bg:    selfSav > 0 ? "#d5e8d4" : "#f3f4f6" },
+                            { label: "Heir savings",      value: `+${fmtM(heirSav)}`, sub: "10yr liquidation avoided", color: "#15803d", bg: "#d5e8d4" },
                           ].map(({ label, value, sub, color, bg }) => (
                             <div key={label} style={{ flex: "1 1 130px", background: bg,
                               borderRadius: 8, padding: "8px 12px", border: `1px solid ${color}33` }}>
@@ -3349,7 +3353,19 @@ Re-run simulation to see impact.`)) return;
                               <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2 }}>{sub}</div>
                             </div>
                           ))}
-                        </div>
+                          </div>
+                          {isHeirDriven && (
+                            <div style={{ fontSize: 11, color: "#7a5c00", background: "#fffbeb",
+                              border: "1px solid #fde68a", borderRadius: 6, padding: "5px 10px",
+                              marginBottom: 12 }}>
+                              ★ Converting at {((R.strategies[rec]?.effective_rate ?? 0)*100).toFixed(1)}% effective now
+                              vs {(R.future_rate_self_mfj*100).toFixed(0)}% future self rate — small self benefit,
+                              but heirs face {(R.future_rate_heir_high*100).toFixed(0)}% on forced liquidation.
+                              Heir savings of {fmtM(heirSav)} drive this recommendation.
+                            </div>
+                          )}
+                          </>);
+                        })()}
 
                         {/* Why this strategy — contextual insights */}
                         <div style={{ display: "flex", flexDirection: "column", gap: 4, marginBottom: 12 }}>
@@ -3363,15 +3379,34 @@ Re-run simulation to see impact.`)) return;
                           </div>
                           {/* Why not the others */}
                           {strategies.filter(s => s !== rec).map(strat => {
-                            const sav      = R.savings_matrix[strat]?.self_mfj ?? 0;
-                            const recSav   = R.savings_matrix[rec]?.self_mfj ?? 0;
-                            const diff     = recSav - sav;
+                            const recSelfSav = R.savings_matrix[rec]?.self_mfj ?? 0;
+                            const recHeirSav = R.savings_matrix[rec]?.heir_high ?? 0;
+                            const isHeirDriven = recSelfSav <= 0 && recHeirSav > 0;
                             const irmaaHit = (R.strategies[strat]?.irmaa_annual_delta ?? 0) > 0;
-                            const note     = strat === "maximum"
-                              ? `${irmaaHit ? `triggers IRMAA (+${fmtM(R.strategies[strat]?.irmaa_annual_delta ?? 0)}/yr Medicare premium), ` : ""}leaves ${fmtM(Math.abs(sav - recSav))} ${sav > recSav ? "more" : "less"} than ${rec}`
-                              : sav < recSav
-                                ? `leaves ${fmtM(diff)} on the table vs ${rec}`
-                                : `saves ${fmtM(sav - recSav)} more but at higher tax cost/yr`;
+
+                            let note: string;
+                            if (strat === "maximum") {
+                              const selfDiff = Math.abs((R.savings_matrix[strat]?.self_mfj ?? 0) - recSelfSav);
+                              note = `${irmaaHit ? `triggers IRMAA (+${fmtM(R.strategies[strat]?.irmaa_annual_delta ?? 0)}/yr Medicare premium), ` : ""}heirs save ${fmtM(R.savings_matrix[strat]?.heir_high ?? 0)} — ${fmtM(Math.abs((R.savings_matrix[strat]?.heir_high ?? 0) - recHeirSav))} ${(R.savings_matrix[strat]?.heir_high ?? 0) >= recHeirSav ? "more" : "less"} heir savings than ${stratLabels[rec]}`;
+                            } else if (isHeirDriven) {
+                              // Rec is heir-driven — compare on heir savings, not self savings
+                              const stratHeirSav = R.savings_matrix[strat]?.heir_high ?? 0;
+                              const stratSelfSav = R.savings_matrix[strat]?.self_mfj ?? 0;
+                              const heirDiff = recHeirSav - stratHeirSav;
+                              if (heirDiff > 0) {
+                                note = stratSelfSav > 0
+                                  ? `saves ${fmtM(stratSelfSav)} more for you personally, but leaves ${fmtM(heirDiff)} less in heir savings`
+                                  : `leaves ${fmtM(heirDiff)} less in heir savings`;
+                              } else {
+                                note = `saves ${fmtM(Math.abs(heirDiff))} more in heir savings but at higher tax cost/yr`;
+                              }
+                            } else {
+                              const sav  = R.savings_matrix[strat]?.self_mfj ?? 0;
+                              const diff = recSelfSav - sav;
+                              note = sav < recSelfSav
+                                ? `leaves ${fmtM(diff)} on the table vs ${stratLabels[rec]}`
+                                : `saves ${fmtM(sav - recSelfSav)} more for you but at higher tax cost/yr`;
+                            }
                             return (
                               <div key={strat} style={{ fontSize: 12, display: "flex", gap: 6 }}>
                                 <span style={{ color: "#9ca3af", flexShrink: 0 }}>↳</span>
@@ -3555,21 +3590,14 @@ Re-run simulation to see impact.`)) return;
                       </div>
                     </div>
 
-                    {/* IRMAA notes */}
-                    {R.strategies[rec]?.irmaa_notes?.length > 0 && (
-                      <div style={{ fontSize: 12, color: "#7a5c00", background: "#fff2cc",
-                        borderRadius: 6, padding: "6px 12px", marginBottom: 12,
-                        border: "1px solid #f0c040" }}>
-                        <strong>IRMAA:</strong>{" "}
-                        {R.strategies[rec].irmaa_notes[0]}
-                      </div>
-                    )}
-
-                    {/* Warnings */}
-                    {R.warnings.map((w, i) => (
-                      <div key={i} style={{ fontSize: 12, color: "#b91c1c", background: "#fce4d6",
+                    {/* Edge-case warnings (deferring is better, missing beneficiaries, etc.)
+                        IRA timebomb and heir rate warnings are shown as bullets above,
+                        generated directly from structured data fields. Only edge cases
+                        not derivable from data appear here. */}
+                    {R.warnings.filter(w => w.length > 0).map((w, i) => (
+                      <div key={i} style={{ fontSize: 12, color: "#92400e", background: "#fffbeb",
                         borderRadius: 6, padding: "6px 12px", marginBottom: 8,
-                        border: "1px solid #f4b8a8" }}>
+                        border: "1px solid #fde68a" }}>
                         ⚠ {w}
                       </div>
                     ))}

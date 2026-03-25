@@ -1000,28 +1000,19 @@ def optimize_roth_conversion_full(
     }
 
     # ── Global warnings ───────────────────────────────────────────────────────
+    # IMPORTANT: Do NOT add IRA timebomb or heir rate warnings here.
+    # App.tsx generates those bullets directly from structured data fields
+    # (projected_rmd_year1, future_rate_self_mfj, future_rate_heir_high) which
+    # are always accurate. Adding them here too causes duplicates and can
+    # contradict the App.tsx bullets if the two sources use different values.
+    # Only add warnings for edge cases that App.tsx cannot derive from data fields.
     warnings = []
     _deferring_better = (betr_self > 0 and current_marg > betr_self + 0.01)
-
-    if severity in ("CRITICAL", "SEVERE"):
-        if _deferring_better:
-            warnings.append(
-                f"IRA Timebomb {severity}: projected RMD yr1 ~${int(projected_rmd_y1):,} "
-                f"forces 37% bracket regardless of other choices. "
-                f"However your current {int(current_marg*100)}% rate exceeds BETR {int(betr_self*100)}% — "
-                f"defer conversions until retirement when your rate drops, then convert aggressively."
-            )
-        else:
-            warnings.append(
-                f"IRA Timebomb {severity}: projected RMD yr1 ~${int(projected_rmd_y1):,} "
-                f"forces 37% bracket regardless of other choices. Convert aggressively now."
-            )
-    if include_heir and fr_heir_high >= 0.37:
-        heir_strat = "betr_optimal" if "betr_optimal" in strategies_out else "aggressive"
-        heir_sav   = strategies_out[heir_strat]["scenarios"]["heir_high"]["lifetime_savings"]
+    if _deferring_better:
         warnings.append(
-            f"High-earning heir faces {int(fr_heir_high*100)}% rate on 10yr forced liquidation. "
-            f"Aggressive strategy saves heirs ~${heir_sav:,}."
+            f"Current rate {int(current_marg*100)}% exceeds BETR {int(betr_self*100)}% — "
+            f"defer conversions while working. At retirement your rate drops and conversion "
+            f"becomes strongly optimal."
         )
     if not non_spouse_heirs:
         warnings.append(
@@ -1062,6 +1053,12 @@ def optimize_roth_conversion_full(
         # Recommendation
         "recommended_strategy":        rec_name,
         "recommended_reason":          rec_reason,
+        # Signals that self savings are ≤0 but heir savings justify the recommendation.
+        # App.tsx uses this to reframe the "Self savings" metric card appropriately.
+        "heir_driven_recommendation":  (
+            (savings_matrix.get(rec_name, {}).get("self_mfj", 0) <= 0) and
+            (savings_matrix.get(rec_name, {}).get("heir_high", 0) > 0)
+        ),
 
         # Optimization conflicts — settings blocking better outcomes
         "conflicts": _compute_conflicts(

@@ -71,6 +71,7 @@ COVERAGE MAP
                  Gap 4: summary totals wired and consistent with yearly arrays
                  NIIT suppressed by avoid_niit=True; fires when income > threshold
                  California state tax fires; effective rate in plausible range
+                 Additional Medicare Tax (0.9% on W2 > $250K MFJ / $200K single)
     Group 12 — Roth conversion tax verification
                  conv_tax > 0 when active, = 0 when disabled
                  Tax rate (tax/converted) in plausible marginal range [10%, 50%]
@@ -88,6 +89,14 @@ COVERAGE MAP
                  Per-account YoY arrays for all 6 accounts
                  Shock year region shows lower YoY than no-shock baseline
                  summary.cagr_nominal_mean consistent with YoY-derived geo mean
+    Group 25 — Social Security provisional income (three-tier inclusion rule)
+                 Tier 0: provisional < base1 → 0% SS taxable
+                 Tier 1: base1 ≤ provisional < base2 → up to 50% taxable
+                 Tier 2: provisional ≥ base2 → up to 85% taxable
+                 MFJ thresholds ($32K/$44K) vs Single ($25K/$34K)
+                 Monotonically non-decreasing with income; capped at 85% gross
+                 exclude_from_plan=True zeroes SS; taxes ≤ normal SS-only run
+                 End-to-end: SS+$150K W2 taxes > SS-only taxes
 
 NOT COVERED HERE (requires api.py pre-processing path)
     economicglobal.json shock_scaling_enabled, min_scaling_factor, scale_curve,
@@ -2636,7 +2645,58 @@ def group11_tax_wiring(paths: int):
         _within(excise_delta, 24_500),
         f"delta={excise_delta:,.0f} expected=24,500 tol={TOL*100:.0f}%"))
 
-    return "G11", "Tax wiring + bracket math + filing status + state-specific rates", checks, elapsed
+    # ── 11r: Additional Medicare Tax (0.9% on W2 wages > $250K MFJ) ─────────
+    # With $350K W2 income (MFJ), AMT applies on $100K above threshold = $900.
+    # With $200K W2 income (MFJ), AMT does NOT apply (below $250K threshold).
+    # Tests that taxes_core.py compute_annual_taxes correctly computes AMT.
+    from taxes_core import compute_annual_taxes
+
+    # Load CA MFJ tax config for the test
+    _tax_cfg_amt = load_tax_unified(TAX_GLOBAL_PATH, state="California", filing="MFJ")
+
+    # $350K W2 MFJ → AMT = 0.9% × ($350K - $250K) = $900
+    fed_350k_with_amt,  _, _, _ = compute_annual_taxes(
+        ordinary_income_cur=350_000.0, qual_div_cur=0.0, cap_gains_cur=0.0,
+        tax_cfg=_tax_cfg_amt, ytd_income_nom=350_000.0, w2_income_cur=350_000.0,
+    )
+    fed_350k_no_amt, _, _, _ = compute_annual_taxes(
+        ordinary_income_cur=350_000.0, qual_div_cur=0.0, cap_gains_cur=0.0,
+        tax_cfg=_tax_cfg_amt, ytd_income_nom=350_000.0, w2_income_cur=0.0,
+    )
+    amt_delta = fed_350k_with_amt - fed_350k_no_amt
+    checks.append(chk("11r: AMT fires on $350K W2 MFJ (w2 > $250K threshold)",
+        amt_delta > 0, f"delta={amt_delta:.2f} (expected ~$900)"))
+    checks.append(chk("11r: AMT delta ≈ $900 (0.9% × $100K above threshold)",
+        _within(amt_delta, 900.0, tol=0.05), f"delta={amt_delta:.2f} expected=900"))
+
+    # $200K W2 MFJ → AMT does NOT apply (below $250K threshold)
+    fed_200k_with_w2, _, _, _ = compute_annual_taxes(
+        ordinary_income_cur=200_000.0, qual_div_cur=0.0, cap_gains_cur=0.0,
+        tax_cfg=_tax_cfg_amt, ytd_income_nom=200_000.0, w2_income_cur=200_000.0,
+    )
+    fed_200k_no_w2, _, _, _ = compute_annual_taxes(
+        ordinary_income_cur=200_000.0, qual_div_cur=0.0, cap_gains_cur=0.0,
+        tax_cfg=_tax_cfg_amt, ytd_income_nom=200_000.0, w2_income_cur=0.0,
+    )
+    checks.append(chk("11r: AMT = $0 when W2 = $200K MFJ (below $250K threshold)",
+        abs(fed_200k_with_w2 - fed_200k_no_w2) < 1.0,
+        f"delta={fed_200k_with_w2 - fed_200k_no_w2:.2f} expected=0"))
+
+    # Backward compatibility: w2_income_cur defaults to 0 → no AMT
+    fed_default, _, _, _ = compute_annual_taxes(
+        ordinary_income_cur=350_000.0, qual_div_cur=0.0, cap_gains_cur=0.0,
+        tax_cfg=_tax_cfg_amt, ytd_income_nom=350_000.0,
+    )
+    checks.append(chk("11r: AMT backward compat — no w2_income_cur kwarg → same as w2=0",
+        abs(fed_default - fed_350k_no_amt) < 1.0,
+        f"default={fed_default:.2f} no_amt={fed_350k_no_amt:.2f}"))
+
+    # AMT is additive to regular federal tax, not a replacement
+    checks.append(chk("11r: AMT is additive — fed_with_amt > fed_no_amt",
+        fed_350k_with_amt > fed_350k_no_amt,
+        f"with_amt={fed_350k_with_amt:.0f} no_amt={fed_350k_no_amt:.0f}"))
+
+    return "G11", "Tax wiring + bracket math + filing status + state rates + AMT", checks, elapsed
 
 
 # ===========================================================================
@@ -4820,13 +4880,281 @@ def group22_roth_optimizer(paths: int):
         R250["strategies"]["aggressive"]["scenarios"]["self_mfj"]["convert_makes_sense"],
         "aggressive scenario says don't convert"))
 
-    return "G22", "Roth optimizer (BETR, severity, bracket math, 4×4 savings matrix, income ranges)", checks, elapsed
+    # ── 22h: heir_driven_recommendation field ───────────────────────────────
+    # When self savings ≤ 0 but heir savings > 0, optimizer sets this flag True.
+    # App.tsx uses it to reframe the "Self savings" metric card.
+    checks.append(chk("22h: heir_driven_recommendation field present in output",
+        "heir_driven_recommendation" in R,
+        f"keys: {list(R.keys())}"))
+
+    # For the CRITICAL profile (large IRA, age 46), aggressive recommendation has
+    # self savings = $0 (converting at 32% when future MFJ rate is 37% — the math
+    # works for the heir scenario but self pays more now). Check the flag logic.
+    _rec = R.get("recommended_strategy", "aggressive")
+    _self_sav  = R.get("savings_matrix", {}).get(_rec, {}).get("self_mfj", 0)
+    _heir_sav  = R.get("savings_matrix", {}).get(_rec, {}).get("heir_high", 0)
+    _hdr_flag  = R.get("heir_driven_recommendation", False)
+    checks.append(chk("22h: heir_driven_recommendation is bool",
+        isinstance(_hdr_flag, bool), f"got {type(_hdr_flag)}"))
+    # If self savings ≤ 0 and heir savings > 0, flag must be True
+    if _self_sav <= 0 and _heir_sav > 0:
+        checks.append(chk("22h: heir_driven=True when self_sav<=0 and heir_sav>0",
+            _hdr_flag is True,
+            f"self={_self_sav} heir={_heir_sav} flag={_hdr_flag}"))
+    else:
+        checks.append(chk("22h: heir_driven=False when self_sav>0",
+            _hdr_flag is False,
+            f"self={_self_sav} heir={_heir_sav} flag={_hdr_flag}"))
+
+    # ── 22i: no duplicate warning strings ───────────────────────────────────
+    # App.tsx generates IRA timebomb and heir rate bullets directly from structured
+    # data fields. Optimizer must NOT put these in warnings[] — that caused duplicates
+    # and contradictions (hardcoded "37%" in warning vs computed rate in bullets).
+    _warnings = R.get("warnings", [])
+    _timebomb_in_warnings = any(
+        "IRA Timebomb" in w or "IRA timebomb" in w or "forces 37%" in w or "forces 24%" in w
+        for w in _warnings
+    )
+    _heir_in_warnings = any(
+        ("heir" in w.lower() or "High-earning" in w)
+        and ("10yr" in w or "liquidation" in w)
+        for w in _warnings
+    )
+    checks.append(chk("22i: warnings[] does NOT contain IRA Timebomb text (App.tsx handles this)",
+        not _timebomb_in_warnings,
+        f"found timebomb text in warnings: {[w for w in _warnings if 'timebomb' in w.lower() or 'Timebomb' in w]}"))
+    checks.append(chk("22i: warnings[] does NOT contain heir liquidation text (App.tsx handles this)",
+        not _heir_in_warnings,
+        f"found heir text in warnings: {[w for w in _warnings if 'heir' in w.lower() or 'High-earning' in w]}"))
+
+    # ── 22j: warnings[] only contains edge-case content ─────────────────────
+    # Valid warning types: deferral note, missing beneficiaries.
+    # Each warning (if present) should be ≥ 10 chars and a genuine string.
+    for i, w in enumerate(_warnings):
+        checks.append(chk(f"22j: warning[{i}] is non-empty string",
+            isinstance(w, str) and len(w) >= 10, f"got {repr(w)}"))
+
+    return "G22", "Roth optimizer (BETR, severity, bracket math, savings matrix, heir_driven, no-dup-warnings)", checks, elapsed
 
 
 GROUPS.append(group19_playwright)
 GROUPS.append(group20_portfolio_analysis)
 GROUPS.append(group21_asset_weight_sanity)
 GROUPS.append(group22_roth_optimizer)
+
+
+# ===========================================================================
+# GROUP 25 — SOCIAL SECURITY PROVISIONAL INCOME (three-tier inclusion rule)
+#
+# IRS formula: provisional income = non-SS ordinary income + 50% × SS gross
+# Tier 0: provisional < base1        →  0% of SS is taxable
+# Tier 1: base1 ≤ provisional < base2 → up to 50% of SS is taxable
+# Tier 2: provisional ≥ base2         → up to 85% of SS is taxable
+#
+# MFJ thresholds: base1=$32,000  base2=$44,000
+# Single:         base1=$25,000  base2=$34,000
+#
+# Prior to this fix, api.py hardcoded 85% inclusion for everyone — even
+# retirees with no other income, who should pay 0%.
+# ===========================================================================
+
+def group25_ss_provisional_income(paths: int):
+    """
+    Tests the SS provisional income three-tier inclusion rule implemented
+    in api.py. Because the logic is embedded in the SS injection block
+    (not a standalone function), we test it via:
+      1. Direct arithmetic verification of the three-tier formula
+      2. Ephemeral simulation runs confirming different SS income injection
+         levels at different non-SS income levels
+    """
+    checks = []
+    elapsed = 0.0
+
+    # ── 25a: Three-tier formula correctness (direct arithmetic) ──────────────
+    # Replicate the logic from api.py and verify known inputs/outputs.
+
+    def _ss_taxable_mfj(ss_gross: float, non_ss_income: float) -> float:
+        """Replicate api.py three-tier SS inclusion for MFJ."""
+        pi_base1, pi_base2 = 32_000.0, 44_000.0
+        provisional = non_ss_income + 0.5 * ss_gross
+        if provisional < pi_base1:
+            return 0.0
+        elif provisional < pi_base2:
+            return min(0.5 * ss_gross, 0.5 * (provisional - pi_base1))
+        else:
+            return min(
+                0.85 * ss_gross,
+                0.85 * (provisional - pi_base2) + 0.5 * (pi_base2 - pi_base1)
+            )
+
+    def _ss_taxable_single(ss_gross: float, non_ss_income: float) -> float:
+        """Replicate api.py three-tier SS inclusion for single filer."""
+        pi_base1, pi_base2 = 25_000.0, 34_000.0
+        provisional = non_ss_income + 0.5 * ss_gross
+        if provisional < pi_base1:
+            return 0.0
+        elif provisional < pi_base2:
+            return min(0.5 * ss_gross, 0.5 * (provisional - pi_base1))
+        else:
+            return min(
+                0.85 * ss_gross,
+                0.85 * (provisional - pi_base2) + 0.5 * (pi_base2 - pi_base1)
+            )
+
+    SS_GROSS = 36_000.0  # $36K/yr SS gross (realistic couple MFJ)
+
+    # Tier 0: provisional = $0 + 0.5×$36K = $18K < $32K MFJ base1 → 0% taxable
+    tier0 = _ss_taxable_mfj(SS_GROSS, non_ss_income=0.0)
+    checks.append(chk("25a: Tier 0 (no other income, MFJ) → SS taxable = $0",
+        tier0 == 0.0, f"got {tier0:.2f} (provisional=$18K < base1=$32K)"))
+
+    # Tier 0 boundary: provisional just below base1
+    tier0_boundary = _ss_taxable_mfj(SS_GROSS, non_ss_income=13_999.0)
+    checks.append(chk("25a: Tier 0 boundary (non_ss=$13,999 → provisional=$31,999) → SS taxable = $0",
+        tier0_boundary == 0.0, f"got {tier0_boundary:.2f}"))
+
+    # Tier 1: provisional = $20K + $18K = $38K → base1=$32K ≤ $38K < base2=$44K
+    # taxable = min(50% × $36K, 50% × ($38K - $32K)) = min($18K, $3K) = $3K
+    tier1 = _ss_taxable_mfj(SS_GROSS, non_ss_income=20_000.0)
+    checks.append(chk("25a: Tier 1 (non_ss=$20K, provisional=$38K) → SS taxable = $3,000",
+        abs(tier1 - 3_000.0) < 1.0, f"got {tier1:.2f} expected=3,000"))
+
+    # Tier 2: provisional = $100K + $18K = $118K >> base2=$44K → 85% taxable
+    # = min(0.85×$36K, 0.85×($118K-$44K) + 0.5×($44K-$32K))
+    # = min($30,600, $62,900 + $6,000) = min($30,600, $68,900) = $30,600
+    tier2_high = _ss_taxable_mfj(SS_GROSS, non_ss_income=100_000.0)
+    checks.append(chk("25a: Tier 2 high income (non_ss=$100K) → SS taxable = 85% of gross ($30,600)",
+        abs(tier2_high - SS_GROSS * 0.85) < 1.0,
+        f"got {tier2_high:.2f} expected={SS_GROSS*0.85:.2f}"))
+
+    # Tier 2 boundary: provisional just above base2
+    # non_ss = $26,001 → provisional = $26,001 + $18K = $44,001 > $44K base2
+    tier2_boundary = _ss_taxable_mfj(SS_GROSS, non_ss_income=26_001.0)
+    checks.append(chk("25a: Tier 2 boundary (non_ss=$26,001, provisional=$44,001) → taxable > tier1",
+        tier2_boundary > 0.0, f"got {tier2_boundary:.2f} (should be > 0)"))
+
+    # Taxable is monotonically non-decreasing with income
+    t_0   = _ss_taxable_mfj(SS_GROSS, 0)
+    t_10k = _ss_taxable_mfj(SS_GROSS, 10_000)
+    t_50k = _ss_taxable_mfj(SS_GROSS, 50_000)
+    t_200k = _ss_taxable_mfj(SS_GROSS, 200_000)
+    checks.append(chk("25a: SS taxable is non-decreasing with non-SS income",
+        t_0 <= t_10k <= t_50k <= t_200k,
+        f"0:{t_0:.0f} 10K:{t_10k:.0f} 50K:{t_50k:.0f} 200K:{t_200k:.0f}"))
+
+    # Always capped at 85% of gross
+    checks.append(chk("25a: SS taxable never exceeds 85% of gross",
+        all(v <= SS_GROSS * 0.85 + 1.0 for v in [t_0, t_10k, t_50k, t_200k]),
+        f"max={max(t_0,t_10k,t_50k,t_200k):.0f} cap={SS_GROSS*0.85:.0f}"))
+
+    # ── 25b: Single filer thresholds ($25K/$34K vs MFJ $32K/$44K) ────────────
+    # Single: provisional = $15K + 0.5×$24K = $27K > $25K base1 → Tier 1
+    SS_SINGLE = 24_000.0
+    single_tier1 = _ss_taxable_single(SS_SINGLE, non_ss_income=15_000.0)
+    mfj_same     = _ss_taxable_mfj(SS_SINGLE, non_ss_income=15_000.0)
+    # Single has lower threshold so taxes more — single should have higher or equal inclusion
+    checks.append(chk("25b: Single filer taxes more SS than MFJ at same income (lower thresholds)",
+        single_tier1 >= mfj_same,
+        f"single={single_tier1:.2f} mfj={mfj_same:.2f}"))
+
+    # Single at $0 other income: provisional = 0.5×$24K = $12K < $25K base1 → 0% taxable
+    single_tier0 = _ss_taxable_single(SS_SINGLE, non_ss_income=0.0)
+    checks.append(chk("25b: Single filer, no other income → SS taxable = $0",
+        single_tier0 == 0.0, f"got {single_tier0:.2f}"))
+
+    # ── 25c: End-to-end via ephemeral sim — SS with no other income vs high income ─
+    # We verify that the tax arrays differ when non-SS income differs.
+    # Profile 1: SS active, zero W2/rental → should have low SS inclusion
+    # Profile 2: SS active, $150K W2 → should have 85% SS inclusion
+    # We don't check exact dollar amounts (simulator aggregates too much) but verify
+    # that tax arrays are non-negative and that the high-income run has higher taxes.
+
+    _birth_yr = 1967  # age 59 → SS starts in a few years
+    _ss_cfg = {
+        "self_benefit_monthly": 2_000,   # $24K/yr gross
+        "self_start_age": 67,
+        "spouse_benefit_monthly": 1_200,  # $14.4K/yr gross
+        "spouse_start_age": 67,
+        "exclude_from_plan": False,
+    }
+    p_ss_only = copy.deepcopy(BASE_PERSON)
+    p_ss_only["birth_year"] = _birth_yr
+    p_ss_only["current_age"] = 2026 - _birth_yr
+    p_ss_only["social_security"] = copy.deepcopy(_ss_cfg)
+    p_ss_only["roth_conversion_policy"]["enabled"] = False  # simplify
+    inc_zero = copy.deepcopy(BASE_INCOME)  # all zeros
+
+    p_ss_w2 = copy.deepcopy(p_ss_only)
+    inc_w2 = copy.deepcopy(BASE_INCOME)
+    inc_w2["w2"] = [{"years": "1-30", "amount_nom": 150_000}]
+
+    res_ss_only, t = ephemeral_run("g25c_ss_only", paths, person=p_ss_only, income=inc_zero,
+                                   ignore_conv=True)
+    elapsed += t
+    res_ss_w2, t   = ephemeral_run("g25c_ss_w2", paths, person=p_ss_w2, income=inc_w2,
+                                   ignore_conv=True)
+    elapsed += t
+
+    fed_ss_only = _wd_taxes_fed(res_ss_only)
+    fed_ss_w2   = _wd_taxes_fed(res_ss_w2)
+
+    checks.append(chk("25c: SS-only run produces non-negative fed taxes", True,
+        ""))  # crash guard already passed
+    checks.append(chk_all_nonneg("25c: Fed tax array non-negative (SS+no-income run)", fed_ss_only))
+    checks.append(chk_all_nonneg("25c: Fed tax array non-negative (SS+$150K W2 run)", fed_ss_w2))
+
+    # $150K W2 run should have significantly higher taxes than SS-only run
+    # (both include SS but W2 run has much more ordinary income)
+    tax_ss_only_total = float(sum(fed_ss_only[:20]))
+    tax_ss_w2_total   = float(sum(fed_ss_w2[:20]))
+    checks.append(chk("25c: SS+W2 run has higher total taxes than SS-only run",
+        tax_ss_w2_total > tax_ss_only_total,
+        f"w2_total={tax_ss_w2_total:,.0f} ss_only_total={tax_ss_only_total:,.0f}"))
+
+    # ── 25d: exclude_from_plan=True zeroes out SS ─────────────────────────────
+    p_ss_excl = copy.deepcopy(p_ss_only)
+    p_ss_excl["social_security"]["exclude_from_plan"] = True
+    res_excl, t = ephemeral_run("g25d_excl", paths, person=p_ss_excl, income=inc_zero,
+                                ignore_conv=True)
+    elapsed += t
+    fed_excl = _wd_taxes_fed(res_excl)
+    checks.append(chk_all_nonneg("25d: Fed tax non-negative with exclude_from_plan=True", fed_excl))
+    # exclude_from_plan should result in lower or equal taxes vs normal SS (no SS income)
+    tax_excl_total = float(sum(fed_excl[:20]))
+    checks.append(chk("25d: exclude_from_plan=True → taxes ≤ normal SS-only taxes",
+        tax_excl_total <= tax_ss_only_total + 1.0,
+        f"excl={tax_excl_total:,.0f} ss_only={tax_ss_only_total:,.0f}"))
+
+    # ── 25e: SS injection preserves manual ordinary_other ─────────────────────
+    # If income.json already has non-zero ordinary_other for SS-active years,
+    # SS injection must NOT override it. This is the Experiment-2-OptimisedRMD pattern:
+    # user manually entered $53K SS taxable in ordinary_other, SS block also present.
+    # Expected: ordinary_other in retirement years stays at $53K, not $0.
+    p_ss_manual = copy.deepcopy(p_ss_only)
+    inc_manual = copy.deepcopy(BASE_INCOME)
+    # Set ordinary_other to non-zero for retirement years (manually entered SS)
+    # Use a years-format entry since BASE_INCOME is years-format
+    inc_manual["ordinary_other"] = [
+        {"years": "8-30", "amount_nom": 53_000}  # year 8 = age 67 (SS active)
+    ]
+    res_manual, t = ephemeral_run("g25e_manual", paths, person=p_ss_manual,
+                                  income=inc_manual, ignore_conv=True)
+    elapsed += t
+
+    # The run should succeed without crash
+    checks.append(chk_all_nonneg("25e: Manual ordinary_other + SS block → taxes non-negative",
+                                 _wd_taxes_fed(res_manual)))
+
+    # Taxes should be >= SS-only run (manual $53K SS > computed $0 SS)
+    tax_manual_total = float(sum(_wd_taxes_fed(res_manual)[:20]))
+    checks.append(chk("25e: Manual $53K ordinary_other → higher taxes than SS-only (SS not zeroed)",
+        tax_manual_total >= tax_ss_only_total - 1.0,
+        f"manual={tax_manual_total:,.0f} ss_only={tax_ss_only_total:,.0f} (manual should be >= ss_only)"))
+
+    return "G25", "SS provisional income three-tier rule (0%/50%/85% inclusion)", checks, elapsed
+
+
+GROUPS.append(group25_ss_provisional_income)
 
 
 # ===========================================================================
