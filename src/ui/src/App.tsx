@@ -117,14 +117,18 @@ type SnapshotSummary = {
 
 type SnapshotReturns = {
   nom_withdraw_yoy_mean_pct?: number[];
+  nom_withdraw_yoy_med_pct?:  number[];
   real_withdraw_yoy_mean_pct?: number[];
+  real_withdraw_yoy_med_pct?:  number[];
   nom_withdraw_yoy_p10_pct?: number[];
   nom_withdraw_yoy_p90_pct?: number[];
   inv_nom_yoy_p10_pct?: number[];
   inv_nom_yoy_p90_pct?: number[];
   inv_real_yoy_p10_pct?: number[];
   inv_nom_yoy_mean_pct?: number[];
+  inv_nom_yoy_med_pct?:  number[];
   inv_real_yoy_mean_pct?: number[];
+  inv_real_yoy_med_pct?:  number[];
 };
 
 type SnapshotReturnsAcct = {
@@ -3145,11 +3149,15 @@ const App: React.FC = () => {
                         display: "flex", alignItems: "center", gap: 10,
                       }}>
                         <span style={{ fontWeight: 700, fontSize: 13, color: sevColor }}>
-                          {R.configured_status === "on_track" ? "Baseline (do-nothing counterfactual)" : "Current Situation"}
+                          {R.configured_status === "on_track" ? "Baseline (do-nothing counterfactual)"
+                            : R.configured_status === "not_configured" ? "Opportunity — conversions not yet active"
+                            : "Current Situation"}
                         </span>
                         <span style={{ fontSize: 12, color: "#6b7280" }}>
                           {R.configured_status === "on_track"
                             ? "— shows what would happen without your active conversion strategy"
+                            : R.configured_status === "not_configured"
+                            ? "— apply the recommendation below to start capturing these savings"
                             : "— what happens if you do nothing"}
                         </span>
                       </div>
@@ -3522,12 +3530,12 @@ Re-run simulation to see impact.`)) return;
                           )}
                           {R.configured_status === "not_configured" && (
                             <div style={{
-                              marginTop: 8, padding: "6px 12px",
-                              background: "#fef2f2", border: "1px solid #fca5a5",
-                              borderRadius: 6, fontSize: 12, color: "#991b1b",
+                              marginTop: 8, padding: "8px 12px",
+                              background: "#fffbeb", border: "1px solid #f59e0b",
+                              borderRadius: 6, fontSize: 12, color: "#92400e",
                               display: "flex", alignItems: "center", gap: 6,
                             }}>
-                              ⭕ {R.configured_note}
+                              💡 Conversions not yet active — click <strong>Apply</strong> below to activate the recommended strategy and capture these savings.
                             </div>
                           )}
                         </div>
@@ -3876,73 +3884,104 @@ Re-run simulation to see impact.`)) return;
 
               <section className="results-section">
                 <h3>Total Portfolio (Future USD)</h3>
-                <table className="table">
+                <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+                <table className="table" style={{ minWidth: 1400, fontSize: 12 }}>
                   <thead>
                     <tr>
-                      <th>Year</th>
-                      <th>Age</th>
-                      <th><Tip label="Typical balance (median)" tip="Portfolio value in future dollars where half of all simulated market scenarios land above and half below. Use this as your primary planning number." /></th>
-                      <th><Tip label="Typical balance — today's $ (median)" tip="Same as typical balance but adjusted for inflation back to today's purchasing power." /></th>
-                      <th><Tip label="Average balance (mean)" tip="Mathematical average across all paths. Skewed upward by a few exceptional market scenarios. The typical (median) column is usually more representative." /></th>
-                      <th><Tip label="Floor balance" tip="In 90% of simulated market scenarios your portfolio exceeds this value — a stress-test floor. Essential spending should remain viable at this level." /></th>
-                      <th><Tip label="Ceiling balance" tip="In 90% of simulated scenarios your portfolio stays below this value — your realistic upside. Don't build spending plans around this number." /></th>
-                      <th><Tip label="Annual growth — total portfolio (mean)" tip="Mean year-over-year growth across all simulated paths. Averages out negative years — use the stress return column to see realistic downside." /></th>
-                      <th><Tip label="Annual growth — inflation-adjusted (mean)" tip="Mean year-over-year growth after removing inflation. Averaged across all paths." /></th>
-                      <th><Tip label="Stress return — 1-in-10 bad year (P10)" tip="In 1 out of 10 simulated scenarios, annual return was THIS bad or worse. Unlike the mean columns, this will show negative years during shocks and bad markets — the honest downside picture." /></th>
-                      <th><Tip label="Investment return only (nominal, mean)" tip="Mean pure investment return excluding cashflows like withdrawals and deposits." /></th>
-                      <th><Tip label="Investment return only (real, mean)" tip="Mean pure investment return after inflation." /></th>
+                      {/* Fixed identifier columns */}
+                      <th rowSpan={2} style={{ verticalAlign: "bottom", minWidth: 44, position: "sticky", left: 0, background: "#f8fafc", zIndex: 2 }}>Year</th>
+                      <th rowSpan={2} style={{ verticalAlign: "bottom", minWidth: 40, position: "sticky", left: 44, background: "#f8fafc", zIndex: 2 }}>Age</th>
+                      {/* Balance columns — no median/mean pairing needed, already have separate cols */}
+                      <th rowSpan={2} style={{ verticalAlign: "bottom", minWidth: 110 }}><Tip label="Typical balance (median)" tip="Portfolio in future dollars — half of scenarios land above, half below. Primary planning number." /></th>
+                      <th rowSpan={2} style={{ verticalAlign: "bottom", minWidth: 110 }}><Tip label="Typical balance today's $" tip="Median balance adjusted for inflation back to today's purchasing power." /></th>
+                      <th rowSpan={2} style={{ verticalAlign: "bottom", minWidth: 110 }}><Tip label="Average balance (mean)" tip="Mean across all paths. Skewed upward by exceptional scenarios — use median for planning." /></th>
+                      <th rowSpan={2} style={{ verticalAlign: "bottom", minWidth: 100 }}><Tip label="Floor balance" tip="P10 — in 90% of scenarios your portfolio exceeds this. Stress-test floor." /></th>
+                      <th rowSpan={2} style={{ verticalAlign: "bottom", minWidth: 100 }}><Tip label="Ceiling balance" tip="P90 — in 90% of scenarios your portfolio stays below this. Realistic upside." /></th>
+                      {/* Paired rate groups */}
+                      <th colSpan={2} style={{ textAlign: "center", background: "#eff6ff", borderBottom: "1px solid #bfdbfe", fontSize: 11, color: "#1d4ed8" }}>Annual growth — total portfolio</th>
+                      <th colSpan={2} style={{ textAlign: "center", background: "#f0fdf4", borderBottom: "1px solid #bbf7d0", fontSize: 11, color: "#15803d" }}>Annual growth — inflation-adjusted</th>
+                      <th rowSpan={2} style={{ verticalAlign: "bottom", minWidth: 90 }}><Tip label="Stress return P10" tip="1-in-10 bad year return. Shows negative years during shocks — the honest downside picture." /></th>
+                      <th colSpan={2} style={{ textAlign: "center", background: "#faf5ff", borderBottom: "1px solid #e9d5ff", fontSize: 11, color: "#7c3aed" }}>Investment return only (nominal)</th>
+                      <th colSpan={2} style={{ textAlign: "center", background: "#fff7ed", borderBottom: "1px solid #fed7aa", fontSize: 11, color: "#c2410c" }}>Investment return only (real)</th>
+                    </tr>
+                    <tr>
+                      {/* Total portfolio sub-headers */}
+                      <th style={{ background: "#eff6ff", fontSize: 11, minWidth: 72 }}><Tip label="Median" tip="50th percentile path — the typical year-over-year growth most investors experience." /></th>
+                      <th style={{ background: "#eff6ff", fontSize: 11, minWidth: 72 }}><Tip label="Mean" tip="Average across all paths. Skewed upward by exceptional upside scenarios." /></th>
+                      {/* Inflation-adjusted sub-headers */}
+                      <th style={{ background: "#f0fdf4", fontSize: 11, minWidth: 72 }}><Tip label="Median" tip="Median real growth — what a typical investor experiences after inflation." /></th>
+                      <th style={{ background: "#f0fdf4", fontSize: 11, minWidth: 72 }}><Tip label="Mean" tip="Mean real growth across all paths." /></th>
+                      {/* Investment nominal sub-headers */}
+                      <th style={{ background: "#faf5ff", fontSize: 11, minWidth: 72 }}><Tip label="Median" tip="Median pure investment return excluding cashflows — typical investor experience." /></th>
+                      <th style={{ background: "#faf5ff", fontSize: 11, minWidth: 72 }}><Tip label="Mean" tip="Mean pure nominal investment return excluding cashflows." /></th>
+                      {/* Investment real sub-headers */}
+                      <th style={{ background: "#fff7ed", fontSize: 11, minWidth: 72 }}><Tip label="Median" tip="Median pure investment return after inflation — typical real return." /></th>
+                      <th style={{ background: "#fff7ed", fontSize: 11, minWidth: 72 }}><Tip label="Mean" tip="Mean pure investment return after inflation." /></th>
                     </tr>
                   </thead>
                   <tbody>
                     {snapshot.years.map((y, i) => {
                       const P = snapshot.portfolio;
                       const R = snapshot.returns;
-              
-                      const futMean = P?.future_mean?.[i] ?? 0;
-                      const curMean = P?.current_mean?.[i] ?? 0;
-                      const futMed = P?.future_median?.[i] ?? 0;
-                      const curMed = P?.current_median?.[i] ?? 0;
-                      const futP10 = P?.future_p10_mean?.[i] ?? 0;
-                      const futP90 = P?.future_p90_mean?.[i] ?? 0;
-              
-                      const nomWith = R?.nom_withdraw_yoy_mean_pct?.[i] ?? 0;
-                      const realWith = R?.real_withdraw_yoy_mean_pct?.[i] ?? 0;
-                      const nomInv = R?.inv_nom_yoy_mean_pct?.[i] ?? 0;
-                      const realInv = R?.inv_real_yoy_mean_pct?.[i] ?? 0;
-                      const p10Return = R?.nom_withdraw_yoy_p10_pct?.[i] ?? null;
-              
-                      // Age: starting age from person.json + year offset
-                      const startAge =
-                        snapshot.person?.current_age ??
-                        snapshot.person?.age ??
-                        undefined;
-                      const ageDisplay =
-                        startAge !== undefined ? Math.floor(startAge + i) : "";
-              
+
+                      const futMed  = P?.future_median?.[i]  ?? 0;
+                      const curMed  = P?.current_median?.[i] ?? 0;
+                      const futMean = P?.future_mean?.[i]    ?? 0;
+                      const futP10  = P?.future_p10_mean?.[i]?? 0;
+                      const futP90  = P?.future_p90_mean?.[i]?? 0;
+
+                      const nomMed  = R?.nom_withdraw_yoy_med_pct?.[i]  ?? 0;
+                      const nomMean = R?.nom_withdraw_yoy_mean_pct?.[i] ?? 0;
+                      const realMed = R?.real_withdraw_yoy_med_pct?.[i] ?? 0;
+                      const realMean= R?.real_withdraw_yoy_mean_pct?.[i]?? 0;
+                      const p10Ret  = R?.nom_withdraw_yoy_p10_pct?.[i]  ?? null;
+                      const invNomMed  = R?.inv_nom_yoy_med_pct?.[i]  ?? 0;
+                      const invNomMean = R?.inv_nom_yoy_mean_pct?.[i] ?? 0;
+                      const invRealMed = R?.inv_real_yoy_med_pct?.[i] ?? 0;
+                      const invRealMean= R?.inv_real_yoy_mean_pct?.[i]?? 0;
+
+                      const startAge = snapshot.person?.current_age ?? snapshot.person?.age;
+                      const ageDisplay = startAge !== undefined ? Math.floor(startAge + i) : "";
+
+                      const pctStyle = (v: number) => ({
+                        color: v < 0 ? "#dc2626" : v > 10 ? "#15803d" : "inherit",
+                        fontWeight: v < 0 ? 600 : 400,
+                      });
+
                       return (
                         <tr key={y}>
-                          <td>{y}</td>
-                          <td>{ageDisplay}</td>
+                          <td style={{ position: "sticky", left: 0, background: "#fff", zIndex: 1 }}>{y}</td>
+                          <td style={{ position: "sticky", left: 44, background: "#fff", zIndex: 1 }}>{ageDisplay}</td>
                           <td>{formatUSD(futMed)}</td>
                           <td>{formatUSD(curMed)}</td>
                           <td>{formatUSD(futMean)}</td>
                           <td>{formatUSD(futP10)}</td>
                           <td>{formatUSD(futP90)}</td>
-                          <td>{formatPct(nomWith)}</td>
-                          <td>{formatPct(realWith)}</td>
+                          {/* Total portfolio median/mean */}
+                          <td style={{ background: "#f8fbff", ...pctStyle(nomMed) }}>{formatPct(nomMed)}</td>
+                          <td style={{ background: "#f8fbff", ...pctStyle(nomMean) }}>{formatPct(nomMean)}</td>
+                          {/* Inflation-adjusted median/mean */}
+                          <td style={{ background: "#f7fdf9", ...pctStyle(realMed) }}>{formatPct(realMed)}</td>
+                          <td style={{ background: "#f7fdf9", ...pctStyle(realMean) }}>{formatPct(realMean)}</td>
+                          {/* P10 stress */}
                           <td style={{
-                            color: p10Return !== null && p10Return < 0 ? "#dc2626" : "#15803d",
-                            fontWeight: p10Return !== null && p10Return < 0 ? 600 : 400,
+                            color: p10Ret !== null && p10Ret < 0 ? "#dc2626" : "#15803d",
+                            fontWeight: p10Ret !== null && p10Ret < 0 ? 600 : 400,
                           }}>
-                            {p10Return !== null ? formatPct(p10Return) : "—"}
+                            {p10Ret !== null ? formatPct(p10Ret) : "—"}
                           </td>
-                          <td>{formatPct(nomInv)}</td>
-                          <td>{formatPct(realInv)}</td>
+                          {/* Investment nominal median/mean */}
+                          <td style={{ background: "#fdf8ff", ...pctStyle(invNomMed) }}>{formatPct(invNomMed)}</td>
+                          <td style={{ background: "#fdf8ff", ...pctStyle(invNomMean) }}>{formatPct(invNomMean)}</td>
+                          {/* Investment real median/mean */}
+                          <td style={{ background: "#fffaf5", ...pctStyle(invRealMed) }}>{formatPct(invRealMed)}</td>
+                          <td style={{ background: "#fffaf5", ...pctStyle(invRealMean) }}>{formatPct(invRealMean)}</td>
                         </tr>
                       );
                     })}
                   </tbody>
                 </table>
+                </div>
               </section>
 
               <section className="results-section">

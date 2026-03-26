@@ -1923,22 +1923,21 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
     except Exception:
         pass
 
-    # 9a-roth) Run Roth optimizer inline — attaches to snapshot
-    roth_policy = (person_cfg.get("roth_conversion_policy") or {})
-    if bool(roth_policy.get("enabled", False)):
-        try:
-            from roth_optimizer import optimize_roth_conversion_full
-            res["roth_optimizer"] = optimize_roth_conversion_full(
-                person_cfg=person_cfg,
-                simulation_summary=res.get("summary", {}),
-                simulation_portfolio=res.get("portfolio", {}),
-                withdrawals=res.get("withdrawals", {}),
-            )
-        except Exception as _roth_exc:
-            logger.warning("Roth optimizer failed (non-fatal): %s", _roth_exc)
-            res["roth_optimizer"] = {"error": str(_roth_exc)}
-    else:
-        res["roth_optimizer"] = None
+    # 9a-roth) Run Roth optimizer inline — always runs regardless of enabled flag.
+    # Even when roth_conversion_policy.enabled=False, the optimizer shows the
+    # opportunity cost of not converting — "here's what you're leaving on the table."
+    # The UI uses the result to present an actionable insight and Apply button.
+    try:
+        from roth_optimizer import optimize_roth_conversion_full
+        res["roth_optimizer"] = optimize_roth_conversion_full(
+            person_cfg=person_cfg,
+            simulation_summary=res.get("summary", {}),
+            simulation_portfolio=res.get("portfolio", {}),
+            withdrawals=res.get("withdrawals", {}),
+        )
+    except Exception as _roth_exc:
+        logger.warning("Roth optimizer failed (non-fatal): %s", _roth_exc)
+        res["roth_optimizer"] = {"error": str(_roth_exc)}
 
     # 9b) Snapshot + run_meta (now includes ending_balances)
     save_raw_snapshot_accounts(

@@ -1016,15 +1016,49 @@ def run_accounts_new(
         withdrawals["min_scaling_factor"]         = _min_scaling_factor
         withdrawals["upside_scaling_enabled"]     = bool(_esp.get("upside_scaling_enabled", False))
 
-        # Safe withdrawal rate at P10 — annualized planned withdrawal as % of
-        # starting portfolio. Represents how much of the portfolio is consumed
-        # per year on the planned schedule.
+        # Safe withdrawal rate at P10 — maximum constant annual withdrawal (current USD)
+        # that the P10 (stress) portfolio path can sustain without depleting to zero.
+        # Computed via binary search on the P10 real path.
+        #
+        # Algorithm: start with planned_cur as candidate. Scale until P10 path survives.
+        # "Survives" = P10 real balance never goes below zero over n_years.
+        # Result expressed as % of starting portfolio (annualized).
         try:
-            if starting_total > 0 and len(planned_cur) > 0:
-                _mean_planned = float(planned_cur.mean())
-                withdrawals["safe_withdrawal_rate_p10_pct"] = round(
-                    (_mean_planned / starting_total) * 100.0, 2
+            if starting_total > 0 and total_real_paths is not None:
+                _p10_real = np.percentile(total_real_paths, 10, axis=0)  # (n_years,)
+                # The P10 path already has actual cashflows baked in (withdrawals drawn).
+                # To find SWR: use the P10 core path (pre-withdrawal) and binary search
+                # for the max constant withdrawal that doesn't deplete it.
+                _p10_core_real = np.percentile(
+                    total_nom_paths_core / np.maximum(deflator, 1e-12), 10, axis=0
                 )
+                _start_real = float(starting_total)
+
+                def _p10_survives(wd_cur: float) -> bool:
+                    """Check if constant annual withdrawal wd_cur sustains P10 core path."""
+                    bal = _start_real
+                    for _y in range(n_years):
+                        growth_factor = (float(_p10_core_real[_y]) /
+                                         max(float(_p10_core_real[_y - 1]) if _y > 0 else _start_real, 1.0))
+                        bal = bal * growth_factor - wd_cur
+                        if bal < 0:
+                            return False
+                    return True
+
+                # Binary search between 0 and 2× planned withdrawal
+                _mean_planned = float(planned_cur.mean()) if len(planned_cur) > 0 else 0.0
+                _lo, _hi = 0.0, max(_mean_planned * 3.0, _start_real * 0.15)
+                for _ in range(30):  # 30 iterations → precision < 0.01%
+                    _mid = (_lo + _hi) / 2.0
+                    if _p10_survives(_mid):
+                        _lo = _mid
+                    else:
+                        _hi = _mid
+                _swr_cur = _lo
+
+                withdrawals["safe_withdrawal_rate_p10_pct"] = round(
+                    (_swr_cur / _start_real) * 100.0, 2
+                ) if _start_real > 0 else 0.0
             else:
                 withdrawals["safe_withdrawal_rate_p10_pct"] = 0.0
         except Exception:
@@ -1416,6 +1450,15 @@ def run_accounts_new(
     nom_withdraw_yoy_mean_pct  = (inv_nom_yoy.mean(axis=0)  * 100.0).tolist()
     real_withdraw_yoy_mean_pct = (inv_real_yoy.mean(axis=0) * 100.0).tolist()
 
+    # Median YoY — the typical (50th percentile) path each year
+    import warnings as _w2m
+    with _w2m.catch_warnings():
+        _w2m.simplefilter("ignore", RuntimeWarning)
+        nom_withdraw_yoy_med_pct  = (np.nanmedian(inv_nom_yoy,  axis=0) * 100.0).tolist()
+        real_withdraw_yoy_med_pct = (np.nanmedian(inv_real_yoy, axis=0) * 100.0).tolist()
+        inv_nom_yoy_med_pct_core  = (np.nanmedian(inv_nom_yoy_paths_core_shifted, axis=0) * 100.0).tolist()
+        inv_real_yoy_med_pct_core = (np.nanmedian(inv_real_yoy_paths_core_shifted, axis=0) * 100.0).tolist()
+
     # P10/P90 of annual returns — shows the realistic downside/upside range
     # P10: 1-in-10 bad year return — will show negative years during shocks/bad markets
     # P90: 1-in-10 good year return — shows realistic upside per year
@@ -1668,21 +1711,23 @@ def run_accounts_new(
     res["returns"] = {
         "nom_withdraw_yoy_mean_pct": nom_withdraw_yoy_mean_pct,
         "real_withdraw_yoy_mean_pct": real_withdraw_yoy_mean_pct,
+        "nom_withdraw_yoy_med_pct":  nom_withdraw_yoy_med_pct,
+        "real_withdraw_yoy_med_pct": real_withdraw_yoy_med_pct,
 
         # P10/P90 of annual portfolio returns — realistic downside/upside per year
-        # P10 shows negative years in shock/bad-market scenarios (mean hides these)
         "nom_withdraw_yoy_p10_pct":  nom_withdraw_yoy_p10_pct,
         "nom_withdraw_yoy_p90_pct":  nom_withdraw_yoy_p90_pct,
 
-        # Investment-only YoY from core path (mean)
+        # Investment-only YoY from core path (mean + median)
         "inv_nom_yoy_mean_pct": inv_nom_yoy_mean_pct_core,
         "inv_real_yoy_mean_pct": inv_real_yoy_mean_pct_core,
+        "inv_nom_yoy_med_pct":  inv_nom_yoy_med_pct_core,
+        "inv_real_yoy_med_pct": inv_real_yoy_med_pct_core,
 
         # Investment-only P10/P90 — pure asset return downside/upside
         "inv_nom_yoy_p10_pct":  inv_nom_yoy_p10_pct_core,
         "inv_nom_yoy_p90_pct":  inv_nom_yoy_p90_pct_core,
         "inv_real_yoy_p10_pct": inv_real_yoy_p10_pct_core,
-
     }
 
     res["returns_acct"] = {

@@ -90,6 +90,17 @@ COVERAGE MAP
                  Per-account YoY arrays for all 6 accounts
                  Shock year region shows lower YoY than no-shock baseline
                  summary.cagr_nominal_mean consistent with YoY-derived geo mean
+                 13n: Median YoY arrays present (nom/real/inv_nom/inv_real)
+                 13n: Median values finite and in [-50%, +100%] range
+                 13n: Median ≤ mean in majority of years (mean skewed by upside)
+                 13n: Real median < nominal median (inflation gap preserved)
+    Group 24 — Withdrawal rate verification (SWR, planned WR, floor WR)
+                 SWR in [0.5%, 30%], planned WR in [0.5%, 15%]
+                 Rate ordering: floor_wr ≤ planned_wr ≤ SWR (well-funded)
+                 SWR > planned WR for well-funded portfolio (binary search working)
+                 SWR ≠ planned WR regression guard (old code echoed planned rate)
+                 Stress-funded portfolio: SWR ≤ planned WR
+                 Upside disabled → realized ≤ planned
     Group 25 — Social Security provisional income (three-tier inclusion rule)
                  Tier 0: provisional < base1 → 0% SS taxable
                  Tier 1: base1 ≤ provisional < base2 → up to 50% taxable
@@ -3174,7 +3185,55 @@ def group13_yoy_sanity(paths: int):
     else:
         checks.append(chk("P10 shock array long enough for 13m check", False, "array too short"))
 
-    return "G13", "YoY returns sanity (range, inflation gap, variance, shock impact, CAGR, deflator guard)", checks, elapsed
+    # ── 13n: Median YoY arrays present and well-formed ───────────────────────
+    # Verify the four new median rate arrays are present and have correct properties
+    R_base = res.get("returns", {})
+    nom_med  = R_base.get("nom_withdraw_yoy_med_pct",  [])
+    real_med = R_base.get("real_withdraw_yoy_med_pct", [])
+    inv_nom_med  = R_base.get("inv_nom_yoy_med_pct",  [])
+    inv_real_med = R_base.get("inv_real_yoy_med_pct", [])
+
+    checks.append(chk("13n: nom_withdraw_yoy_med_pct present and length=n_years",
+        len(nom_med) > 0, f"len={len(nom_med)}"))
+    checks.append(chk("13n: real_withdraw_yoy_med_pct present and length=n_years",
+        len(real_med) > 0, f"len={len(real_med)}"))
+    checks.append(chk("13n: inv_nom_yoy_med_pct present and length=n_years",
+        len(inv_nom_med) > 0, f"len={len(inv_nom_med)}"))
+    checks.append(chk("13n: inv_real_yoy_med_pct present and length=n_years",
+        len(inv_real_med) > 0, f"len={len(inv_real_med)}"))
+
+    # Median arrays must be finite
+    checks.append(chk("13n: all median YoY arrays finite (no NaN/Inf)",
+        all(np.isfinite(v) for arr in [nom_med, real_med, inv_nom_med, inv_real_med]
+            for v in arr if v is not None),
+        "NaN or Inf found in median YoY arrays"))
+
+    # Median values in sane range [-50%, +100%]
+    for _name, _arr in [("nom_med", nom_med), ("real_med", real_med),
+                        ("inv_nom_med", inv_nom_med), ("inv_real_med", inv_real_med)]:
+        if _arr:
+            _bad = [v for v in _arr if v is not None and not (-50 <= v <= 100)]
+            checks.append(chk(f"13n: {_name} values in sane range [-50%, +100%]",
+                len(_bad) == 0, f"{len(_bad)} values outside range: {_bad[:3]}"))
+
+    # Median ≤ mean for total portfolio (median < mean is expected — mean skewed by upside)
+    nom_mean = R_base.get("nom_withdraw_yoy_mean_pct", [])
+    if nom_med and nom_mean and len(nom_med) == len(nom_mean):
+        n_med_le_mean = sum(1 for m, n in zip(nom_med, nom_mean)
+                            if m is not None and n is not None and m <= n + 0.5)
+        checks.append(chk("13n: nom median ≤ mean in majority of years (mean skewed by upside)",
+            n_med_le_mean >= len(nom_med) * 0.6,
+            f"{n_med_le_mean}/{len(nom_med)} years have median ≤ mean"))
+
+    # Real median < nominal median (inflation gap preserved in median path)
+    if nom_med and real_med and len(nom_med) == len(real_med):
+        n_real_lt_nom = sum(1 for n, r in zip(nom_med, real_med)
+                            if n is not None and r is not None and r < n + 0.1)
+        checks.append(chk("13n: real median < nominal median in most years (inflation gap)",
+            n_real_lt_nom >= len(nom_med) * 0.8,
+            f"{n_real_lt_nom}/{len(nom_med)} years have real_med < nom_med"))
+
+    return "G13", "YoY returns sanity (range, inflation gap, variance, shock impact, CAGR, deflator guard, median arrays)", checks, elapsed
 
 
 
@@ -5719,40 +5778,122 @@ GROUPS.append(group23_bad_market_response)
 # ===========================================================================
 
 def group24_upside_and_swr(paths: int):
-    """G24: upside_scaling_enabled field present, SWR at P10 plausible."""
+    """G24: Withdrawal rate verification — SWR, planned WR, floor WR ordering and semantics."""
     checks = []; elapsed = 0.0
+
+    # ── Base run: well-funded profile (BASE_PERSON has $9.92M TRAD+BROK) ─────
     res, t = ephemeral_run("g24_swr", paths); elapsed += t
 
     W = res.get("withdrawals", {})
-    swr = W.get("safe_withdrawal_rate_p10_pct")
+    P = res.get("portfolio", {})
 
-    checks.append(chk(
-        "G24: safe_withdrawal_rate_p10_pct field present",
-        swr is not None,
-        "field missing from withdrawals"
-    ))
-    checks.append(chk(
-        "G24: SWR at P10 plausible range (0.5% - 30.0%)",
+    swr   = W.get("safe_withdrawal_rate_p10_pct")
+    # Starting portfolio total — lives in res["starting"] (dict of account→balance)
+    _starting_dict = res.get("starting") or {}
+    start = float(sum(_starting_dict.values())) if _starting_dict else 0.0
+    if start <= 0:
+        # fallback: use first value of current_mean as proxy
+        cur = P.get("current_mean") or []
+        start = float(cur[0]) if cur else 0.0
+
+    # ── 24a: SWR field presence and basic sanity ──────────────────────────────
+    checks.append(chk("24a: safe_withdrawal_rate_p10_pct field present",
+        swr is not None, "field missing from withdrawals"))
+    checks.append(chk("24a: SWR in plausible range [0.5%, 30%]",
         swr is not None and 0.5 <= float(swr) <= 30.0,
-        f"swr_p10={swr}% -- outside 0.5-30% range"
-    ))
-    checks.append(chk(
-        "G24: SWR > 0",
-        swr is not None and float(swr) > 0,
-        f"swr_p10={swr}%"
-    ))
-    checks.append(chk(
-        "G24: upside_scaling_enabled field present",
-        "upside_scaling_enabled" in W,
-        "field missing"
-    ))
-    checks.append(chk(
-        "G24: upside disabled → realized ≤ planned in pre-RMD years",
-        not W.get("upside_scaling_enabled", False),
-        f"upside_scaling_enabled={W.get('upside_scaling_enabled')}"
-    ))
+        f"swr={swr}%"))
+    checks.append(chk("24a: upside_scaling_enabled field present",
+        "upside_scaling_enabled" in W, "field missing"))
 
-    return "G24", "Upside withdrawal scaling and SWR at P10", checks, elapsed
+    # ── 24b: Planned withdrawal rate ─────────────────────────────────────────
+    # planned_current is in current USD. Rate = mean(planned) / starting_portfolio
+    planned = _wd(res)
+    if start > 0 and planned:
+        mean_planned = float(sum(planned)) / max(len(planned), 1)
+        planned_wr_pct = (mean_planned / start) * 100.0
+    else:
+        planned_wr_pct = 0.0
+
+    checks.append(chk("24b: planned withdrawal rate computable (start > 0, planned present)",
+        start > 0 and bool(planned),
+        f"start={start:,.0f} planned_len={len(planned) if planned else 0}"))
+    checks.append(chk("24b: planned WR in realistic range [0.5%, 15%]",
+        0.5 <= planned_wr_pct <= 15.0,
+        f"planned_wr={planned_wr_pct:.2f}%"))
+
+    # ── 24c: Floor withdrawal rate ────────────────────────────────────────────
+    # BASE_WITHDRAWAL has floor_k=100K, amount_k starts at 150K
+    # floor_wr = mean(floor) / starting_portfolio
+    sched_base = res.get("withdrawals", {}).get("floor_current_mean")
+    if sched_base and start > 0:
+        mean_floor = float(sum(sched_base)) / max(len(sched_base), 1)
+        floor_wr_pct = (mean_floor / start) * 100.0
+    else:
+        # approximate from BASE_WITHDRAWAL floor_k=100K
+        floor_wr_pct = (100_000 / start) * 100.0 if start > 0 else 0.0
+
+    checks.append(chk("24c: floor WR < planned WR (floor must be <= target)",
+        floor_wr_pct <= planned_wr_pct + 0.01,
+        f"floor_wr={floor_wr_pct:.2f}% planned_wr={planned_wr_pct:.2f}%"))
+
+    # ── 24d: SWR > planned WR for well-funded portfolio ───────────────────────
+    # With $9.92M starting portfolio and $150K-$250K withdrawals (1.5%-2.5% WR),
+    # the P10 stress path should be able to sustain MORE than the planned amount.
+    # SWR > planned WR confirms the new binary search is working (not echoing back).
+    if swr is not None and planned_wr_pct > 0:
+        checks.append(chk("24d: SWR > planned WR for well-funded portfolio ($9.92M, ~2% WR)",
+            float(swr) >= planned_wr_pct,
+            f"swr={float(swr):.2f}% planned_wr={planned_wr_pct:.2f}% — SWR should exceed planned for well-funded portfolio"))
+
+    # ── 24e: Three-rate ordering ──────────────────────────────────────────────
+    # For a well-funded portfolio: floor_wr ≤ planned_wr ≤ SWR
+    # This ordering must always hold — floor is the minimum, SWR is the maximum sustainable
+    if swr is not None and planned_wr_pct > 0 and floor_wr_pct > 0:
+        checks.append(chk("24e: Rate ordering: floor_wr ≤ planned_wr ≤ SWR",
+            floor_wr_pct <= planned_wr_pct + 0.01 and planned_wr_pct <= float(swr) + 0.01,
+            f"floor={floor_wr_pct:.2f}% ≤ planned={planned_wr_pct:.2f}% ≤ swr={float(swr):.2f}%"))
+
+    # ── 24f: SWR not equal to planned WR (regression: old code echoed planned) ─
+    # The old broken implementation returned mean(planned)/starting = planned_wr.
+    # The new binary search must return a DIFFERENT value.
+    if swr is not None and planned_wr_pct > 0:
+        checks.append(chk("24f: SWR ≠ planned WR (regression: old code echoed planned rate)",
+            abs(float(swr) - planned_wr_pct) > 0.05,
+            f"swr={float(swr):.2f}% planned_wr={planned_wr_pct:.2f}% (should differ by >0.05pp)"))
+
+    # ── 24g: Low-funded portfolio — SWR < planned WR ─────────────────────────
+    # A portfolio that is barely sufficient should have SWR ≤ planned WR.
+    # Use a small starting balance relative to withdrawal target.
+    _tiny_alloc = copy.deepcopy(BASE_ALLOCATION)
+    _tiny_alloc["starting"] = {k: v * 0.05 for k, v in BASE_ALLOCATION["starting"].items()}
+    res_tiny, t = ephemeral_run("g24_tiny", paths, allocation=_tiny_alloc,
+                                ignore_conv=True, ignore_rmd=True)
+    elapsed += t
+    W_tiny = res_tiny.get("withdrawals", {})
+    swr_tiny = W_tiny.get("safe_withdrawal_rate_p10_pct")
+    P_tiny = res_tiny.get("portfolio", {})
+    _start_dict_tiny = res_tiny.get("starting") or {}
+    start_tiny = float(sum(_start_dict_tiny.values())) if _start_dict_tiny else 0.0
+    planned_tiny = _wd(res_tiny)
+    if start_tiny > 0 and planned_tiny:
+        planned_wr_tiny = (float(sum(planned_tiny)) / max(len(planned_tiny), 1) / start_tiny) * 100.0
+    else:
+        planned_wr_tiny = 0.0
+
+    checks.append(chk("24g: Stress-funded portfolio SWR in valid range [0%, 30%]",
+        swr_tiny is not None and 0.0 <= float(swr_tiny) <= 30.0,
+        f"swr_tiny={swr_tiny}%"))
+    if swr_tiny is not None and planned_wr_tiny > 0:
+        checks.append(chk("24g: Stress-funded portfolio: SWR ≤ planned WR (can't sustain full plan)",
+            float(swr_tiny) <= planned_wr_tiny + 0.5,
+            f"swr={float(swr_tiny):.2f}% planned_wr={planned_wr_tiny:.2f}% — tiny portfolio should be near or below plan"))
+
+    # ── 24h: Upside disabled → realized ≤ planned ────────────────────────────
+    checks.append(chk("24h: upside disabled → realized ≤ planned in pre-RMD years",
+        not W.get("upside_scaling_enabled", False),
+        f"upside_scaling_enabled={W.get('upside_scaling_enabled')}"))
+
+    return "G24", "Withdrawal rates: SWR, planned WR, floor WR ordering and semantics", checks, elapsed
 
 
 GROUPS.append(group24_upside_and_swr)

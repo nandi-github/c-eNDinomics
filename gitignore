@@ -1,0 +1,66 @@
+# =============================================================================
+# eNDinomics .gitignore
+# =============================================================================
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ── Node / UI ─────────────────────────────────────────────────────────────────
+node_modules/
+ui/node_modules/
+ui/.next/
+ui/dist/
+ui/build/
+*.tsbuildinfo
+
+# ── OS / Editor ───────────────────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# ── Test artifacts ────────────────────────────────────────────────────────────
+src/test_results/
+ui/test-results/
+ui/playwright-report/
+
+# ── User profiles (private financial data — never commit) ─────────────────────
+# Rule: exclude ALL profiles/ subdirectories EXCEPT the ones explicitly tracked.
+# Tracked: default/ (canonical schema), Test/ (test harness), __system__* (generated fixtures), __testui__ (Playwright fixture)
+src/profiles/*/
+!src/profiles/default/
+!src/profiles/default/**
+!src/profiles/Test/
+!src/profiles/Test/**
+!src/profiles/__system__/
+!src/profiles/__system__/**
+!src/profiles/__system__noss/
+!src/profiles/__system__noss/**
+!src/profiles/__system__single/
+!src/profiles/__system__single/**
+!src/profiles/__system__texas/
+!src/profiles/__system__texas/**
+!src/profiles/__system__rmd73/
+!src/profiles/__system__rmd73/**
+!src/profiles/__system__rmd75/
+!src/profiles/__system__rmd75/**
+!src/profiles/__testui__/
+!src/profiles/__testui__/**
+
+# ── Misc ──────────────────────────────────────────────────────────────────────
+*.log
+*.tmp
+.env
+.env.*
