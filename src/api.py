@@ -1618,6 +1618,40 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
         _misc_taxable_cur    = _misc_arr * _misc_tax_arr          # only taxable portion
         _misc_nontaxable_cur = _misc_arr * (1.0 - _misc_tax_arr)  # gifts/inheritances
 
+        # ── Future-dollar conversion ──────────────────────────────────────────
+        # income.json rows with "dollar_type": "future" are in nominal dollars
+        # as-of the start year of that range. Divide by deflator[y] to convert
+        # to current (real) USD before passing to the tax engine and income paths.
+        # "current" (default / unspecified) requires no conversion.
+        _infl_arr_api = np.asarray(infl_yearly, dtype=float) if infl_yearly is not None else np.full(_n_years, 0.025)
+        if _infl_arr_api.size < _n_years:
+            _infl_arr_api = np.concatenate([_infl_arr_api,
+                np.full(_n_years - _infl_arr_api.size, _infl_arr_api[-1] if _infl_arr_api.size else 0.025)])
+        _deflator_api = np.cumprod(1.0 + _infl_arr_api[:_n_years])  # deflator[0]=1+infl[0], etc.
+
+        def _to_cur(arr_cur: np.ndarray, is_future_flag: np.ndarray) -> np.ndarray:
+            """For years flagged as future-dollar: divide by deflator to get current USD."""
+            out = arr_cur.copy()
+            for _y in range(min(_n_years, len(out), len(is_future_flag))):
+                if is_future_flag[_y] > 0.5:  # 1.0 = future
+                    out[_y] = out[_y] / max(_deflator_api[_y], 1e-12)
+            return out
+
+        def _get_is_future(key: str) -> np.ndarray:
+            arr = np.asarray(income_cfg.get(f"{key}_is_future", np.zeros(_n_years)), dtype=float)
+            if arr.size < _n_years:
+                arr = np.concatenate([arr, np.zeros(_n_years - arr.size)])
+            return arr[:_n_years]
+
+        w2_cur_adj           = _to_cur(np.asarray(w2_cur,            dtype=float), _get_is_future("w2"))
+        rental_cur_adj       = _to_cur(np.asarray(rental_cur,        dtype=float), _get_is_future("rental"))
+        interest_cur_adj     = _to_cur(np.asarray(interest_cur,      dtype=float), _get_is_future("interest"))
+        ord_other_cur_adj    = _to_cur(np.asarray(ordinary_other_cur, dtype=float), _get_is_future("ordinary_other"))
+        qual_div_cur_adj     = _to_cur(np.asarray(qual_div_cur,       dtype=float), _get_is_future("qualified_div"))
+        cap_gains_cur_adj    = _to_cur(np.asarray(cap_gains_cur,      dtype=float), _get_is_future("cap_gains"))
+        misc_taxable_cur_adj = _to_cur(_misc_taxable_cur,              _get_is_future("misc"))
+        misc_nontax_cur_adj  = _to_cur(_misc_nontaxable_cur,           _get_is_future("misc"))
+
         ordinary_income_cur_paths = np.zeros((paths, _n_years), dtype=float)
         qual_div_cur_paths        = np.zeros((paths, _n_years), dtype=float)
         cap_gains_cur_paths       = np.zeros((paths, _n_years), dtype=float)
@@ -1629,18 +1663,18 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
         income_sources_cur_paths  = np.zeros((paths, _n_years), dtype=float)
 
         for y in range(_n_years):
-            _misc_t = float(_misc_taxable_cur[y])    if y < len(_misc_taxable_cur)    else 0.0
-            _misc_nt = float(_misc_nontaxable_cur[y]) if y < len(_misc_nontaxable_cur) else 0.0
+            _misc_t  = float(misc_taxable_cur_adj[y])  if y < len(misc_taxable_cur_adj)  else 0.0
+            _misc_nt = float(misc_nontax_cur_adj[y])   if y < len(misc_nontax_cur_adj)   else 0.0
             ordinary_income_cur_paths[:, y] = (
-                w2_cur[y] + rental_cur[y] + interest_cur[y] + ordinary_other_cur[y] + _misc_t
+                w2_cur_adj[y] + rental_cur_adj[y] + interest_cur_adj[y]
+                + ord_other_cur_adj[y] + _misc_t
             )
-            qual_div_cur_paths[:, y]       = qual_div_cur[y]
-            cap_gains_cur_paths[:, y]      = cap_gains_cur[y]
-            w2_income_cur_paths[:, y]      = w2_cur[y]
-            # income_sources: all sources including non-taxable misc (gross, pre-tax)
+            qual_div_cur_paths[:, y]       = qual_div_cur_adj[y]
+            cap_gains_cur_paths[:, y]      = cap_gains_cur_adj[y]
+            w2_income_cur_paths[:, y]      = w2_cur_adj[y]
             income_sources_cur_paths[:, y] = (
-                w2_cur[y] + rental_cur[y] + interest_cur[y]
-                + ordinary_other_cur[y] + _misc_t + _misc_nt
+                w2_cur_adj[y] + rental_cur_adj[y] + interest_cur_adj[y]
+                + ord_other_cur_adj[y] + _misc_t + _misc_nt
             )
 
         # Extract excess_income_policy from econ_policy for surplus routing in simulator

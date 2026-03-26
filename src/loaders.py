@@ -696,11 +696,16 @@ def load_income(
     """Load income schedule — supports both age-based and year-based formats.
 
     Age-based format (recommended — self-documenting):
-        { "ages": "47-64", "amount_nom": 350000 }
+        { "ages": "47-64", "amount": 350000 }
         Converted to years using current_age: year = age - current_age
 
     Year-based format (legacy — still supported):
-        { "years": "1-18", "amount_nom": 350000 }
+        { "years": "1-18", "amount": 350000 }
+
+    dollar_type field (optional per row):
+        "current" (default) — amount is in today's purchasing power; real value held constant.
+        "future"            — amount is the actual nominal dollar received at that future date.
+        Legacy field "amount_nom" is still accepted as a fallback for backward compatibility.
 
     Parameters
     ----------
@@ -716,16 +721,34 @@ def load_income(
     def _expand_series(rows_key: str) -> np.ndarray:
         out = np.zeros(max_years, dtype=float)
         for r in (data.get(rows_key, []) or []):
-            amt = _safe_num(r.get("amount_nom", 0.0), 0.0)
+            # 'amount' is the canonical field name; 'amount_nom' is legacy (still supported)
+            amt = _safe_num(r.get("amount", r.get("amount_nom", 0.0)), 0.0)
             if "ages" in r:
-                # Age-based format
                 yrs = _ages_range(str(r["ages"]), current_age, max_years)
             else:
-                # Year-based format (legacy)
                 yrs = _years_range(str(r.get("years", "*")), max_years)
             for y in yrs:
                 if 1 <= y <= max_years:
                     out[y - 1] = amt
+        return out
+
+    def _expand_is_future(rows_key: str) -> np.ndarray:
+        """Per-year dollar_type flag: 1.0 = future/nominal dollars, 0.0 = current/real (default).
+        'future' means the amount is already in nominal dollars as-of the start year of the range.
+        'current' (default) means the amount is in today's purchasing power — the simulator
+        inflates it each year so the real value stays constant.
+        For 'future' entries: api.py divides by deflator[y] to convert to current USD."""
+        out = np.zeros(max_years, dtype=float)  # default: current dollars
+        for r in (data.get(rows_key, []) or []):
+            if str(r.get("dollar_type", "current")).strip().lower() != "future":
+                continue  # current is the default — leave as 0.0
+            if "ages" in r:
+                yrs = _ages_range(str(r["ages"]), current_age, max_years)
+            else:
+                yrs = _years_range(str(r.get("years", "*")), max_years)
+            for y in yrs:
+                if 1 <= y <= max_years:
+                    out[y - 1] = 1.0
         return out
 
     def _expand_misc_taxable(rows: list) -> np.ndarray:
@@ -747,20 +770,14 @@ def load_income(
                     out[y - 1] = 0.0
         return out
 
-    return {
-        "w2":             _expand_series("w2"),
-        "rental":         _expand_series("rental"),
-        "interest":       _expand_series("interest"),
-        "ordinary_other": _expand_series("ordinary_other"),
-        "qualified_div":  _expand_series("qualified_div"),
-        "cap_gains":      _expand_series("cap_gains"),
-        # Misc: one-off income not fitting other categories (gifts, bonuses, inheritances,
-        # asset sale proceeds). Taxable as ordinary income unless row has "taxable": false.
-        # Non-taxable misc (gifts/inheritances) still flows through for surplus routing
-        # but is excluded from the tax engine's ordinary_income_cur_paths.
-        "misc":           _expand_series("misc"),
-        "misc_taxable":   _expand_misc_taxable(data.get("misc", [])),
-    }
+    _income_types = ["w2", "rental", "interest", "ordinary_other",
+                     "qualified_div", "cap_gains", "misc"]
+    result = {t: _expand_series(t) for t in _income_types}
+    result["misc_taxable"] = _expand_misc_taxable(data.get("misc", []))
+    # Per-year future-dollar flags — 1.0 where dollar_type="future", 0.0 otherwise
+    for t in _income_types:
+        result[f"{t}_is_future"] = _expand_is_future(t)
+    return result
 
 # -----------------------------
 # Economic policy

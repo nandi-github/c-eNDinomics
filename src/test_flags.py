@@ -193,28 +193,28 @@ BASE_PERSON = {
 }
 
 BASE_INCOME = {
-    "w2":             [{"years": "1-30", "amount_nom": 0}],
-    "rental":         [{"years": "1-30", "amount_nom": 0}],
-    "interest":       [{"years": "1-30", "amount_nom": 0}],
-    "ordinary_other": [{"years": "1-30", "amount_nom": 0}],
-    "qualified_div":  [{"years": "1-30", "amount_nom": 0}],
-    "cap_gains":      [{"years": "1-30", "amount_nom": 0}],
+    "w2":             [{"years": "1-30", "amount": 0}],
+    "rental":         [{"years": "1-30", "amount": 0}],
+    "interest":       [{"years": "1-30", "amount": 0}],
+    "ordinary_other": [{"years": "1-30", "amount": 0}],
+    "qualified_div":  [{"years": "1-30", "amount": 0}],
+    "cap_gains":      [{"years": "1-30", "amount": 0}],
 }
 
 # Realistic Test profile income (MFJ, $9.92M portfolio, born 1980, retirement 65)
 # Used in G4 realistic income tests
 TEST_INCOME = {
     "w2": [
-        {"ages": "47-64", "amount_nom": 350_000},   # working years
-        {"ages": "65-65", "amount_nom": 175_000},   # partial retirement year
+        {"ages": "47-64", "amount": 350_000},   # working years
+        {"ages": "65-65", "amount": 175_000},   # partial retirement year
     ],
     "ordinary_other": [
-        {"ages": "66-95", "amount_nom": 51_000},    # SS taxable 85% of $60K combined
+        {"ages": "66-95", "amount": 51_000},    # SS taxable 85% of $60K combined
     ],
-    "rental":       [{"ages": "47-95", "amount_nom": 0}],
-    "interest":     [{"ages": "47-95", "amount_nom": 0}],
-    "qualified_div":[{"ages": "47-95", "amount_nom": 0}],
-    "cap_gains":    [{"ages": "47-95", "amount_nom": 0}],
+    "rental":       [{"ages": "47-95", "amount": 0}],
+    "interest":     [{"ages": "47-95", "amount": 0}],
+    "qualified_div":[{"ages": "47-95", "amount": 0}],
+    "cap_gains":    [{"ages": "47-95", "amount": 0}],
 }
 
 BASE_INFLATION = {
@@ -525,12 +525,12 @@ _SYSTEM_NOSS_FILES = {
         {"ages": "75-95", "amount_k": 200, "base_k": 120},
     ]},
     "income.json": {
-        "w2":            [{"ages": "47-64", "amount_nom": 120000}],
-        "ordinary_other":[{"ages": "47-95", "amount_nom": 0}],
-        "rental":        [{"ages": "47-95", "amount_nom": 0}],
-        "interest":      [{"ages": "47-95", "amount_nom": 0}],
-        "qualified_div": [{"ages": "47-95", "amount_nom": 0}],
-        "cap_gains":     [{"ages": "47-95", "amount_nom": 0}],
+        "w2":            [{"ages": "47-64", "amount": 120000}],
+        "ordinary_other":[{"ages": "47-95", "amount": 0}],
+        "rental":        [{"ages": "47-95", "amount": 0}],
+        "interest":      [{"ages": "47-95", "amount": 0}],
+        "qualified_div": [{"ages": "47-95", "amount": 0}],
+        "cap_gains":     [{"ages": "47-95", "amount": 0}],
     },
     "inflation_yearly.json": copy.deepcopy(BASE_INFLATION),
     "economic.json":          copy.deepcopy(BASE_ECONOMIC),
@@ -575,12 +575,12 @@ _SYSTEM_SINGLE_FILES = {
         {"ages": "75-95", "amount_k": 130, "base_k": 100},
     ]},
     "income.json": {
-        "w2":            [{"ages": "47-64", "amount_nom": 120000}],
-        "ordinary_other":[{"ages": "66-95", "amount_nom": 20000}],
-        "rental":        [{"ages": "47-95", "amount_nom": 0}],
-        "interest":      [{"ages": "47-95", "amount_nom": 0}],
-        "qualified_div": [{"ages": "47-95", "amount_nom": 0}],
-        "cap_gains":     [{"ages": "47-95", "amount_nom": 0}],
+        "w2":            [{"ages": "47-64", "amount": 120000}],
+        "ordinary_other":[{"ages": "66-95", "amount": 20000}],
+        "rental":        [{"ages": "47-95", "amount": 0}],
+        "interest":      [{"ages": "47-95", "amount": 0}],
+        "qualified_div": [{"ages": "47-95", "amount": 0}],
+        "cap_gains":     [{"ages": "47-95", "amount": 0}],
     },
     "inflation_yearly.json": copy.deepcopy(BASE_INFLATION),
     "economic.json":          copy.deepcopy(BASE_ECONOMIC),
@@ -677,12 +677,12 @@ _SYSTEM_RMD73_FILES = {
         {"ages": "73-95", "amount_k": 200, "base_k": 140},
     ]},
     "income.json": {
-        "w2":            [{"ages": "73-95", "amount_nom": 0}],
-        "ordinary_other":[{"ages": "73-95", "amount_nom": 58000}],
-        "rental":        [{"ages": "73-95", "amount_nom": 0}],
-        "interest":      [{"ages": "73-95", "amount_nom": 0}],
-        "qualified_div": [{"ages": "73-95", "amount_nom": 0}],
-        "cap_gains":     [{"ages": "73-95", "amount_nom": 0}],
+        "w2":            [{"ages": "73-95", "amount": 0}],
+        "ordinary_other":[{"ages": "73-95", "amount": 58000}],
+        "rental":        [{"ages": "73-95", "amount": 0}],
+        "interest":      [{"ages": "73-95", "amount": 0}],
+        "qualified_div": [{"ages": "73-95", "amount": 0}],
+        "cap_gains":     [{"ages": "73-95", "amount": 0}],
     },
     "inflation_yearly.json": copy.deepcopy(BASE_INFLATION),
     "economic.json":          copy.deepcopy(BASE_ECONOMIC),
@@ -751,12 +751,12 @@ _SYSTEM_RMD75_FILES = {
         {"ages": "75-95", "amount_k": 220, "base_k": 160},
     ]},
     "income.json": {
-        "w2":            [{"ages": "66-95", "amount_nom": 0}],
-        "ordinary_other":[{"ages": "67-95", "amount_nom": 46000}],
-        "rental":        [{"ages": "66-95", "amount_nom": 0}],
-        "interest":      [{"ages": "66-95", "amount_nom": 0}],
-        "qualified_div": [{"ages": "66-95", "amount_nom": 0}],
-        "cap_gains":     [{"ages": "66-95", "amount_nom": 0}],
+        "w2":            [{"ages": "66-95", "amount": 0}],
+        "ordinary_other":[{"ages": "67-95", "amount": 46000}],
+        "rental":        [{"ages": "66-95", "amount": 0}],
+        "interest":      [{"ages": "66-95", "amount": 0}],
+        "qualified_div": [{"ages": "66-95", "amount": 0}],
+        "cap_gains":     [{"ages": "66-95", "amount": 0}],
     },
     "inflation_yearly.json": copy.deepcopy(BASE_INFLATION),
     "economic.json":          copy.deepcopy(BASE_ECONOMIC),
@@ -923,7 +923,7 @@ def load_cfg(name: str, state: str = "California", filing: str = "MFJ") -> Dict[
 def _income_arrays(income_cfg, paths, n_years=None):
     # income_cfg is the dict returned by load_income() — already expanded into
     # per-year numpy arrays.  Do NOT pass through build_income_streams, which
-    # expects the raw JSON structure (rows with "years"/"amount_nom" keys) and
+    # expects the raw JSON structure (rows with "years"/"amount" keys) and
     # returns zeros when given pre-expanded arrays.
     NY = n_years if n_years is not None else YEARS
     _z = np.zeros(NY, dtype=float)
@@ -1364,8 +1364,8 @@ def group4_income(paths: int):
         return result
 
     rt_w2 = _roundtrip({**BASE_INCOME,
-                         "w2": [{"ages": "56-60", "amount_nom": 200_000},
-                                {"ages": "61-95", "amount_nom": 0}]},
+                         "w2": [{"ages": "56-60", "amount": 200_000},
+                                {"ages": "61-95", "amount": 0}]},
                         current_age=55.0)
     w2_arr = np.asarray(rt_w2.get("w2", []), dtype=float)
     # ages 56-60 → years 1-5 (current_age=55), 61-95 → years 6-40
@@ -1374,9 +1374,9 @@ def group4_income(paths: int):
                        f"w2[:5]={w2_arr[:5].tolist()} w2[5]={float(w2_arr[5]) if len(w2_arr)>5 else 'N/A'}"))
 
     rt_r = _roundtrip({**BASE_INCOME,
-                        "rental":         [{"ages": "56-95", "amount_nom": 24_000}],
-                        "interest":       [{"ages": "56-95", "amount_nom": 12_000}],
-                        "ordinary_other": [{"ages": "56-70", "amount_nom": 18_000}]},
+                        "rental":         [{"ages": "56-95", "amount": 24_000}],
+                        "interest":       [{"ages": "56-95", "amount": 12_000}],
+                        "ordinary_other": [{"ages": "56-70", "amount": 18_000}]},
                        current_age=55.0)
     rental_arr = np.asarray(rt_r.get("rental", []), dtype=float)
     oo_arr     = np.asarray(rt_r.get("ordinary_other", []), dtype=float)
@@ -1394,41 +1394,41 @@ def group4_income(paths: int):
 
     res_w2, t = ephemeral_run("g4a_w2", paths,
                                income={**BASE_INCOME,
-                                       "w2": [{"ages": "56-60", "amount_nom": 200_000},
-                                              {"ages": "61-95", "amount_nom": 0}]}); elapsed += t
+                                       "w2": [{"ages": "56-60", "amount": 200_000},
+                                              {"ages": "61-95", "amount": 0}]}); elapsed += t
     checks.append(chk_len("W2 income: 30yr portfolio", _portfolio_future(res_w2)))
     checks.append(chk_all_finite("W2 income: no NaN", _portfolio_future(res_w2)))
 
     res_rental, t = ephemeral_run("g4b_rental", paths,
                                    income={**BASE_INCOME,
-                                           "rental":         [{"ages": "56-95", "amount_nom": 24_000}],
-                                           "interest":       [{"ages": "56-95", "amount_nom": 12_000}],
-                                           "ordinary_other": [{"ages": "56-70", "amount_nom": 18_000}]}); elapsed += t
+                                           "rental":         [{"ages": "56-95", "amount": 24_000}],
+                                           "interest":       [{"ages": "56-95", "amount": 12_000}],
+                                           "ordinary_other": [{"ages": "56-70", "amount": 18_000}]}); elapsed += t
     checks.append(chk_len("rental+interest+ord_other: 30yr portfolio", _portfolio_future(res_rental)))
     checks.append(chk_all_finite("rental+interest+ord_other: no NaN", _portfolio_future(res_rental)))
 
     res_qd, t = ephemeral_run("g4c_qual_div_cg", paths,
                                income={**BASE_INCOME,
-                                       "qualified_div": [{"ages": "56-95", "amount_nom": 50_000}],
-                                       "cap_gains":     [{"ages": "56-95", "amount_nom": 40_000}]}); elapsed += t
+                                       "qualified_div": [{"ages": "56-95", "amount": 50_000}],
+                                       "cap_gains":     [{"ages": "56-95", "amount": 40_000}]}); elapsed += t
     checks.append(chk_len("qual_div+cap_gains: 30yr fed_tax array", _tax_fed(res_qd)))
     checks.append(chk_len("qual_div+cap_gains: 30yr niit array",    _tax_niit(res_qd)))
     checks.append(chk_all_finite("qual_div+cap_gains: no NaN", _portfolio_future(res_qd)))
 
     res_stagger, t = ephemeral_run("g4d_staggered", paths,
                                     income={**BASE_INCOME,
-                                            "rental": [{"ages": "56-60", "amount_nom": 0},
-                                                       {"ages": "61-95", "amount_nom": 36_000}]}); elapsed += t
+                                            "rental": [{"ages": "56-60", "amount": 0},
+                                                       {"ages": "61-95", "amount": 36_000}]}); elapsed += t
     checks.append(chk_len("staggered rental: 30yr portfolio", _portfolio_future(res_stagger)))
     checks.append(chk_all_finite("staggered rental: no NaN", _portfolio_future(res_stagger)))
 
     res_all, t = ephemeral_run("g4e_all_income", paths,
-                                income={"w2":             [{"ages": "56-65", "amount_nom": 50_000}],
-                                        "rental":         [{"ages": "56-95", "amount_nom": 18_000}],
-                                        "interest":       [{"ages": "56-95", "amount_nom":  8_000}],
-                                        "ordinary_other": [{"ages": "56-75", "amount_nom": 10_000}],
-                                        "qualified_div":  [{"ages": "56-95", "amount_nom": 30_000}],
-                                        "cap_gains":      [{"ages": "56-95", "amount_nom": 20_000}]}); elapsed += t
+                                income={"w2":             [{"ages": "56-65", "amount": 50_000}],
+                                        "rental":         [{"ages": "56-95", "amount": 18_000}],
+                                        "interest":       [{"ages": "56-95", "amount":  8_000}],
+                                        "ordinary_other": [{"ages": "56-75", "amount": 10_000}],
+                                        "qualified_div":  [{"ages": "56-95", "amount": 30_000}],
+                                        "cap_gains":      [{"ages": "56-95", "amount": 20_000}]}); elapsed += t
     b, t_, r = end_by_type(res_all)
     checks.append(chk("all-income: balances > 0", b + t_ + r > 0, f"total={b+t_+r:,.0f}"))
     checks.append(chk_all_finite("all-income: no NaN", _portfolio_future(res_all)))
@@ -1491,12 +1491,12 @@ def group4_income(paths: int):
     # Run sim with realistic income — verify stability
     # Note: ephemeral_run uses BASE_PERSON (current_age=55), so use age ranges starting from 56
     _INCOME_55 = {
-        "w2":          [{"ages": "56-69", "amount_nom": 350_000}, {"ages": "70-70", "amount_nom": 175_000}],
-        "ordinary_other": [{"ages": "71-95", "amount_nom": 51_000}],
-        "rental":      [{"ages": "56-95", "amount_nom": 0}],
-        "interest":    [{"ages": "56-95", "amount_nom": 0}],
-        "qualified_div":[{"ages": "56-95", "amount_nom": 0}],
-        "cap_gains":   [{"ages": "56-95", "amount_nom": 0}],
+        "w2":          [{"ages": "56-69", "amount": 350_000}, {"ages": "70-70", "amount": 175_000}],
+        "ordinary_other": [{"ages": "71-95", "amount": 51_000}],
+        "rental":      [{"ages": "56-95", "amount": 0}],
+        "interest":    [{"ages": "56-95", "amount": 0}],
+        "qualified_div":[{"ages": "56-95", "amount": 0}],
+        "cap_gains":   [{"ages": "56-95", "amount": 0}],
     }
     res_realistic, t = ephemeral_run("g4f_realistic", paths, income=_INCOME_55); elapsed += t
     fed_realistic = _tax_fed(res_realistic)
@@ -2427,7 +2427,7 @@ def group11_tax_wiring(paths: int):
     # The base profile has zero ordinary income → array is correctly zero.
     # To verify Gap 2 wiring, inject $60k/yr rental income.
     inc_rental = copy.deepcopy(BASE_INCOME)
-    inc_rental["rental"] = [{"years": "1-30", "amount_nom": 60_000}]
+    inc_rental["rental"] = [{"years": "1-30", "amount": 60_000}]
     res_inc, t2 = ephemeral_run("g11_income", paths, income=inc_rental); elapsed += t2
 
     # ── 11a: Gap 2 — withdrawals tax arrays populated ─────────────────────
@@ -2488,7 +2488,7 @@ def group11_tax_wiring(paths: int):
     p_niit = copy.deepcopy(BASE_PERSON)
     p_niit["roth_conversion_policy"]["avoid_niit"] = False
     inc_niit = copy.deepcopy(BASE_INCOME)
-    inc_niit["qualified_div"] = [{"years": "1-30", "amount_nom": 300_000}]
+    inc_niit["qualified_div"] = [{"years": "1-30", "amount": 300_000}]
     res_niit, t = ephemeral_run("g11e_niit_fires", paths,
                                  person=p_niit, income=inc_niit); elapsed += t
     niit_fires = _wd_taxes_niit(res_niit)
@@ -2559,9 +2559,9 @@ def group11_tax_wiring(paths: int):
         return abs(actual - expected) / expected <= tol
 
     inc_50k = copy.deepcopy(BASE_INCOME)
-    inc_50k["rental"] = [{"years": "1-30", "amount_nom": 50_000}]
+    inc_50k["rental"] = [{"years": "1-30", "amount": 50_000}]
     inc_200k = copy.deepcopy(BASE_INCOME)
-    inc_200k["rental"] = [{"years": "1-30", "amount_nom": 200_000}]
+    inc_200k["rental"] = [{"years": "1-30", "amount": 200_000}]
     p_noconv = copy.deepcopy(BASE_PERSON)
     p_noconv["roth_conversion_policy"]["enabled"] = False
 
@@ -2651,7 +2651,7 @@ def group11_tax_wiring(paths: int):
         "g11q_wa_base", paths, person=p_noconv, income=inc_200k,
         ignore_conv=True, state="Washington", filing="MFJ"); elapsed += t
     inc_wa_cg = copy.deepcopy(BASE_INCOME)
-    inc_wa_cg["cap_gains"] = [{"years": "1-30", "amount_nom": 350_000}]
+    inc_wa_cg["cap_gains"] = [{"years": "1-30", "amount": 350_000}]
     res_wa_cg, t = ephemeral_run(
         "g11q_wa_cg", paths, person=p_noconv, income=inc_wa_cg,
         ignore_conv=True, state="Washington", filing="MFJ"); elapsed += t
@@ -5162,7 +5162,7 @@ def group25_ss_provisional_income(paths: int):
 
     p_ss_w2 = copy.deepcopy(p_ss_only)
     inc_w2 = copy.deepcopy(BASE_INCOME)
-    inc_w2["w2"] = [{"years": "1-30", "amount_nom": 150_000}]
+    inc_w2["w2"] = [{"years": "1-30", "amount": 150_000}]
 
     res_ss_only, t = ephemeral_run("g25c_ss_only", paths, person=p_ss_only, income=inc_zero,
                                    ignore_conv=True)
@@ -5211,7 +5211,7 @@ def group25_ss_provisional_income(paths: int):
     # Set ordinary_other to non-zero for retirement years (manually entered SS)
     # Use a years-format entry since BASE_INCOME is years-format
     inc_manual["ordinary_other"] = [
-        {"years": "8-30", "amount_nom": 53_000}  # year 8 = age 67 (SS active)
+        {"years": "8-30", "amount": 53_000}  # year 8 = age 67 (SS active)
     ]
     res_manual, t = ephemeral_run("g25e_manual", paths, person=p_ss_manual,
                                   income=inc_manual, ignore_conv=True)
@@ -5266,9 +5266,9 @@ def group26_excess_income_policy(paths: int):
         "qualified_div": [],
         "cap_gains": [],
         "misc": [
-            {"years": "5",       "amount_nom": 50_000},           # one-time bonus (taxable default)
-            {"years": "10-12",   "amount_nom": 17_000, "taxable": False},  # non-taxable gift
-            {"years": "15",      "amount_nom": 100_000},           # inheritance (taxable default)
+            {"years": "5",       "amount": 50_000},           # one-time bonus (taxable default)
+            {"years": "10-12",   "amount": 17_000, "taxable": False},  # non-taxable gift
+            {"years": "15",      "amount": 100_000},           # inheritance (taxable default)
         ]
     }
     with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as _tf:
@@ -5299,6 +5299,40 @@ def group26_excess_income_policy(paths: int):
     checks.append(chk("26a: misc_taxable year 15 = 1.0 (taxable default)",
         abs(float(_misc_tax[14]) - 1.0) < 1e-6, f"got {float(_misc_tax[14]):.1f}"))
 
+    # ── 26a2: dollar_type = future → is_future flag set correctly ─────────────
+    # Verify load_income correctly reads dollar_type="future" rows and sets
+    # the *_is_future flag arrays. The actual deflation happens in api.py.
+    _income_data2 = {
+        "w2": [
+            {"years": "1-5",  "amount": 200_000},                              # current (default)
+            {"years": "6-10", "amount": 200_000, "dollar_type": "current"},    # explicit current
+            {"years": "11-15","amount": 200_000, "dollar_type": "future"},     # future dollars
+        ],
+        "rental": [], "interest": [], "ordinary_other": [],
+        "qualified_div": [], "cap_gains": [], "misc": []
+    }
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as _tf2:
+        _json.dump(_income_data2, _tf2)
+        _tmp2 = _tf2.name
+    try:
+        _result2 = _load_income(_tmp2, current_age=55.0, max_years=20)
+    finally:
+        _os.unlink(_tmp2)
+
+    _w2_future = _result2.get("w2_is_future", [])
+    checks.append(chk("26a2: w2_is_future years 1-5 = 0.0 (current, default)",
+        all(abs(float(_w2_future[i]) - 0.0) < 1e-6 for i in range(5)),
+        f"got {[float(_w2_future[i]) for i in range(5)]}"))
+    checks.append(chk("26a2: w2_is_future years 6-10 = 0.0 (current, explicit)",
+        all(abs(float(_w2_future[i]) - 0.0) < 1e-6 for i in range(5, 10)),
+        f"got {[float(_w2_future[i]) for i in range(5,10)]}"))
+    checks.append(chk("26a2: w2_is_future years 11-15 = 1.0 (future)",
+        all(abs(float(_w2_future[i]) - 1.0) < 1e-6 for i in range(10, 15)),
+        f"got {[float(_w2_future[i]) for i in range(10,15)]}"))
+    checks.append(chk("26a2: w2_is_future years 16-20 = 0.0 (unspecified → current)",
+        all(abs(float(_w2_future[i]) - 0.0) < 1e-6 for i in range(15, 20)),
+        f"got {[float(_w2_future[i]) for i in range(15,20)]}"))
+
     # ── 26b: income offset reduces portfolio withdrawal ───────────────────────
     # Profile with $200K W2 income and $150K withdrawal target.
     # At 30% tax rate, net W2 = $140K — close to but below $150K target.
@@ -5314,7 +5348,7 @@ def group26_excess_income_policy(paths: int):
     p_noconv["roth_conversion_policy"]["enabled"] = False
 
     inc_w2_200k = copy.deepcopy(BASE_INCOME)
-    inc_w2_200k["w2"] = [{"years": "1-15", "amount_nom": 200_000}]
+    inc_w2_200k["w2"] = [{"years": "1-15", "amount": 200_000}]
 
     res_no_income, t  = ephemeral_run("g26b_no_income",  paths, person=p_noconv,
                                       income=BASE_INCOME, ignore_conv=True)
@@ -5340,7 +5374,7 @@ def group26_excess_income_policy(paths: int):
     # Net W2 at 30% = $350K >> $150K target. Surplus = $200K deposited to brokerage.
     # Brokerage balance should be significantly HIGHER than run without W2 income.
     inc_w2_500k = copy.deepcopy(BASE_INCOME)
-    inc_w2_500k["w2"] = [{"years": "1-10", "amount_nom": 500_000}]
+    inc_w2_500k["w2"] = [{"years": "1-10", "amount": 500_000}]
 
     # Write profile manually to capture cfg for diagnostic
     _tag_surplus = "g26c_surplus"
@@ -5382,10 +5416,10 @@ def group26_excess_income_policy(paths: int):
     # Run with taxable misc vs non-taxable misc. Federal taxes should be higher
     # for taxable misc (appears in ordinary income) vs non-taxable (excluded).
     inc_misc_taxable = copy.deepcopy(BASE_INCOME)
-    inc_misc_taxable["misc"] = [{"years": "1-10", "amount_nom": 50_000}]  # taxable default
+    inc_misc_taxable["misc"] = [{"years": "1-10", "amount": 50_000}]  # taxable default
 
     inc_misc_nontax = copy.deepcopy(BASE_INCOME)
-    inc_misc_nontax["misc"] = [{"years": "1-10", "amount_nom": 50_000, "taxable": False}]  # gift
+    inc_misc_nontax["misc"] = [{"years": "1-10", "amount": 50_000, "taxable": False}]  # gift
 
     res_misc_tax,   t = ephemeral_run("g26d_misc_tax",   paths, person=p_noconv,
                                       income=inc_misc_taxable, ignore_conv=True)
