@@ -1,0 +1,55 @@
+{
+  "_comment": "SYSTEM FIXTURE: single filer \u2014 different brackets + std deduction $15,750",
+  "current_age": 46,
+  "birth_year": 1980,
+  "assumed_death_age": 88,
+  "filing_status": "single",
+  "state": "California",
+  "target_age": 95,
+  "retirement_age": 65,
+  "simulation_mode": "retirement",
+  "spouse": {},
+  "beneficiaries": {
+    "primary": [
+      {
+        "name": "Child A",
+        "relationship": "child",
+        "birth_year": 2001,
+        "share_percent": 100,
+        "eligible_designated_beneficiary": false,
+        "per_stirpes": true
+      }
+    ],
+    "contingent": []
+  },
+  "rmd_policy": {
+    "extra_handling": "reinvest_in_brokerage"
+  },
+  "roth_conversion_policy": {
+    "enabled": true,
+    "window_years": [
+      "now-75"
+    ],
+    "keepit_below_max_marginal_fed_rate": "fill the bracket",
+    "avoid_niit": true,
+    "rmd_assist": "convert",
+    "tax_payment_source": "BROKERAGE",
+    "irmaa_guard": {
+      "enabled": false
+    }
+  },
+  "rmd_table": "uniform_lifetime",
+  "roth_optimizer_config": {
+    "include_survivor_scenario": false,
+    "include_heir_scenario": true,
+    "irmaa_sensitivity": "low",
+    "window_years": 29
+  },
+  "social_security": {
+    "self_benefit_monthly": 2000,
+    "self_start_age": 67,
+    "spouse_benefit_monthly": 0,
+    "spouse_start_age": 67,
+    "exclude_from_plan": false
+  }
+}

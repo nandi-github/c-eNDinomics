@@ -1,69 +1,77 @@
 {
   "w2": [
     {
-      "ages": "47-64",
-      "amount_nom": 350000,
-      "_note": "Gross W2 salary ages 47-64 (working years). ~$318.5K taxable \u2192 24% marginal bracket MFJ."
-    },
-    {
-      "ages": "65-65",
-      "amount_nom": 175000,
-      "_note": "Partial year W2 age 65 (transition to retirement)."
+      "years": "1-30",
+      "amount_nom": 0
     }
   ],
   "ordinary_other": [
     {
-      "ages": "66-95",
-      "amount_nom": 51000,
-      "_note": "Social Security taxable portion (85% of ~$60K combined). Spouse SS starts age 70, self SS starts age 70 \u2014 using combined from age 66 (conservative)."
+      "years": "1-30",
+      "amount_nom": 0
     }
   ],
   "rental": [
     {
-      "ages": "47-95",
+      "years": "1-30",
       "amount_nom": 0
     }
   ],
   "interest": [
     {
-      "ages": "47-95",
+      "years": "1-30",
       "amount_nom": 0
     }
   ],
   "qualified_div": [
     {
-      "ages": "47-95",
+      "years": "1-30",
       "amount_nom": 0
     }
   ],
   "cap_gains": [
     {
-      "ages": "47-95",
+      "years": "1-30",
       "amount_nom": 0
     }
   ],
+  "misc": [],
   "readme": {
-    "purpose": "Income from sources OUTSIDE the simulator accounts. Portfolio accounts handle their own distributions internally \u2014 do NOT re-enter those here.",
+    "purpose": "Income from sources OUTSIDE the simulator accounts. Portfolio accounts handle their own distributions internally — do NOT re-enter those here.",
     "format": {
       "ages": "Recommended. Use age ranges: '47-64' means ages 47 through 64 inclusive. Converted to simulation years using current_age from person.json.",
       "years": "Legacy format. Year 1 = current_age + 1. Still supported for backward compatibility."
     },
     "what_not_to_enter": "Do NOT enter: dividends or gains from accounts in allocation_yearly.json, RMDs (computed automatically), Roth conversion amounts. Entering these causes double-counting.",
-    "gross_amounts": "All amounts are GROSS (pre-tax). The simulator computes federal, state, NIIT taxes.",
-    "tax_stacking_note": "Income here stacks at the BOTTOM of the tax bracket \u2014 below RMDs and Roth conversions. W2 $350K fills to 24% bracket during working years. After retirement, SS-only income ($51K taxable = $19.5K after std deduction) leaves huge headroom for Roth conversions.",
-    "profile_notes": {
-      "ages_47_64": "W2 $350K \u2192 taxable $318.5K \u2192 24% marginal. Roth conversion headroom limited but still valuable vs future 35%+ RMD bracket.",
-      "age_65": "Partial W2 $175K transition year.",
-      "ages_66_74": "SS $51K taxable \u2192 $19.5K after std deduction \u2192 10% bracket. Prime Roth conversion window \u2014 $375K/yr headroom to 24% bracket.",
-      "ages_75_95": "RMDs dominate. SS + RMDs likely push to 35%+ bracket."
-    },
+    "gross_amounts": "All amounts are GROSS (pre-tax). The simulator computes federal, state, NIIT, and Additional Medicare Tax.",
+    "withdrawal_offset": "Net income from these sources automatically reduces the portfolio withdrawal needed each year. If W2 + rental + SS net after-tax already covers your $150K spending target, the simulator draws $0 from the portfolio that year. Surplus (net income above target) is routed per excess_income_policy in economic.json.",
     "income_types": {
-      "w2": "Gross wages or salary. Ordinary income rates.",
-      "rental": "Net rental income after expenses. Ordinary income rates.",
-      "interest": "Taxable interest from outside accounts.",
-      "ordinary_other": "Social Security (taxable portion 85%), pensions, annuities.",
-      "qualified_div": "Qualified dividends from outside accounts. LTCG rates.",
-      "cap_gains": "Realized capital gains from outside assets. LTCG rates."
-    }
+      "w2": "Gross wages or salary. Ordinary income tax rates. Also triggers Additional Medicare Tax (0.9%) on amounts above $250K MFJ / $200K single.",
+      "rental": "Net rental income after expenses. Ordinary income rates. Does NOT trigger Additional Medicare Tax.",
+      "interest": "Taxable interest from bank accounts, CDs, bonds outside portfolio accounts.",
+      "ordinary_other": "Social Security (taxable portion), pensions, annuities, non-qualified distributions. If a social_security block is in person.json, that overrides ordinary_other for SS-active years (only for years where ordinary_other is zero — manual entries are preserved).",
+      "qualified_div": "Qualified dividends from outside accounts (non-portfolio). Lower LTCG rates apply.",
+      "cap_gains": "Realized capital gains from outside assets (property sale, non-portfolio investments). LTCG rates.",
+      "misc": "One-off income not fitting other categories. Use for: gifts received, inheritances, bonuses, asset sale proceeds, insurance payouts. Each entry can optionally set 'taxable': false for non-taxable items (gifts, inheritances) — these still count toward surplus routing but are excluded from the tax engine."
+    },
+    "misc_examples": [
+      {
+        "_example": "One-time bonus in year 3 (taxable)",
+        "years": "3",
+        "amount_nom": 50000
+      },
+      {
+        "_example": "Annual gift from parents ages 60-65 (non-taxable — under annual gift exclusion)",
+        "ages": "60-65",
+        "amount_nom": 17000,
+        "taxable": false
+      },
+      {
+        "_example": "Inheritance received at age 70 (non-taxable)",
+        "ages": "70",
+        "amount_nom": 200000,
+        "taxable": false
+      }
+    ]
   }
 }

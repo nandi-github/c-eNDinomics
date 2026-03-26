@@ -110,6 +110,9 @@ def run_accounts_new(
     qual_div_cur_paths: Optional[np.ndarray] = None,
     cap_gains_cur_paths: Optional[np.ndarray] = None,
     ytd_income_nom_paths: Optional[np.ndarray] = None,
+    w2_income_cur_paths: Optional[np.ndarray] = None,        # W2 wages — for Additional Medicare Tax (0.9%)
+    income_sources_cur_paths: Optional[np.ndarray] = None,  # Income.json sources only (pre-RMD/conversion) — for withdrawal offset
+    excess_income_policy: Optional[Dict[str, Any]] = None,  # From economic.json — how to route surplus income
     person_cfg: Optional[Dict[str, Any]] = None,
     rmd_table_path: Optional[str] = None,
     conversion_per_year_nom: Optional[float] = None,  # NEW
@@ -177,6 +180,52 @@ def run_accounts_new(
         current_age=_current_age_now, retirement_age=_retirement_age,
         simulation_mode=_simulation_mode,
     )
+
+    # ── Pre-compute income surplus and inject into deposits_yearly ─────────────
+    # Surplus = net income after approx tax minus withdrawal target.
+    # Must happen BEFORE simulate_balances so the deposit compounds correctly
+    # through the year-by-year growth simulation. Doing it after (in-loop) means
+    # the deposit only affects a single year's balance — it doesn't compound.
+    #
+    # Note: alloc_accounts is a caller-owned dict — deep-copy deposits_yearly
+    # to avoid mutating the caller's data.
+    if (income_sources_cur_paths is not None
+            and excess_income_policy is not None
+            and apply_withdrawals
+            and sched is not None):
+        _eip_pre = excess_income_policy or {}
+        _surplus_tax_rate_pre = float(_eip_pre.get("income_offset_tax_rate", 0.30))
+        _surplus_policy_pre   = str(_eip_pre.get("surplus_policy", "reinvest_in_brokerage"))
+        if _surplus_policy_pre == "reinvest_in_brokerage":
+            _sched_pre = np.asarray(sched, dtype=float)
+            if _sched_pre.size < n_years:
+                _sched_pre = np.concatenate([_sched_pre,
+                    np.full(n_years - _sched_pre.size, _sched_pre[-1] if _sched_pre.size else 0.0)])
+            _gross_mean_pre = income_sources_cur_paths[:, :n_years].mean(axis=0)
+            _net_pre        = _gross_mean_pre * (1.0 - _surplus_tax_rate_pre)
+            _surplus_pre    = np.maximum(_net_pre - _sched_pre[:n_years], 0.0)  # current USD
+
+            # Identify first brokerage account
+            _brok_names = [a for a in (alloc_accounts.get("per_year_portfolios") or {}).keys()
+                           if "BROKERAGE" in a.upper() or "TAXABLE" in a.upper()]
+            if _brok_names and np.any(_surplus_pre > 0):
+                _brok0 = _brok_names[0]
+                # Deep-copy deposits_yearly so we don't mutate caller's alloc_accounts
+                import copy as _copy
+                alloc_accounts = dict(alloc_accounts)
+                alloc_accounts["deposits_yearly"] = {
+                    k: v.copy() if hasattr(v, "copy") else np.array(v, dtype=float)
+                    for k, v in (alloc_accounts.get("deposits_yearly") or {}).items()
+                }
+                _dep = alloc_accounts["deposits_yearly"].get(_brok0,
+                    np.zeros(n_years, dtype=float))
+                # Convert surplus from current USD to nominal (approximate: use year index
+                # as proxy — exact deflator built after simulate_balances, but current≈nominal
+                # for early years and the deposit magnitude matters more than exact scaling)
+                for _y in range(min(n_years, len(_surplus_pre), len(_dep))):
+                    if _surplus_pre[_y] > 0.0:
+                        _dep[_y] = _dep[_y] + _surplus_pre[_y]
+                alloc_accounts["deposits_yearly"][_brok0] = _dep
 
     # Core Monte Carlo
     acct_eoy_nom, total_nom_paths, total_real_paths, acct_class_eoy_nom = simulate_balances(
@@ -542,6 +591,7 @@ def run_accounts_new(
                 cap_gains_cur_paths[:, y],
                 tax_cfg,
                 ytd_income_nom_paths[:, y],
+                w2_income_cur_paths[:, y] if w2_income_cur_paths is not None else None,
             )
 
     # Snapshot ordinary_income_cur_paths immediately after tax computation.
@@ -684,8 +734,38 @@ def run_accounts_new(
 
         planned_cur = sched_vec.copy()
 
-        # Mean-basis: how much does the plan exceed the mean RMD each year?
-        extra_cur = np.maximum(planned_cur - rmd_current_mean, 0.0)
+        # ── Income offset: reduce portfolio draw by external income ──────────────
+        # External income sources (W2, rental, SS, misc) flow through the tax engine
+        # separately. The withdrawal_schedule specifies the after-tax PORTFOLIO take-home
+        # target. If external income already meets part (or all) of living expenses,
+        # the portfolio draw should be reduced accordingly.
+        #
+        # Uses approximate after-tax income = gross_income × (1 - income_offset_tax_rate)
+        # income_offset_tax_rate is configured in economic.json excess_income_policy.
+        # Default 0.30 (30% effective rate). This is an approximation — the actual tax
+        # is computed by the full tax engine above. Phase 2 will replace this with
+        # exact computed after-tax income once per-source tax tracking is added.
+        _eip = excess_income_policy or {}
+        _income_offset_tax_rate = float(_eip.get("income_offset_tax_rate", 0.30))
+        _surplus_policy = str(_eip.get("surplus_policy", "reinvest_in_brokerage")).strip()
+
+        _net_income_offset = np.zeros(n_years, dtype=float)  # current USD, per year
+        _surplus_income_cur = np.zeros(n_years, dtype=float)  # current USD surplus per year
+
+        if income_sources_cur_paths is not None and income_sources_cur_paths.shape[1] >= n_years:
+            # Mean across paths (income is deterministic, so all paths identical)
+            _gross_income_mean = income_sources_cur_paths[:, :n_years].mean(axis=0)  # (n_years,)
+            _net_income_offset = _gross_income_mean * (1.0 - _income_offset_tax_rate)
+            # Surplus = how much net income exceeds the withdrawal target (in current USD)
+            _surplus_income_cur = np.maximum(
+                _net_income_offset - planned_cur,
+                0.0
+            )
+
+        # Adjusted withdrawal target = planned - income offset
+        # The RMD offset is kept separate — extra_cur already accounts for RMD
+        _income_adjusted_planned = np.maximum(planned_cur - _net_income_offset, 0.0)
+        extra_cur = np.maximum(_income_adjusted_planned - rmd_current_mean, 0.0)
 
         realized_cur   = np.zeros(n_years, dtype=float)
         shortfall_cur  = np.zeros(n_years, dtype=float)

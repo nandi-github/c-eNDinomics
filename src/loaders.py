@@ -568,6 +568,7 @@ def load_allocation_yearly_accounts(path: str) -> Dict[str, Any]:
         "starting": starting,
         "deposits_yearly": deposits_yearly,
         "per_year_portfolios": per_year_portfolios,
+        "account_types": accounts,   # dict: account_name → type string (taxable/traditional_ira/roth_ira)
         "warnings": warnings,
     }
     logger.debug("[DEBUG loaders] alloc_accounts keys: %s", list(result.keys()))
@@ -727,6 +728,25 @@ def load_income(
                     out[y - 1] = amt
         return out
 
+    def _expand_misc_taxable(rows: list) -> np.ndarray:
+        """Per-year taxability flag for misc income (1.0 = taxable, 0.0 = non-taxable).
+        Defaults to 1.0 (taxable) unless row has "taxable": false.
+        Non-taxable misc (gifts, inheritances) still flows for surplus routing
+        but is excluded from ordinary_income_cur_paths in the tax engine."""
+        out = np.ones(max_years, dtype=float)  # default: all taxable
+        for r in (rows or []):
+            if bool(r.get("taxable", True)):
+                continue  # taxable = default, leave as 1.0
+            # Non-taxable entry: mark those years as 0.0
+            if "ages" in r:
+                yrs = _ages_range(str(r["ages"]), current_age, max_years)
+            else:
+                yrs = _years_range(str(r.get("years", "*")), max_years)
+            for y in yrs:
+                if 1 <= y <= max_years:
+                    out[y - 1] = 0.0
+        return out
+
     return {
         "w2":             _expand_series("w2"),
         "rental":         _expand_series("rental"),
@@ -734,6 +754,12 @@ def load_income(
         "ordinary_other": _expand_series("ordinary_other"),
         "qualified_div":  _expand_series("qualified_div"),
         "cap_gains":      _expand_series("cap_gains"),
+        # Misc: one-off income not fitting other categories (gifts, bonuses, inheritances,
+        # asset sale proceeds). Taxable as ordinary income unless row has "taxable": false.
+        # Non-taxable misc (gifts/inheritances) still flows through for surplus routing
+        # but is excluded from the tax engine's ordinary_income_cur_paths.
+        "misc":           _expand_series("misc"),
+        "misc_taxable":   _expand_misc_taxable(data.get("misc", [])),
     }
 
 # -----------------------------

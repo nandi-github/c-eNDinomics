@@ -1,11 +1,16 @@
 {
-  "current_age": "compute",
-  "birth_year": 1980,
-  "assumed_death_age": 95,
+  "_comment": "SYSTEM FIXTURE: RMD75 \u2014 born 1960 (age 66). SECURE 2.0: born >=1960 \u2192 RMD starts at 75. Tests zero-RMD for years 1-8, non-zero from year 9.",
+  "current_age": 66,
+  "birth_year": 1960,
+  "assumed_death_age": 88,
   "filing_status": "MFJ",
+  "state": "California",
+  "target_age": 95,
+  "retirement_age": 65,
+  "simulation_mode": "retirement",
   "spouse": {
     "name": "Spouse",
-    "birth_year": 1975,
+    "birth_year": 1963,
     "sole_beneficiary_for_ira": true
   },
   "beneficiaries": {
@@ -18,14 +23,14 @@
     ],
     "contingent": [
       {
-        "name": "Child",
+        "name": "Child A",
         "relationship": "child",
-        "birth_year": 2005,
+        "birth_year": 1990,
         "share_percent": 100,
         "eligible_designated_beneficiary": false,
         "per_stirpes": true,
-        "estimated_income_moderate": 150000,
-        "estimated_income_high": 300000,
+        "estimated_income_moderate": 100000,
+        "estimated_income_high": 180000,
         "filing_status": "MFJ"
       }
     ]
@@ -35,7 +40,9 @@
   },
   "roth_conversion_policy": {
     "enabled": true,
-    "window_years": ["now-75"],
+    "window_years": [
+      "now-75"
+    ],
     "keepit_below_max_marginal_fed_rate": "fill the bracket",
     "avoid_niit": true,
     "rmd_assist": "convert",
@@ -44,25 +51,18 @@
       "enabled": false
     }
   },
-  "state": "California",
   "rmd_table": "uniform_lifetime",
-  "target_age": 95,
-  "simulation_mode": "automatic",
-  "retirement_age": 65,
   "roth_optimizer_config": {
     "include_survivor_scenario": true,
     "include_heir_scenario": true,
-    "irmaa_sensitivity": "low"
+    "irmaa_sensitivity": "low",
+    "window_years": 29
   },
   "social_security": {
-    "self_benefit_monthly": 2500,
+    "self_benefit_monthly": 2200,
     "self_start_age": 67,
-    "spouse_benefit_monthly": 1800,
+    "spouse_benefit_monthly": 1600,
     "spouse_start_age": 67,
     "exclude_from_plan": false
-  },
-  "readme": {
-    "purpose": "Test profile — realistic scenario for functional test suite. Born 1980, MFJ, CA, age ~46. Large TRAD IRA ($9.92M total) with CRITICAL timebomb severity. Used by all Python test groups (G1-G25) and Playwright tests. Do not use for personal planning.",
-    "_schema_note": "Schema matches default/person.json. Fields and structure must stay in sync."
   }
 }

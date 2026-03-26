@@ -1,5 +1,5 @@
 {
-  "_comment": "Global market assumptions shared across ALL profiles. No withdrawal sequences here \u2014 those are per-profile in economic.json.",
+  "_comment": "Global market assumptions shared across ALL profiles. No withdrawal sequences here — those are per-profile in economic.json.",
   "defaults": {
     "bad_market": {
       "drawdown_threshold": 0.15,
@@ -34,6 +34,10 @@
       "upside_outperformance_threshold": 0.15,
       "upside_max_factor": 1.25,
       "upside_scale_curve": "linear"
+    },
+    "excess_income_policy": {
+      "surplus_policy": "reinvest_in_brokerage",
+      "income_offset_tax_rate": 0.30
     },
     "core_inflation_pct": 2.5
   },
@@ -130,44 +134,53 @@
     }
   ],
   "readme": {
-    "purpose": "Global market behavior settings shared across ALL profiles. Overrides section applies year-range-specific changes. Profile economic.json is merged on top for profile-specific differences \u2014 profile values win on any conflict.",
+    "purpose": "Global market behavior settings shared across ALL profiles. Overrides section applies year-range-specific changes. Profile economic.json is merged on top for profile-specific differences — profile values win on any conflict.",
     "bad_market": {
       "drawdown_threshold": "Portfolio decline fraction from peak that triggers bad-market mode. E.g. 0.15 = 15% below peak switches to bad-market withdrawal sequencing and suppresses rebalancing.",
       "use_recession_flag": "true = also trigger bad-market mode if the stochastic model sets a macro recession flag, even if drawdown threshold has not yet been crossed.",
-      "p10_signal_enabled": "true = also trigger bad-market mode when the cross-sectional P10 annual return across all paths is below p10_return_threshold_pct. This is a leading indicator — catches deteriorating market conditions before any single path hits the drawdown threshold.",
-      "p10_return_threshold_pct": "P10 return level (%) below which bad-market mode triggers. E.g. -2.0 = if the 10th-percentile path is returning worse than -2% this year, treat as bad market even if the median path is still positive."
+      "p10_signal_enabled": "true = also trigger bad-market mode when the cross-sectional P10 annual return across all paths is below p10_return_threshold_pct.",
+      "p10_return_threshold_pct": "P10 return level (%) below which bad-market mode triggers."
     },
     "cash_reserve": {
-      "months": "Months of withdrawal target kept as liquid cash buffer. E.g. 6 = six-month cash cushion always maintained in brokerage.",
-      "allow_dip_below_reserve": "false = never let cash fall below the reserve floor even if it means a withdrawal shortfall.",
-      "use_cash_only_in_bad_markets": "true = only draw from the cash reserve during bad markets; use investment accounts in good markets."
+      "months": "Months of withdrawal target kept as liquid cash buffer.",
+      "allow_dip_below_reserve": "false = never let cash fall below the reserve floor.",
+      "use_cash_only_in_bad_markets": "true = only draw from cash reserve during bad markets."
     },
     "rebalancing": {
-      "global_drift_threshold": "Maximum allowed drift as a fraction of target weight before rebalancing triggers. E.g. 0.12 = \u00b112% of target weight. Overrides the per-portfolio rebalance_band_pct default from allocation_yearly.json when set here.",
-      "require_cash_above_reserve_to_rebalance": "true = do not execute rebalancing trades if cash is at or below the reserve threshold.",
-      "suppress_in_bad_market": "true = pause all rebalancing during bad-market periods to avoid locking in losses at depressed prices.",
-      "brokerage_capgain_limit_k": "Maximum capital gains in $k per year realized from brokerage rebalancing. Tax note: brokerage rebalancing generates taxable capital gains \u2014 this cap prevents a single rebalance from creating a large unexpected tax bill. TRAD and Roth rebalancing generates no taxable event.",
-      "brokerage_enabled": "true/false. Master switch for brokerage rebalancing. TRAD and Roth accounts always rebalance without tax consequence."
+      "global_drift_threshold": "Maximum allowed drift as a fraction of target weight before rebalancing triggers.",
+      "require_cash_above_reserve_to_rebalance": "true = do not rebalance if cash is at or below reserve.",
+      "suppress_in_bad_market": "true = pause all rebalancing during bad-market periods.",
+      "brokerage_capgain_limit_k": "Maximum capital gains in $k per year realized from brokerage rebalancing.",
+      "brokerage_enabled": "Master switch for brokerage rebalancing."
     },
     "withdrawals": {
-      "shock_scaling_enabled": "true = scale down take-home withdrawals during bad markets. false = withdraw full target regardless. Note: even when scaled down, taxes are still computed on actual income (RMDs, conversions) and debited from brokerage separately.",
-      "drawdown_threshold": "Portfolio decline fraction at which scaling begins. Should match bad_market.drawdown_threshold for consistent behavior.",
-      "min_scaling_factor": "Minimum fraction of the target withdrawal paid out. E.g. 0.65 = never deliver less than 65% of planned take-home. Works together with floor_k in withdrawal_schedule.json \u2014 the effective floor is max(floor_k, min_scaling_factor \u00d7 target).",
+      "shock_scaling_enabled": "true = scale down take-home withdrawals during bad markets.",
+      "drawdown_threshold": "Portfolio decline fraction at which scaling begins.",
+      "min_scaling_factor": "Minimum fraction of target withdrawal paid out. E.g. 0.65 = never below 65% of planned.",
       "scale_curve_options": {
-        "linear": "Take-home scales linearly from 100% at threshold down to min_scaling_factor at full drawdown.",
-        "poly": "Polynomial scaling. scale_poly_alpha > 1 = gentle reduction at first, sharper near the bottom.",
-        "exp": "Exponential scaling. scale_exp_lambda controls how quickly reduction accelerates."
+        "linear": "Take-home scales linearly from 100% at threshold to min_scaling_factor at full drawdown.",
+        "poly": "Polynomial scaling. scale_poly_alpha > 1 = gentle then sharp.",
+        "exp": "Exponential scaling. scale_exp_lambda controls acceleration."
       },
-      "use_recession_flag": "Same as bad_market \u2014 also scale withdrawals when recession flag is set.",
-      "makeup_enabled": "true = in good years following a scaled-down year, make up a portion of the missed take-home.",
-      "makeup_ratio": "Fraction of the cumulative missed withdrawal recovered per good year. E.g. 0.3 = recover 30% of the deficit each year.",
-      "makeup_cap_per_year": "Maximum makeup payment as fraction of that year's target. E.g. 0.1 = makeup never exceeds 10% of the year's planned withdrawal.",
-      "upside_scaling_enabled": "false = withdrawals never exceed amount_k (default). true = when portfolio outperforms baseline median path by outperformance_threshold, scale withdrawals up toward upside_max_factor × amount_k. Only applies in automatic and retirement modes.",
-      "upside_outperformance_threshold": "Portfolio outperformance fraction above which upside scaling begins. E.g. 0.15 = portfolio must be >15% above expected median before withdrawals are raised.",
-      "upside_max_factor": "Maximum upside withdrawal as a multiple of amount_k. E.g. 1.25 = cap at 125% of planned withdrawal in the best years.",
-      "upside_scale_curve": "Shape of upside scaling: linear (default), poly, or exp. Same semantics as scale_curve for downside."
+      "use_recession_flag": "Also scale withdrawals when recession flag is set.",
+      "makeup_enabled": "true = in good years after a scaled-down year, recover a portion of missed take-home.",
+      "makeup_ratio": "Fraction of cumulative missed withdrawal recovered per good year.",
+      "makeup_cap_per_year": "Maximum makeup as fraction of that year's target.",
+      "upside_scaling_enabled": "false = withdrawals never exceed amount_k. true = scale up when portfolio outperforms.",
+      "upside_outperformance_threshold": "Portfolio outperformance fraction above which upside scaling begins.",
+      "upside_max_factor": "Maximum upside withdrawal as a multiple of amount_k.",
+      "upside_scale_curve": "Shape of upside scaling."
     },
-    "overrides_note": "Time-bounded only. Each override applies for its years range then reverts to the defaults block. To make a permanent change, update the defaults block instead of adding a permanent override.",
-    "core_inflation_pct": "Long-run core inflation assumption (%). Used as the fallback rate when inflation_yearly.json does not cover a simulation year. Fed long-run target is ~2.0%; recent 2022-2024 experience was 4-9%; 2.5% is a reasonable baseline. Override in inflation_yearly.json for specific year ranges."
+    "excess_income_policy": {
+      "purpose": "Controls what happens when external income (W2, rental, SS, misc) net after-tax EXCEEDS the withdrawal_schedule target. The withdrawal target is reduced by net income — this policy handles the surplus.",
+      "surplus_policy_options": {
+        "reinvest_in_brokerage": "Route surplus to the first brokerage account. Grows the portfolio — best for accumulators still building wealth.",
+        "spend": "Treat surplus as additional spending. No portfolio impact — best for retirees who want to spend their full income."
+      },
+      "income_offset_tax_rate": "Approximate effective tax rate applied to gross income to estimate net take-home for portfolio offset. Default 0.30 (30%). This is a planning approximation — actual taxes are computed exactly by the tax engine. Set higher (e.g. 0.40) for high-income working years, lower (e.g. 0.20) for retirement years. Phase 2 will use exact computed taxes.",
+      "note": "The withdrawal_schedule.json specifies the after-tax PORTFOLIO take-home target. When W2/rental/SS net income already covers living expenses, the simulator draws nothing from the portfolio for those years. This is the correct modeling of real behavior: a $450K earner with $150K expenses does not drain their IRA while working."
+    },
+    "overrides_note": "Time-bounded only. Each override applies for its years range then reverts to defaults.",
+    "core_inflation_pct": "Long-run core inflation assumption (%). Fallback when inflation_yearly.json doesn't cover a year."
   }
 }

@@ -4,15 +4,17 @@
   "_self_crc_field": "SHA256 of the tracked list (JSON, sorted keys). Verified at startup to detect manifest.lock corruption.",
   "_self_crc": "9fe104fd720e286c",
   "hashes": {
-    "api.py": "f977353259f89a1c",
-    "test_flags.py": "34ad97535469ffe7",
+    "api.py": "51bdfeacf1343bff",
+    "test_flags.py": "e2cf5369a4bea753",
     "ui/tests/smoke.spec.ts": "f92d2bc58b1f1099",
     "ui/tests/global-setup.ts": "16b4790e640b153e",
     "ui/tests/global-teardown.ts": "b49600b2b2430ec2",
     "ui/playwright.config.ts": "b4d013b46bf7ddb4",
     "roth_optimizer.py": "c98f14dbe9019ee3",
     "ui/src/App.tsx": "190fb24fd5d1c694",
-    "taxes_core.py": "ef276bce9b4992b7"
+    "taxes_core.py": "ef276bce9b4992b7",
+    "simulator_new.py": "c119f6f9d233df70",
+    "loaders.py": "72202c09e8f2a230"
   },
   "tracked": [
     "api.py",

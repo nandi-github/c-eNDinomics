@@ -1,0 +1,15 @@
+{
+  "floor_k": 100,
+  "schedule": [
+    {
+      "ages": "66-74",
+      "amount_k": 180,
+      "base_k": 130
+    },
+    {
+      "ages": "75-95",
+      "amount_k": 220,
+      "base_k": 160
+    }
+  ]
+}

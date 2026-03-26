@@ -29,154 +29,19 @@
     "BROKERAGE-1": 500000,
     "BROKERAGE-2": 250000,
     "TRAD_IRA-1": 3500000,
-    "TRAD_IRA-2": 2200000,
+    "TRAD_IRA-2": 1300000,
     "ROTH_IRA-1": 250000,
     "ROTH_IRA-2": 120000
   },
   "deposits_yearly": [
     {
-      "years": "1-5",
+      "years": "1-30",
       "BROKERAGE-1": 0,
       "BROKERAGE-2": 0,
       "TRAD_IRA-1": 0,
       "TRAD_IRA-2": 0,
       "ROTH_IRA-1": 0,
       "ROTH_IRA-2": 0
-    },
-    {
-      "years": "6-30",
-      "BROKERAGE-1": 0,
-      "BROKERAGE-2": 0,
-      "TRAD_IRA-1": 0,
-      "TRAD_IRA-2": 0,
-      "ROTH_IRA-1": 0,
-      "ROTH_IRA-2": 0
-    }
-  ],
-  "overrides": [
-    {
-      "years": "7-10",
-      "mode": "augment",
-      "BROKERAGE-1": {
-        "portfolios": {
-          "GROWTH": {
-            "weight_pct": 60,
-            "classes_pct": {
-              "US_STOCKS": 68,
-              "INTL_STOCKS": 22,
-              "GOLD": 5,
-              "COMMOD": 5
-            }
-          },
-          "FOUNDATIONAL": {
-            "weight_pct": 40,
-            "classes_pct": {
-              "LONG_TREAS": 42,
-              "INT_TREAS": 28,
-              "TIPS": 30
-            }
-          }
-        }
-      },
-      "BROKERAGE-2": {
-        "portfolios": {
-          "GROWTH": {
-            "weight_pct": 60,
-            "classes_pct": {
-              "US_STOCKS": 68,
-              "INTL_STOCKS": 22,
-              "GOLD": 5,
-              "COMMOD": 5
-            }
-          },
-          "FOUNDATIONAL": {
-            "weight_pct": 40,
-            "classes_pct": {
-              "LONG_TREAS": 42,
-              "INT_TREAS": 28,
-              "TIPS": 30
-            }
-          }
-        }
-      },
-      "TRAD_IRA-1": {
-        "portfolios": {
-          "GROWTH": {
-            "weight_pct": 70,
-            "classes_pct": {
-              "US_STOCKS": 65,
-              "INTL_STOCKS": 25,
-              "GOLD": 5,
-              "COMMOD": 5
-            }
-          },
-          "FOUNDATIONAL": {
-            "weight_pct": 30,
-            "classes_pct": {
-              "LONG_TREAS": 35,
-              "INT_TREAS": 35,
-              "TIPS": 30
-            }
-          }
-        }
-      },
-      "TRAD_IRA-2": {
-        "portfolios": {
-          "GROWTH": {
-            "weight_pct": 70,
-            "classes_pct": {
-              "US_STOCKS": 65,
-              "INTL_STOCKS": 25,
-              "GOLD": 5,
-              "COMMOD": 5
-            }
-          },
-          "FOUNDATIONAL": {
-            "weight_pct": 30,
-            "classes_pct": {
-              "LONG_TREAS": 35,
-              "INT_TREAS": 35,
-              "TIPS": 30
-            }
-          }
-        }
-      },
-      "ROTH_IRA-1": {
-        "portfolios": {
-          "GROWTH": {
-            "weight_pct": 80,
-            "classes_pct": {
-              "US_STOCKS": 75,
-              "INTL_STOCKS": 25
-            }
-          },
-          "FOUNDATIONAL": {
-            "weight_pct": 20,
-            "classes_pct": {
-              "TIPS": 50,
-              "INT_TREAS": 50
-            }
-          }
-        }
-      },
-      "ROTH_IRA-2": {
-        "portfolios": {
-          "GROWTH": {
-            "weight_pct": 80,
-            "classes_pct": {
-              "US_STOCKS": 75,
-              "INTL_STOCKS": 25
-            }
-          },
-          "FOUNDATIONAL": {
-            "weight_pct": 20,
-            "classes_pct": {
-              "TIPS": 50,
-              "INT_TREAS": 50
-            }
-          }
-        }
-      }
     }
   ],
   "global_allocation": {
@@ -565,33 +430,5 @@
       }
     }
   },
-  "readme": {
-    "purpose": "Portfolio structure: account definitions, starting balances, annual deposits, and asset allocation. 'global_allocation' is the default for all years. 'overrides' are time-bounded and revert to global_allocation after their range ends.",
-    "accounts": {
-      "name": "Unique account identifier used throughout all JSON files. Must match exactly \u2014 case-sensitive.",
-      "type_options": "'taxable' (brokerage \u2014 gains taxed annually, withdrawals are take-home), 'traditional_ira' (pre-tax \u2014 every dollar withdrawn is taxable as ordinary income, subject to RMDs after age 73/75), 'roth_ira' (post-tax \u2014 withdrawals are completely tax-free, no RMDs ever)"
-    },
-    "starting": "Starting balance in nominal dollars per account at simulation year 0. IMPORTANT: TRAD IRA balances are fully pre-tax \u2014 the IRS has a claim on every dollar. Roth balances are post-tax \u2014 withdrawals are tax-free. Brokerage balances may have embedded unrealized gains subject to capital gains tax on sale (cost basis not modeled here).",
-    "deposits_yearly": "Annual tax-advantaged contributions per account per year range. In nominal dollars. IRA contribution limits are NOT enforced \u2014 set to 0 if not contributing. IMPORTANT: Use deposits_yearly ONLY for tax-advantaged accounts (traditional_ira, roth_ira, 401k). DO NOT use for brokerage deposits \u2014 surplus external income (W2/rental/SS/misc above spending target) is automatically routed to brokerage per excess_income_policy in economic.json. Note: TRAD IRA deposits reduce current-year taxable income (not modeled here); Roth IRA deposits are after-tax with no current deduction.",
-    "global_allocation": {
-      "purpose": "Default allocation for ALL years. Used for any year not covered by an override. Changing this affects the whole simulation unless overridden.",
-      "portfolios": "Named portfolio buckets within an account. Weights must sum to 100 across all portfolios in the account.",
-      "weight_pct": "Percentage of the account in this portfolio bucket. All portfolio weight_pct values for an account must sum to 100.",
-      "classes_pct": {
-        "purpose": "Asset class breakdown within a portfolio. Must sum to 100.",
-        "available_classes": "US_STOCKS, INTL_STOCKS, GOLD, COMMOD, LONG_TREAS, INT_TREAS, TIPS, CASH"
-      },
-      "holdings_pct": "Optional. Specific ETF/fund tickers within each class. Must sum to 100 per class. Used for display and benchmark comparison only \u2014 does not affect simulation returns.",
-      "rebalance_band_pct": "Optional per-portfolio override. Drift band as % of target weight before rebalancing triggers. Default: 10 (meaning \u00b110% of target). E.g. if target is 20%, band is 18%-22%."
-    },
-    "overrides": {
-      "purpose": "Time-bounded allocation changes. After the years range ends, allocation reverts to global_allocation. No permanent overrides \u2014 update global_allocation instead.",
-      "years": "Year range e.g. '7-10'. Year 1 = current_age + 1.",
-      "mode_options": {
-        "augment": "Merge with global_allocation \u2014 only specified accounts/portfolios/classes are changed, rest inherit from global.",
-        "replace": "Full replacement \u2014 specified accounts completely override global_allocation for this period."
-      }
-    },
-    "deposits_yearly_brokerage_note": "Brokerage deposits are handled automatically via excess_income_policy in economic.json. When net external income exceeds the withdrawal_schedule target, the surplus is deposited to brokerage without needing manual configuration here. This eliminates the need to estimate and manually enter annual savings amounts."
-  }
+  "overrides": []
 }

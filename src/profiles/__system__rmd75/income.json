@@ -1,0 +1,38 @@
+{
+  "w2": [
+    {
+      "ages": "66-95",
+      "amount_nom": 0
+    }
+  ],
+  "ordinary_other": [
+    {
+      "ages": "67-95",
+      "amount_nom": 46000
+    }
+  ],
+  "rental": [
+    {
+      "ages": "66-95",
+      "amount_nom": 0
+    }
+  ],
+  "interest": [
+    {
+      "ages": "66-95",
+      "amount_nom": 0
+    }
+  ],
+  "qualified_div": [
+    {
+      "ages": "66-95",
+      "amount_nom": 0
+    }
+  ],
+  "cap_gains": [
+    {
+      "ages": "66-95",
+      "amount_nom": 0
+    }
+  ]
+}

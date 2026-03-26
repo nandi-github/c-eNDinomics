@@ -25,19 +25,33 @@
       ],
       "tira_age_gate": 59.5,
       "roth_last_resort": true
+    },
+    "excess_income_policy": {
+      "surplus_policy": "reinvest_in_brokerage",
+      "income_offset_tax_rate": 0.30
     }
   },
   "readme": {
-    "purpose": "Per-profile withdrawal sequencing strategy. Merged on top of economicglobal.json — profile values win on any conflict. Only put things here that differ from global defaults.",
-    "tax_note": "Withdrawal sequence determines WHICH account is drained but taxes are always computed on the full income stack and debited from brokerage separately. Sequence choice is a tax efficiency decision: draining TRAD first generates more ordinary income (higher bracket usage) but reduces future RMD burden; draining Roth last preserves the most tax-free growth.",
+    "purpose": "Per-profile withdrawal sequencing strategy and income surplus policy. Merged on top of economicglobal.json — profile values win on any conflict. Only put things here that differ from global defaults.",
+    "tax_note": "Withdrawal sequence determines WHICH portfolio account is drained but taxes are always computed on the full income stack and debited from brokerage separately. Sequence choice is a tax efficiency decision: draining TRAD first generates more ordinary income (higher bracket usage) but reduces future RMD burden; draining Roth last preserves the most tax-free growth.",
+    "income_sources_note": "External income (W2, rental, SS, misc from income.json) is processed BEFORE portfolio withdrawals. Net after-tax income reduces the portfolio draw needed each year. When W2 income covers all expenses, portfolio withdrawal is $0 — the simulator does not drain the IRA while you are earning. Surplus income is routed per excess_income_policy.",
     "withdrawal_sequence": {
-      "purpose": "Controls which accounts to draw from first in good vs bad markets. Earlier entries are drained first.",
+      "purpose": "Controls which PORTFOLIO accounts to draw from when the withdrawal target exceeds external income. Earlier entries are drained first.",
+      "note": "This sequence applies only to portfolio accounts (BROKERAGE, TRAD_IRA, ROTH_IRA). External income sources (W2, rental, SS, misc) offset the withdrawal target first — the sequence handles the remainder.",
       "account_tokens": "Use account names from allocation_yearly.json. For brokerage sub-buckets: 'BROKERAGE-1:equities' or 'BROKERAGE-1:bonds'. Plain 'TRAD_IRA' means all TRAD_IRA accounts drawn proportionally by balance.",
-      "order_good_market": "Withdrawal order when portfolio is above the bad_market drawdown threshold in economicglobal.json.",
-      "order_bad_market": "Withdrawal order when portfolio is below the drawdown threshold and Roth conversion is OFF. Typically bonds first to protect depressed equities from forced sale.",
-      "order_bad_market_with_conversion": "Withdrawal order when portfolio is below threshold and Roth conversion is ON. TRAD first opportunistically converts at low asset prices; brokerage bonds fund living expenses and the conversion tax bill.",
-      "tira_age_gate": "Age below which TRAD_IRA withdrawals incur 10% early withdrawal penalty. IRS rule, default 59.5. Simulator enforces brokerage-only withdrawals below this age regardless of sequence setting.",
-      "roth_last_resort": "true = never draw from Roth unless all other accounts are fully exhausted. Preserves tax-free compounding as long as possible."
+      "order_good_market": "Portfolio draw order when portfolio is above the bad_market drawdown threshold.",
+      "order_bad_market": "Portfolio draw order when portfolio is below the drawdown threshold and Roth conversion is OFF. Typically bonds first to protect depressed equities.",
+      "order_bad_market_with_conversion": "Portfolio draw order when portfolio is below threshold and Roth conversion is ON.",
+      "tira_age_gate": "Age below which TRAD_IRA withdrawals incur 10% early withdrawal penalty. Default 59.5. Simulator enforces brokerage-only regardless of sequence setting.",
+      "roth_last_resort": "true = never draw from Roth unless all other accounts are fully exhausted."
+    },
+    "excess_income_policy": {
+      "purpose": "What to do when net income from income.json sources exceeds the withdrawal_schedule target for a given year.",
+      "surplus_policy_options": {
+        "reinvest_in_brokerage": "Route surplus to first brokerage account. Best for working years — builds taxable wealth while protecting tax-advantaged accounts.",
+        "spend": "Surplus is additional spending. No portfolio deposit. Best for retirement when all income should be consumed."
+      },
+      "income_offset_tax_rate": "Approximate effective tax rate used to estimate net take-home for portfolio offset. 0.30 = 30% effective rate. Override per-profile for accuracy: working high-income years may be 0.38+, retirement years with SS-only may be 0.15."
     }
   }
 }

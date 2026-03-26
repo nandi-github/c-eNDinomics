@@ -1,0 +1,26 @@
+{
+  "defaults": {
+    "withdrawal_sequence": {
+      "order_good_market": [
+        "TRAD_IRA",
+        "BROKERAGE:equities",
+        "BROKERAGE:bonds",
+        "ROTH_IRA"
+      ],
+      "order_bad_market": [
+        "BROKERAGE:bonds",
+        "BROKERAGE:equities",
+        "TRAD_IRA",
+        "ROTH_IRA"
+      ],
+      "order_bad_market_with_conversion": [
+        "TRAD_IRA",
+        "BROKERAGE:bonds",
+        "BROKERAGE:equities",
+        "ROTH_IRA"
+      ],
+      "tira_age_gate": 59.5,
+      "roth_last_resort": true
+    }
+  }
+}

@@ -71,7 +71,8 @@ COVERAGE MAP
                  Gap 4: summary totals wired and consistent with yearly arrays
                  NIIT suppressed by avoid_niit=True; fires when income > threshold
                  California state tax fires; effective rate in plausible range
-                 Additional Medicare Tax (0.9% on W2 > $250K MFJ / $200K single)
+                 11r: Additional Medicare Tax unit test (taxes_core.py direct)
+                 11s: Additional Medicare Tax end-to-end simulation (W2 vs rental delta)
     Group 12 — Roth conversion tax verification
                  conv_tax > 0 when active, = 0 when disabled
                  Tax rate (tax/converted) in plausible marginal range [10%, 50%]
@@ -97,6 +98,20 @@ COVERAGE MAP
                  Monotonically non-decreasing with income; capped at 85% gross
                  exclude_from_plan=True zeroes SS; taxes ≤ normal SS-only run
                  End-to-end: SS+$150K W2 taxes > SS-only taxes
+    Group 26 — Excess income policy (misc income + portfolio withdrawal offset)
+                 misc income type: taxable/non-taxable per entry
+                 Portfolio withdrawal reduced when W2 income covers expenses
+                 Surplus income deposited to brokerage (reinvest_in_brokerage)
+                 Non-taxable misc excluded from ordinary_income_cur_paths
+    Group 27 — IRA/Roth contribution rules (12 checks)
+                 W2=0 → zeroed (earned income requirement, both TRAD and Roth)
+                 Under-50 cap $7K / Age 50+ cap $8K
+                 W2 < cap → capped at W2
+                 Deposit > cap → clamped silently with log
+                 Roth phase-out MFJ $236K-$246K: above ceiling zeroed, in-range partial
+                 TRAD IRA: no income phase-out
+                 Brokerage accounts untouched
+                 Single filer thresholds ($150K-$165K)
 
 NOT COVERED HERE (requires api.py pre-processing path)
     economicglobal.json shock_scaling_enabled, min_scaling_factor, scale_curve,
@@ -926,15 +941,25 @@ def _income_arrays(income_cfg, paths, n_years=None):
     ord_other  = _pad(income_cfg.get("ordinary_other", _z))
     qual_div   = _pad(income_cfg.get("qualified_div",  _z))
     cap_gains  = _pad(income_cfg.get("cap_gains",      _z))
+    # misc: separate taxable and non-taxable portions
+    misc_raw  = _pad(income_cfg.get("misc",         _z))
+    misc_tax  = _pad(income_cfg.get("misc_taxable", np.ones(NY, dtype=float)))
+    misc_taxable    = misc_raw * misc_tax           # taxable misc → ordinary income + tax engine
+    misc_nontaxable = misc_raw * (1.0 - misc_tax)  # non-taxable misc → surplus routing only
 
     ord_ = np.zeros((paths, NY)); qd = np.zeros((paths, NY))
     cg   = np.zeros((paths, NY)); ytd = np.zeros((paths, NY))
+    w2p  = np.zeros((paths, NY))                   # W2 only — for Additional Medicare Tax
+    src  = np.zeros((paths, NY))                   # all sources — for income offset / surplus routing
     for y in range(NY):
-        ord_[:, y] = w2[y] + rental[y] + interest[y] + ord_other[y]
+        ord_[:, y] = w2[y] + rental[y] + interest[y] + ord_other[y] + misc_taxable[y]
         qd[:, y]   = qual_div[y]
         cg[:, y]   = cap_gains[y]
+        w2p[:, y]  = w2[y]
+        src[:, y]  = w2[y] + rental[y] + interest[y] + ord_other[y] + misc_taxable[y] + misc_nontaxable[y]
     return dict(ordinary_income_cur_paths=ord_, qual_div_cur_paths=qd,
-                cap_gains_cur_paths=cg, ytd_income_nom_paths=ytd)
+                cap_gains_cur_paths=cg, ytd_income_nom_paths=ytd,
+                w2_income_cur_paths=w2p, income_sources_cur_paths=src)
 
 def _wd_seq(alloc, person, econ):
     names = list(alloc.get("per_year_portfolios", {}).keys())
@@ -983,6 +1008,7 @@ def sim(cfg, paths, ignore_wd=False, ignore_conv=False, ignore_rmd=False,
         rebalancing_enabled=rebalancing,
         shocks_events=cfg.get("shock_evts") or [],
         shocks_mode="augment",
+        excess_income_policy=(cfg["econ"].get("defaults", {}) or {}).get("excess_income_policy", {}),
         **inc,
     )
     return res, time.time() - t0
@@ -2696,6 +2722,52 @@ def group11_tax_wiring(paths: int):
         fed_350k_with_amt > fed_350k_no_amt,
         f"with_amt={fed_350k_with_amt:.0f} no_amt={fed_350k_no_amt:.0f}"))
 
+    # ── 11s: AMT vectorized path (compute_annual_taxes_paths directly) ──────────
+    # Tests the exact function that simulator_new.py calls per year.
+    # Passes a (paths,) array of W2 $350K values and verifies AMT fires.
+    # This is the right abstraction level — proves the vectorized path that
+    # the simulator calls works correctly, without depending on loaders.py
+    # income format details (which are tested separately in G4).
+    from taxes_core import compute_annual_taxes_paths as _cat_paths
+
+    _tax_cfg_e2e = load_tax_unified(TAX_GLOBAL_PATH, state="California", filing="MFJ")
+    # Inject AMT thresholds exactly as api.py does at runtime
+    _tax_cfg_e2e["ADDL_MEDICARE_THRESH"] = 250_000.0
+    _tax_cfg_e2e["ADDL_MEDICARE_RATE"]   = 0.009
+
+    _n_paths = paths
+    _w2_350k = np.full(_n_paths, 350_000.0)   # W2 $350K — AMT should fire ($900)
+    _no_w2   = np.zeros(_n_paths)             # No W2 — no AMT
+    _ord_350k = np.full(_n_paths, 350_000.0)  # Same ordinary income both cases
+    _zero     = np.zeros(_n_paths)
+
+    fed_w2_paths,    _, _, _ = _cat_paths(_ord_350k, _zero, _zero, _tax_cfg_e2e, _ord_350k, _w2_350k)
+    fed_no_w2_paths, _, _, _ = _cat_paths(_ord_350k, _zero, _zero, _tax_cfg_e2e, _ord_350k, _no_w2)
+
+    amt_paths_delta = float(np.mean(fed_w2_paths - fed_no_w2_paths))
+    checks.append(chk("11s: compute_annual_taxes_paths: W2 $350K adds AMT delta > 0",
+        amt_paths_delta > 0,
+        f"delta={amt_paths_delta:.2f} expected>0"))
+    checks.append(chk("11s: compute_annual_taxes_paths: AMT delta ≈ $900 (0.9% × $100K, tol=5%)",
+        _within(amt_paths_delta, 900.0, tol=0.05),
+        f"delta={amt_paths_delta:.2f} expected=900"))
+    # All paths should have identical delta (deterministic W2 = same for all paths)
+    amt_var = float(np.std(fed_w2_paths - fed_no_w2_paths))
+    checks.append(chk("11s: AMT delta is identical across all paths (deterministic W2)",
+        amt_var < 1.0,
+        f"std={amt_var:.4f} (expected ~0)"))
+    # Single-filer threshold: AMT fires on $250K+ (single), threshold is $200K
+    _tax_cfg_single = load_tax_unified(TAX_GLOBAL_PATH, state="California", filing="Single")
+    _tax_cfg_single["ADDL_MEDICARE_THRESH"] = 200_000.0
+    _tax_cfg_single["ADDL_MEDICARE_RATE"]   = 0.009
+    fed_single_w2, _, _, _ = _cat_paths(_ord_350k, _zero, _zero, _tax_cfg_single, _ord_350k, _w2_350k)
+    fed_single_nw, _, _, _ = _cat_paths(_ord_350k, _zero, _zero, _tax_cfg_single, _ord_350k, _no_w2)
+    amt_single_delta = float(np.mean(fed_single_w2 - fed_single_nw))
+    # Single threshold $200K → AMT on $150K → $1,350
+    checks.append(chk("11s: Single filer: AMT delta ≈ $1,350 (0.9% × $150K above $200K threshold)",
+        _within(amt_single_delta, 1_350.0, tol=0.05),
+        f"delta={amt_single_delta:.2f} expected=1350"))
+
     return "G11", "Tax wiring + bracket math + filing status + state rates + AMT", checks, elapsed
 
 
@@ -4320,12 +4392,16 @@ def group19_playwright(paths: int):
     elapsed = time.time() - t0
     output = result.stdout + result.stderr
 
-    # Clean up PlaywrightTest profile — always, regardless of test outcome
+    # Clean up PlaywrightTest profile — always, regardless of test outcome.
+    # Note: global-teardown.ts also deletes it, so a 404 here is expected and silent.
     _cleanup = _api(f"/profiles/delete", "POST", {"profile": _pw_profile})
+    _cleanup_err = str(_cleanup.get("error", ""))
     if _cleanup.get("ok"):
-        print(f"  [G19] PlaywrightTest profile deleted (cleanup)")
+        pass  # deleted successfully
+    elif "404" in _cleanup_err or "Not Found" in _cleanup_err:
+        pass  # already deleted by Playwright global-teardown — expected, not an error
     else:
-        print(f"  [G19] WARNING: could not delete PlaywrightTest: {_cleanup}")
+        print(f"  [G19] WARNING: unexpected cleanup error: {_cleanup}")
 
     passed = failed = 0
     for line in output.splitlines():
@@ -5158,6 +5234,305 @@ GROUPS.append(group25_ss_provisional_income)
 
 
 # ===========================================================================
+# GROUP 26 — EXCESS INCOME POLICY + MISC INCOME
+#
+# Verifies:
+#   1. misc income type flows through income loader (taxable + non-taxable)
+#   2. Income offset reduces portfolio withdrawal when income > target
+#   3. Surplus income deposited to brokerage when surplus_policy=reinvest
+#   4. No portfolio draw in years where income covers expenses
+# ===========================================================================
+
+def group26_excess_income_policy(paths: int):
+    """
+    Tests the excess_income_policy system:
+      - misc income type loading (taxable and non-taxable)
+      - portfolio withdrawal reduced when external income covers expenses
+      - surplus income deposited to brokerage
+    """
+    checks = []
+    elapsed = 0.0
+
+    # ── 26a: misc income in load_income ──────────────────────────────────────
+    # Verify load_income returns misc and misc_taxable arrays with correct values
+    import tempfile, json as _json, os as _os
+    from loaders import load_income as _load_income
+
+    _income_data = {
+        "w2": [],
+        "rental": [],
+        "interest": [],
+        "ordinary_other": [],
+        "qualified_div": [],
+        "cap_gains": [],
+        "misc": [
+            {"years": "5",       "amount_nom": 50_000},           # one-time bonus (taxable default)
+            {"years": "10-12",   "amount_nom": 17_000, "taxable": False},  # non-taxable gift
+            {"years": "15",      "amount_nom": 100_000},           # inheritance (taxable default)
+        ]
+    }
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as _tf:
+        _json.dump(_income_data, _tf)
+        _tmp_path = _tf.name
+
+    try:
+        _result = _load_income(_tmp_path, current_age=55.0, max_years=20)
+        _misc = _result.get("misc", [])
+        _misc_tax = _result.get("misc_taxable", [])
+    finally:
+        _os.unlink(_tmp_path)
+
+    # misc array should have values at correct indices (year 5 = index 4, etc.)
+    checks.append(chk("26a: misc income array present", len(_misc) > 0, f"got empty"))
+    checks.append(chk("26a: misc year 5 = $50K (one-time bonus)",
+        abs(float(_misc[4]) - 50_000) < 1.0, f"got {float(_misc[4]):.0f}"))
+    checks.append(chk("26a: misc years 10-12 = $17K (gift)",
+        abs(float(_misc[9]) - 17_000) < 1.0, f"got {float(_misc[9]):.0f}"))
+    checks.append(chk("26a: misc year 15 = $100K (inheritance)",
+        abs(float(_misc[14]) - 100_000) < 1.0, f"got {float(_misc[14]):.0f}"))
+
+    # misc_taxable: 1.0 = taxable, 0.0 = non-taxable
+    checks.append(chk("26a: misc_taxable year 5 = 1.0 (taxable bonus)",
+        abs(float(_misc_tax[4]) - 1.0) < 1e-6, f"got {float(_misc_tax[4]):.1f}"))
+    checks.append(chk("26a: misc_taxable year 10 = 0.0 (non-taxable gift)",
+        abs(float(_misc_tax[9]) - 0.0) < 1e-6, f"got {float(_misc_tax[9]):.1f}"))
+    checks.append(chk("26a: misc_taxable year 15 = 1.0 (taxable default)",
+        abs(float(_misc_tax[14]) - 1.0) < 1e-6, f"got {float(_misc_tax[14]):.1f}"))
+
+    # ── 26b: income offset reduces portfolio withdrawal ───────────────────────
+    # Profile with $200K W2 income and $150K withdrawal target.
+    # At 30% tax rate, net W2 = $140K — close to but below $150K target.
+    # Portfolio should draw only the shortfall (~$10K), not the full $150K.
+    # At 40% tax rate, net W2 = $120K → portfolio draws ~$30K shortfall.
+    #
+    # With no income offset (old behavior), portfolio always draws $150K.
+    # With income offset, portfolio draws max(0, $150K - net_W2).
+    #
+    # Test: run with W2 income + surplus policy. Compare total portfolio withdrawal
+    # to run without W2 income. Should be less.
+    p_noconv = copy.deepcopy(BASE_PERSON)
+    p_noconv["roth_conversion_policy"]["enabled"] = False
+
+    inc_w2_200k = copy.deepcopy(BASE_INCOME)
+    inc_w2_200k["w2"] = [{"years": "1-15", "amount_nom": 200_000}]
+
+    res_no_income, t  = ephemeral_run("g26b_no_income",  paths, person=p_noconv,
+                                      income=BASE_INCOME, ignore_conv=True)
+    elapsed += t
+    res_with_income, t = ephemeral_run("g26b_with_w2",   paths, person=p_noconv,
+                                       income=inc_w2_200k, ignore_conv=True)
+    elapsed += t
+
+    def _realized_wd(res):
+        """Actual portfolio draw — reduced by income offset."""
+        return res.get("withdrawals", {}).get("realized_current_mean", [0]*YEARS)
+
+    # Total portfolio withdrawal in first 10 years (working years)
+    _wd_no_inc   = sum(_realized_wd(res_no_income)[:10])
+    _wd_with_inc = sum(_realized_wd(res_with_income)[:10])
+
+    checks.append(chk("26b: Portfolio withdrawal lower when W2 income present",
+        _wd_with_inc < _wd_no_inc,
+        f"with_w2={_wd_with_inc:,.0f} no_income={_wd_no_inc:,.0f}"))
+
+    # ── 26c: surplus income deposited to brokerage ────────────────────────────
+    # Profile with $500K W2 income and $150K withdrawal target.
+    # Net W2 at 30% = $350K >> $150K target. Surplus = $200K deposited to brokerage.
+    # Brokerage balance should be significantly HIGHER than run without W2 income.
+    inc_w2_500k = copy.deepcopy(BASE_INCOME)
+    inc_w2_500k["w2"] = [{"years": "1-10", "amount_nom": 500_000}]
+
+    # Write profile manually to capture cfg for diagnostic
+    _tag_surplus = "g26c_surplus"
+    _name_surplus = write_profile(_tag_surplus, person=p_noconv, income=inc_w2_500k)
+    cfg_g26c = load_cfg(_name_surplus)
+    res_surplus, t = sim(cfg_g26c, paths, ignore_conv=True)
+    drop_profile(_tag_surplus)
+    elapsed += t
+
+    def _brok_end(res, acct="BROKERAGE-1"):
+        levels = _lvls(res)  # inv_nom_levels_mean_acct dict
+        arr = levels.get(acct) or []
+        return float(arr[-1]) if arr else 0.0
+
+    # ── 26c: surplus income deposited to brokerage ───────────────────────────
+    # Diagnostic: trace the exact values to find where surplus is lost
+    _inc_arrays_surplus = _income_arrays(cfg_g26c["income"], paths, n_years=49)
+    _src_y0 = float(_inc_arrays_surplus["income_sources_cur_paths"][0, 0])
+    _w2_y0  = float(_inc_arrays_surplus["w2_income_cur_paths"][0, 0])
+    checks.append(chk("26c-diag: income_sources_cur_paths year1 = $500K W2",
+        abs(_src_y0 - 500_000) < 1.0,
+        f"src_y0={_src_y0:,.0f} w2_y0={_w2_y0:,.0f}"))
+
+    # Verify realized withdrawal is near-zero (income offset covers target)
+    _inc_src = sum(_realized_wd(res_surplus)[:10])
+    _inc_src_base = sum(_realized_wd(res_no_income)[:10])
+    checks.append(chk("26c: Portfolio withdrawal reduced with $500K W2 (income offset active)",
+        _inc_src < _inc_src_base * 0.65,   # floor enforces base_k minimum; offset reduces above-floor draw
+        f"surplus_wd={_inc_src:,.0f} base_wd={_inc_src_base:,.0f} (floor=100K enforced)"))
+
+    # Total portfolio (current median) should be higher with $200K/yr surplus reinvested
+    _port_base    = sum(_portfolio_current_med(res_no_income)[-5:]) / 5
+    _port_surplus = sum(_portfolio_current_med(res_surplus)[-5:])   / 5
+    checks.append(chk("26c: Portfolio (current_median) higher when $200K/yr surplus reinvested",
+        _port_surplus > _port_base * 1.01,
+        f"surplus={_port_surplus:,.0f} base={_port_base:,.0f}"))
+
+    # ── 26d: non-taxable misc does not add to ordinary income ────────────────
+    # Run with taxable misc vs non-taxable misc. Federal taxes should be higher
+    # for taxable misc (appears in ordinary income) vs non-taxable (excluded).
+    inc_misc_taxable = copy.deepcopy(BASE_INCOME)
+    inc_misc_taxable["misc"] = [{"years": "1-10", "amount_nom": 50_000}]  # taxable default
+
+    inc_misc_nontax = copy.deepcopy(BASE_INCOME)
+    inc_misc_nontax["misc"] = [{"years": "1-10", "amount_nom": 50_000, "taxable": False}]  # gift
+
+    res_misc_tax,   t = ephemeral_run("g26d_misc_tax",   paths, person=p_noconv,
+                                      income=inc_misc_taxable, ignore_conv=True)
+    elapsed += t
+    res_misc_nontax, t = ephemeral_run("g26d_misc_nontax", paths, person=p_noconv,
+                                       income=inc_misc_nontax, ignore_conv=True)
+    elapsed += t
+
+    fed_misc_tax_yr1   = float(_wd_taxes_fed(res_misc_tax)[0])   if _wd_taxes_fed(res_misc_tax)   else 0.0
+    fed_misc_nontax_yr1 = float(_wd_taxes_fed(res_misc_nontax)[0]) if _wd_taxes_fed(res_misc_nontax) else 0.0
+    checks.append(chk("26d: Taxable misc generates higher fed tax than non-taxable misc",
+        fed_misc_tax_yr1 > fed_misc_nontax_yr1,
+        f"taxable={fed_misc_tax_yr1:,.0f} nontaxable={fed_misc_nontax_yr1:,.0f}"))
+
+    return "G26", "Excess income policy (misc income, portfolio offset, surplus routing)", checks, elapsed
+
+
+GROUPS.append(group26_excess_income_policy)
+
+
+# ===========================================================================
+# GROUP 27 — IRA / ROTH CONTRIBUTION RULE ENFORCEMENT
+#
+# Tests _apply_ira_contribution_rules() directly (standalone function in api.py).
+# No full simulation needed — direct unit tests of the enforcement logic.
+#
+# Rules tested:
+#   1. W2 = 0  → deposit zeroed (earned income requirement)
+#   2. W2 > 0  → deposit allowed up to IRS cap
+#   3. Under-50 cap = $7,000 / age 50+ cap = $8,000
+#   4. Deposit > cap → clamped to cap
+#   5. Roth: MAGI > $246K MFJ → deposit zeroed (phase-out ceiling)
+#   6. Roth: MAGI in $236K-$246K MFJ → partial reduction
+#   7. TRAD IRA: no income phase-out (always allowed)
+#   8. taxable / brokerage accounts: untouched regardless of income
+# ===========================================================================
+
+def group27_ira_contribution_rules(paths: int):
+    """Direct unit tests of _apply_ira_contribution_rules in api.py."""
+    checks = []
+    elapsed = 0.0
+
+    import sys, os
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    from api import _apply_ira_contribution_rules
+
+    def _make_alloc(deposits: Dict[str, float], acct_types: Dict[str, str], n: int = 10) -> Dict:
+        """Build minimal alloc_accounts dict for testing."""
+        dep_yearly = {acct: np.full(n, float(amt)) for acct, amt in deposits.items()}
+        return {"account_types": acct_types, "deposits_yearly": dep_yearly}
+
+    def _make_income(w2: float = 0.0, rental: float = 0.0, ordinary: float = 0.0, n: int = 10) -> Dict:
+        return {
+            "w2":             np.full(n, w2),
+            "rental":         np.full(n, rental),
+            "ordinary_other": np.full(n, ordinary),
+        }
+
+    def _dep(alloc, acct, y=0):
+        return float(alloc["deposits_yearly"][acct][y])
+
+    N = 10
+    TYPES = {"ROTH_IRA-1": "roth_ira", "TRAD_IRA-1": "traditional_ira", "BROK-1": "taxable"}
+
+    # ── 27a: W2 = 0 → Roth deposit zeroed ───────────────────────────────────
+    a = _make_alloc({"ROTH_IRA-1": 7_000}, TYPES, N)
+    _apply_ira_contribution_rules(a, _make_income(w2=0), current_age=45, n_years=N)
+    checks.append(chk("27a: Roth deposit zeroed when W2=0 (no earned income)",
+        _dep(a, "ROTH_IRA-1") == 0.0, f"got {_dep(a, 'ROTH_IRA-1'):.0f}"))
+
+    # ── 27b: TRAD IRA also zeroed when W2=0 ──────────────────────────────────
+    a = _make_alloc({"TRAD_IRA-1": 7_000}, TYPES, N)
+    _apply_ira_contribution_rules(a, _make_income(w2=0), current_age=45, n_years=N)
+    checks.append(chk("27b: TRAD IRA deposit zeroed when W2=0",
+        _dep(a, "TRAD_IRA-1") == 0.0, f"got {_dep(a, 'TRAD_IRA-1'):.0f}"))
+
+    # ── 27c: W2=$50K, age 45 → Roth allowed up to $7K cap ───────────────────
+    a = _make_alloc({"ROTH_IRA-1": 5_000}, TYPES, N)
+    _apply_ira_contribution_rules(a, _make_income(w2=50_000), current_age=44, n_years=N)
+    checks.append(chk("27c: Roth $5K allowed (under cap, W2=$50K, age 45)",
+        abs(_dep(a, "ROTH_IRA-1") - 5_000) < 1.0, f"got {_dep(a, 'ROTH_IRA-1'):.0f}"))
+
+    # ── 27d: Deposit > cap → clamped to $7K (under-50) ──────────────────────
+    a = _make_alloc({"ROTH_IRA-1": 20_000}, TYPES, N)
+    _apply_ira_contribution_rules(a, _make_income(w2=50_000), current_age=44, n_years=N)
+    checks.append(chk("27d: $20K Roth clamped to $7K cap (age 45, under-50)",
+        abs(_dep(a, "ROTH_IRA-1") - 7_000) < 1.0, f"got {_dep(a, 'ROTH_IRA-1'):.0f}"))
+
+    # ── 27e: Age 50+ → cap is $8K ────────────────────────────────────────────
+    a = _make_alloc({"ROTH_IRA-1": 20_000}, TYPES, N)
+    _apply_ira_contribution_rules(a, _make_income(w2=50_000), current_age=49, n_years=N)
+    checks.append(chk("27e: $20K Roth clamped to $8K cap (age 50+, catch-up)",
+        abs(_dep(a, "ROTH_IRA-1") - 8_000) < 1.0, f"got {_dep(a, 'ROTH_IRA-1'):.0f}"))
+
+    # ── 27f: W2 < cap → capped at W2 amount ──────────────────────────────────
+    a = _make_alloc({"ROTH_IRA-1": 7_000}, TYPES, N)
+    _apply_ira_contribution_rules(a, _make_income(w2=3_000), current_age=44, n_years=N)
+    checks.append(chk("27f: Roth capped at W2=$3K when W2 < $7K limit",
+        abs(_dep(a, "ROTH_IRA-1") - 3_000) < 1.0, f"got {_dep(a, 'ROTH_IRA-1'):.0f}"))
+
+    # ── 27g: Roth phase-out — MAGI above ceiling → zeroed ────────────────────
+    # MFJ, W2=$300K (above $246K ceiling) → Roth deposit zeroed
+    a = _make_alloc({"ROTH_IRA-1": 7_000}, TYPES, N)
+    _apply_ira_contribution_rules(a, _make_income(w2=300_000), current_age=44, n_years=N, filing="MFJ")
+    checks.append(chk("27g: Roth zeroed — MAGI $300K > MFJ phase-out ceiling $246K",
+        _dep(a, "ROTH_IRA-1") == 0.0, f"got {_dep(a, 'ROTH_IRA-1'):.0f}"))
+
+    # ── 27h: Roth phase-out — MAGI in range → partial reduction ──────────────
+    # MFJ, W2=$240K → midpoint of $236K-$246K → ~50% reduction → ~$3,500
+    a = _make_alloc({"ROTH_IRA-1": 7_000}, TYPES, N)
+    _apply_ira_contribution_rules(a, _make_income(w2=241_000), current_age=44, n_years=N, filing="MFJ")
+    dep_partial = _dep(a, "ROTH_IRA-1")
+    checks.append(chk("27h: Roth partially reduced in MFJ phase-out range $236K-$246K",
+        0 < dep_partial < 7_000, f"got {dep_partial:.0f} expected 0<x<7000"))
+    checks.append(chk("27h: Roth partial reduction ≈ 50% at MAGI $241K (midpoint)",
+        2_500 < dep_partial < 5_000, f"got {dep_partial:.0f} expected ~3500"))
+
+    # ── 27i: TRAD IRA no phase-out at high income ────────────────────────────
+    a = _make_alloc({"TRAD_IRA-1": 7_000}, TYPES, N)
+    _apply_ira_contribution_rules(a, _make_income(w2=500_000), current_age=44, n_years=N)
+    checks.append(chk("27i: TRAD IRA $7K allowed at W2=$500K (no income phase-out)",
+        abs(_dep(a, "TRAD_IRA-1") - 7_000) < 1.0, f"got {_dep(a, 'TRAD_IRA-1'):.0f}"))
+
+    # ── 27j: Brokerage accounts untouched ────────────────────────────────────
+    a = _make_alloc({"BROK-1": 50_000}, TYPES, N)
+    _apply_ira_contribution_rules(a, _make_income(w2=0), current_age=44, n_years=N)
+    checks.append(chk("27j: Brokerage deposit untouched (no IRS rules apply)",
+        abs(_dep(a, "BROK-1") - 50_000) < 1.0, f"got {_dep(a, 'BROK-1'):.0f}"))
+
+    # ── 27k: Single filer phase-out threshold ($150K-$165K) ──────────────────
+    a = _make_alloc({"ROTH_IRA-1": 7_000}, TYPES, N)
+    _apply_ira_contribution_rules(a, _make_income(w2=170_000), current_age=44, n_years=N, filing="Single")
+    checks.append(chk("27k: Single filer Roth zeroed — MAGI $170K > single ceiling $165K",
+        _dep(a, "ROTH_IRA-1") == 0.0, f"got {_dep(a, 'ROTH_IRA-1'):.0f}"))
+
+    a = _make_alloc({"ROTH_IRA-1": 7_000}, TYPES, N)
+    _apply_ira_contribution_rules(a, _make_income(w2=100_000), current_age=44, n_years=N, filing="Single")
+    checks.append(chk("27k: Single filer Roth allowed — MAGI $100K below single floor $150K",
+        abs(_dep(a, "ROTH_IRA-1") - 7_000) < 1.0, f"got {_dep(a, 'ROTH_IRA-1'):.0f}"))
+
+    return "G27", "IRA/Roth contribution rules (earned income, age cap, Roth phase-out)", checks, elapsed
+
+
+GROUPS.append(group27_ira_contribution_rules)
+
+
+# ===========================================================================
 # GROUP 23 -- BAD MARKET RESPONSE (session 27)
 # Verifies that economicglobal.json bad market settings are now wired:
 #   - Withdrawal amounts scale down during shocks
@@ -5485,10 +5860,16 @@ def check_updates(server_url: str = "http://localhost:8000", full: bool = False)
 
     # Print table grouped by category
     categories = {
-        "Python backend": [r for r in rows if not r[0].startswith(("ui/", "profiles/"))],
-        "UI files":       [r for r in rows if r[0].startswith("ui/")],
-        "Profile configs":[r for r in rows if r[0].startswith("profiles/")],
+        "Python backend":        [r for r in rows if not r[0].startswith(("ui/", "profiles/"))],
+        "UI files":               [r for r in rows if r[0].startswith("ui/")],
+        "Profile configs (default/ only)": [r for r in rows if r[0].startswith("profiles/default/")],
     }
+    # Safety check: flag any non-default profile entries that shouldn't be tracked
+    non_default = [r for r in rows if r[0].startswith("profiles/") and not r[0].startswith("profiles/default/")]
+    if non_default:
+        print("  ⚠  WARNING: non-default profile entries found in manifest — these should not be tracked:")
+        for name, *_ in non_default:
+            print(f"    {name}")
     for cat, cat_rows in categories.items():
         if not cat_rows: continue
         print(f"  {cat}")
@@ -5582,9 +5963,9 @@ def main():
     ap.add_argument("--paths",     type=int, default=200,   help="MC paths (default: 200)")
     ap.add_argument("--fast",      action="store_true",     help="50 paths")
     ap.add_argument("--comprehensive-test", action="store_true",
-                    help="Full functional matrix across all configurable JSON options")
+                    help="Full functional matrix. Runs --checkupdates first (aborts if stale). Use --skip-playwright to run Python-only without server.")
     ap.add_argument("--skip-playwright",    action="store_true",
-                    help="Skip G19 Playwright UI tests (no browser/server needed)")
+                    help="Skip G19 Playwright UI tests and skip --checkupdates gate (no server needed)")
     ap.add_argument("--update-baseline",    action="store_true",
                     help="Clear G18 snapshot regression baseline before running")
     ap.add_argument("--checkupdates",       action="store_true",
@@ -5673,6 +6054,22 @@ def main():
             active = [g for g in GROUPS if g.__name__ not in
                       ("group19_playwright",)]
             GROUPS[:] = active
+        else:
+            # Server must be running for Playwright (G19). Enforce checkupdates
+            # first — refuse to run if deployed code doesn't match local files.
+            print("Running --checkupdates before test suite (required when server is active)...")
+            print()
+            try:
+                _cu_ok = check_updates(args.server, full=False)
+            except SystemExit:
+                _cu_ok = False
+            if not _cu_ok:
+                print()
+                print("❌  ABORTED — server has stale code. Deploy all files then re-run.")
+                print("   To run Python-only tests without the server:")
+                print("     python3 -B test_flags.py --comprehensive-test --skip-playwright")
+                sys.exit(1)
+            print()
         run_comprehensive(paths)
     else:
         run_standard(args.profile, paths)

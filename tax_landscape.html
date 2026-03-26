@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>eNDinomics — Complete Tax Landscape</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: system-ui, -apple-system, sans-serif; background: #f5f7fb; color: #111827; padding: 16px; }
+h1 { font-size: 17px; font-weight: 700; color: #0f172a; margin-bottom: 4px; }
+.subtitle { font-size: 12px; color: #6b7280; margin-bottom: 14px; }
+
+/* Scenario tabs */
+.scenarios { display: flex; gap: 6px; margin-bottom: 14px; }
+.scen-btn { padding: 5px 14px; border-radius: 999px; border: 1px solid #c0c6dd; background: #eef2ff;
+  color: #12326f; font-size: 12px; cursor: pointer; font-weight: 500; }
+.scen-btn.active { background: #12326f; color: #fff; border-color: #12326f; }
+
+/* Layout */
+.main-grid { display: grid; grid-template-columns: 210px 1fr; gap: 14px; }
+
+/* Sliders panel */
+.sliders-panel { background: #fff; border: 1px solid #d5d9e6; border-radius: 10px; padding: 12px; }
+.sliders-title { font-size: 11px; font-weight: 700; color: #374151; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.05em; }
+.slider-row { margin-bottom: 10px; }
+.slider-label { font-size: 11px; color: #6b7280; margin-bottom: 2px; display: flex; justify-content: space-between; }
+.slider-label span { font-weight: 600; color: #111827; }
+input[type=range] { width: 100%; height: 4px; accent-color: #12326f; cursor: pointer; }
+
+/* Right panel */
+.right-panel { display: flex; flex-direction: column; gap: 12px; }
+
+/* Tax cards */
+.tax-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.tax-card { background: #fff; border: 1px solid #d5d9e6; border-radius: 8px; padding: 8px 10px; }
+.tax-card-label { font-size: 10px; color: #6b7280; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 3px; }
+.tax-card-val { font-size: 18px; font-weight: 700; color: #111827; }
+.tax-card-sub { font-size: 10px; color: #9ca3af; margin-top: 1px; }
+.tax-card.highlight { border-color: #12326f; background: #f0f4ff; }
+.tax-card.highlight .tax-card-val { color: #12326f; }
+.tax-card.warning { border-color: #f59e0b; background: #fffbeb; }
+.tax-card.warning .tax-card-val { color: #b45309; }
+.tax-card.danger { border-color: #ef4444; background: #fef2f2; }
+.tax-card.danger .tax-card-val { color: #dc2626; }
+
+/* Bracket bar */
+.bracket-panel { background: #fff; border: 1px solid #d5d9e6; border-radius: 10px; padding: 12px; }
+.bracket-title { font-size: 11px; font-weight: 700; color: #374151; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.05em; }
+.bracket-bar-wrap { position: relative; height: 38px; background: #f3f4f6; border-radius: 6px; overflow: hidden; margin-bottom: 6px; }
+.bracket-seg { position: absolute; top: 0; height: 100%; transition: width 0.25s ease; }
+.bracket-seg.std-ded { background: #e5e7eb; }
+.bracket-seg.b10 { background: #86efac; }
+.bracket-seg.b12 { background: #6ee7b7; }
+.bracket-seg.b22 { background: #fde68a; }
+.bracket-seg.b24 { background: #fbbf24; }
+.bracket-seg.b32 { background: #fb923c; }
+.bracket-seg.b35 { background: #f87171; }
+.bracket-seg.b37 { background: #dc2626; }
+.bracket-seg.rmd { background: repeating-linear-gradient(45deg, #a78bfa, #a78bfa 4px, #c4b5fd 4px, #c4b5fd 8px); }
+.bracket-seg.conv { background: repeating-linear-gradient(45deg, #38bdf8, #38bdf8 4px, #7dd3fc 4px, #7dd3fc 8px); }
+.bracket-seg.ss { background: #bbf7d0; }
+.bracket-seg.cg { background: repeating-linear-gradient(45deg, #fb923c, #fb923c 3px, #fdba74 3px, #fdba74 6px); }
+
+.bracket-labels { display: flex; gap: 3px; flex-wrap: wrap; margin-top: 6px; }
+.bracket-label { display: flex; align-items: center; gap: 3px; font-size: 10px; color: #374151; }
+.bracket-swatch { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+.bracket-ticks { position: relative; height: 16px; margin-bottom: 2px; }
+.tick { position: absolute; font-size: 9px; color: #9ca3af; transform: translateX(-50%); }
+
+/* SS detail */
+.ss-panel { background: #f0fdf4; border: 1px solid #86efac; border-radius: 10px; padding: 12px; }
+.ss-panel-title { font-size: 11px; font-weight: 700; color: #15803d; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.04em; }
+.ss-row { display: flex; justify-content: space-between; font-size: 12px; padding: 3px 0; border-bottom: 1px solid #dcfce7; }
+.ss-row:last-child { border-bottom: none; }
+.ss-row .key { color: #374151; }
+.ss-row .val { font-weight: 600; color: #111827; }
+.ss-row.highlight-row { background: #dcfce7; margin: 0 -4px; padding: 3px 4px; border-radius: 4px; }
+.ss-row.highlight-row .val { color: #15803d; }
+
+/* IRMAA panel */
+.irmaa-panel { background: #fff7ed; border: 1px solid #fdba74; border-radius: 10px; padding: 12px; }
+.irmaa-title { font-size: 11px; font-weight: 700; color: #c2410c; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.04em; }
+.irmaa-tiers { display: flex; flex-direction: column; gap: 3px; }
+.irmaa-tier { display: flex; justify-content: space-between; font-size: 11px; padding: 3px 6px; border-radius: 4px; }
+.irmaa-tier.active-tier { background: #fed7aa; font-weight: 700; }
+.irmaa-tier .tier-range { color: #92400e; }
+.irmaa-tier .tier-cost { color: #c2410c; }
+
+/* Rate badges */
+.rate-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 4px; }
+.rate-badge { padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 700; }
+.rate-badge.marginal { background: #fee2e2; color: #dc2626; }
+.rate-badge.effective { background: #e0f2fe; color: #0369a1; }
+.rate-badge.combined { background: #fce7f3; color: #be185d; }
+
+/* FICA section (working years) */
+.fica-panel { background: #eff6ff; border: 1px solid #93c5fd; border-radius: 10px; padding: 12px; }
+.fica-title { font-size: 11px; font-weight: 700; color: #1d4ed8; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.04em; }
+.fica-row { display: flex; justify-content: space-between; font-size: 12px; padding: 3px 0; border-bottom: 1px solid #dbeafe; }
+.fica-row:last-child { border-bottom: none; }
+.fica-row.total-row { font-weight: 700; color: #1d4ed8; border-top: 2px solid #93c5fd; margin-top: 4px; padding-top: 6px; }
+
+/* Gap badge */
+.gap-badge { display: inline-block; font-size: 10px; background: #fef3c7; color: #92400e; border: 1px solid #fcd34d; border-radius: 4px; padding: 1px 6px; margin-left: 6px; }
+
+.hidden { display: none; }
+</style>
+</head>
+<body>
+
+<h1>eNDinomics — Complete Tax Landscape</h1>
+<p class="subtitle">MFJ · California · Profile: Experiment-2-OptimisedRMD (born 1967, current age ~59)</p>
+
+<div class="scenarios">
+  <button class="scen-btn active" onclick="setScenario('working')">💼 Working Years (W2 $450K)</button>
+  <button class="scen-btn" onclick="setScenario('gap')">🌅 Retirement Gap (65–74)</button>
+  <button class="scen-btn" onclick="setScenario('rmd')">📋 RMD Era (75+)</button>
+</div>
+
+<div class="main-grid">
+  <!-- LEFT: sliders -->
+  <div class="sliders-panel">
+    <div class="sliders-title">Income Inputs</div>
+
+    <!-- Working years sliders -->
+    <div id="sliders-working">
+      <div class="slider-row">
+        <div class="slider-label">W2 Gross <span id="lbl-w2">$450,000</span></div>
+        <input type="range" id="sl-w2" min="0" max="700000" step="10000" value="450000" oninput="update()">
+      </div>
+      <div class="slider-row">
+        <div class="slider-label">Qualified Divs <span id="lbl-qdiv">$0</span></div>
+        <input type="range" id="sl-qdiv" min="0" max="100000" step="1000" value="0" oninput="update()">
+      </div>
+      <div class="slider-row">
+        <div class="slider-label">Cap Gains <span id="lbl-cg">$0</span></div>
+        <input type="range" id="sl-cg" min="0" max="200000" step="1000" value="0" oninput="update()">
+      </div>
+    </div>
+
+    <!-- Retirement gap sliders -->
+    <div id="sliders-gap" class="hidden">
+      <div class="slider-row">
+        <div class="slider-label">SS Gross/yr <span id="lbl-ss-gap">$51,600</span></div>
+        <input type="range" id="sl-ss-gap" min="0" max="80000" step="1000" value="51600" oninput="update()">
+      </div>
+      <div class="slider-row">
+        <div class="slider-label">Roth Conversion <span id="lbl-conv">$83,000</span></div>
+        <input type="range" id="sl-conv" min="0" max="400000" step="5000" value="83000" oninput="update()">
+      </div>
+      <div class="slider-row">
+        <div class="slider-label">Qual Divs <span id="lbl-qdiv-gap">$0</span></div>
+        <input type="range" id="sl-qdiv-gap" min="0" max="100000" step="1000" value="0" oninput="update()">
+      </div>
+      <div class="slider-row">
+        <div class="slider-label">Cap Gains <span id="lbl-cg-gap">$0</span></div>
+        <input type="range" id="sl-cg-gap" min="0" max="200000" step="1000" value="0" oninput="update()">
+      </div>
+    </div>
+
+    <!-- RMD era sliders -->
+    <div id="sliders-rmd" class="hidden">
+      <div class="slider-row">
+        <div class="slider-label">SS Gross/yr <span id="lbl-ss-rmd">$51,600</span></div>
+        <input type="range" id="sl-ss-rmd" min="0" max="80000" step="1000" value="51600" oninput="update()">
+      </div>
+      <div class="slider-row">
+        <div class="slider-label">RMD Amount <span id="lbl-rmd">$300,000</span></div>
+        <input type="range" id="sl-rmd" min="0" max="700000" step="10000" value="300000" oninput="update()">
+      </div>
+      <div class="slider-row">
+        <div class="slider-label">Roth Conversion <span id="lbl-conv-rmd">$0</span></div>
+        <input type="range" id="sl-conv-rmd" min="0" max="200000" step="5000" value="0" oninput="update()">
+      </div>
+      <div class="slider-row">
+        <div class="slider-label">Qual Divs <span id="lbl-qdiv-rmd">$20,000</span></div>
+        <input type="range" id="sl-qdiv-rmd" min="0" max="150000" step="1000" value="20000" oninput="update()">
+      </div>
+      <div class="slider-row">
+        <div class="slider-label">Cap Gains <span id="lbl-cg-rmd">$30,000</span></div>
+        <input type="range" id="sl-cg-rmd" min="0" max="200000" step="1000" value="30000" oninput="update()">
+      </div>
+    </div>
+
+    <div style="margin-top:12px; padding-top:10px; border-top: 1px solid #e5e7eb;">
+      <div style="font-size:10px; color:#9ca3af; line-height:1.5;">
+        <b style="color:#374151">Bracket top</b><br>
+        10%: $23,850 · 12%: $96,950<br>
+        22%: $206,700 · 24%: $394,600<br>
+        32%: $501,050 · 35%: $751,600<br>
+        Std ded MFJ: $31,500<br>
+        CA std ded: $10,726<br>
+        NIIT thresh: $250,000<br>
+        SS thresh: $32K / $44K
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: results -->
+  <div class="right-panel">
+
+    <!-- Tax summary cards -->
+    <div class="tax-cards">
+      <div class="tax-card" id="card-fed">
+        <div class="tax-card-label">Federal Income</div>
+        <div class="tax-card-val" id="val-fed">—</div>
+        <div class="tax-card-sub" id="sub-fed">—</div>
+      </div>
+      <div class="tax-card" id="card-state">
+        <div class="tax-card-label">State (CA)</div>
+        <div class="tax-card-val" id="val-state">—</div>
+        <div class="tax-card-sub" id="sub-state">—</div>
+      </div>
+      <div class="tax-card" id="card-niit">
+        <div class="tax-card-label">NIIT 3.8%</div>
+        <div class="tax-card-val" id="val-niit">—</div>
+        <div class="tax-card-sub" id="sub-niit">—</div>
+      </div>
+      <div class="tax-card" id="card-fica">
+        <div class="tax-card-label">FICA <span class="gap-badge" id="fica-badge">Not in sim</span></div>
+        <div class="tax-card-val" id="val-fica">—</div>
+        <div class="tax-card-sub" id="sub-fica">—</div>
+      </div>
+      <div class="tax-card" id="card-irmaa">
+        <div class="tax-card-label">Medicare / IRMAA <span class="gap-badge" id="irmaa-badge">Not in sim</span></div>
+        <div class="tax-card-val" id="val-irmaa">—</div>
+        <div class="tax-card-sub" id="sub-irmaa">—</div>
+      </div>
+      <div class="tax-card highlight" id="card-total">
+        <div class="tax-card-label">Total Tax Burden</div>
+        <div class="tax-card-val" id="val-total">—</div>
+        <div class="tax-card-sub" id="sub-total">—</div>
+      </div>
+    </div>
+
+    <!-- Rates -->
+    <div style="background:#fff; border:1px solid #d5d9e6; border-radius:8px; padding:10px 12px;">
+      <div class="rate-row">
+        <span style="font-size:11px; color:#6b7280; font-weight:600;">Marginal:</span>
+        <span class="rate-badge marginal" id="badge-marginal">—</span>
+        <span style="font-size:11px; color:#6b7280; font-weight:600; margin-left:8px;">Eff Fed:</span>
+        <span class="rate-badge effective" id="badge-eff">—</span>
+        <span style="font-size:11px; color:#6b7280; font-weight:600; margin-left:8px;">Eff All-in:</span>
+        <span class="rate-badge combined" id="badge-allin">—</span>
+      </div>
+    </div>
+
+    <!-- Bracket visualization -->
+    <div class="bracket-panel">
+      <div class="bracket-title">Federal Taxable Income — Bracket Fill</div>
+      <div class="bracket-ticks" id="bracket-ticks"></div>
+      <div class="bracket-bar-wrap" id="bracket-bar"></div>
+      <div class="bracket-labels" id="bracket-labels"></div>
+    </div>
+
+    <!-- FICA panel (working only) -->
+    <div class="fica-panel" id="fica-panel">
+      <div class="fica-title">FICA / Payroll Taxes (Employee Share) — Not Currently Simulated</div>
+      <div class="fica-row"><span class="key">SS Tax (6.2% on first $168,600)</span><span id="fica-ss" class="val">—</span></div>
+      <div class="fica-row"><span class="key">Medicare (1.45% on all wages)</span><span id="fica-med" class="val">—</span></div>
+      <div class="fica-row"><span class="key">Add'l Medicare (0.9% over $250K MFJ)</span><span id="fica-addmed" class="val">—</span></div>
+      <div class="fica-row total-row"><span>Total FICA (employee)</span><span id="fica-total" class="val">—</span></div>
+      <div style="margin-top:8px; font-size:10px; color:#6b7280;">Employer matches SS + Medicare (not modeled). W2 entered gross in income.json — FICA deducted from paycheck but not in tax table.</div>
+    </div>
+
+    <!-- SS Panel (retirement) -->
+    <div class="ss-panel hidden" id="ss-panel">
+      <div class="ss-panel-title">Social Security Taxable Inclusion (Provisional Income Method)</div>
+      <div class="ss-row"><span class="key">Gross SS benefit/yr</span><span class="val" id="ss-gross">—</span></div>
+      <div class="ss-row"><span class="key">Non-SS ordinary income (RMD+conv+other)</span><span class="val" id="ss-base">—</span></div>
+      <div class="ss-row"><span class="key">+ 50% of gross SS</span><span class="val" id="ss-half">—</span></div>
+      <div class="ss-row"><span class="key">= Provisional income</span><span class="val" id="ss-pi">—</span></div>
+      <div class="ss-row"><span class="key">Threshold applied</span><span class="val" id="ss-thresh">—</span></div>
+      <div class="ss-row highlight-row"><span class="key"><b>Taxable SS (included in AGI)</b></span><span class="val" id="ss-taxable">—</span></div>
+      <div class="ss-row"><span class="key" style="color:#dc2626; font-size:11px;">⚠ Currently: flat 85% used in simulator</span><span class="val" style="color:#dc2626; font-size:11px;" id="ss-current">—</span></div>
+    </div>
+
+    <!-- IRMAA panel (retirement) -->
+    <div class="irmaa-panel hidden" id="irmaa-panel">
+      <div class="irmaa-title">IRMAA — Medicare Premium Surcharges (Not Currently Simulated)</div>
+      <div class="irmaa-tiers" id="irmaa-tiers-list"></div>
+      <div style="margin-top:8px; font-size:10px; color:#92400e;">Based on MAGI 2 years prior (simplified: current year). Part B + Part D per person × 2. Add to brokerage outflow.</div>
+    </div>
+
+  </div><!-- end right-panel -->
+</div><!-- end main-grid -->
+
+<script>
+// ── Tax constants ──────────────────────────────────────────────────────────
+const FED_STD = 31500, CA_STD = 10726;
+
+const FED_ORD = [
+  {top: 23850,  rate: 0.10},
+  {top: 96950,  rate: 0.12},
+  {top: 206700, rate: 0.22},
+  {top: 394600, rate: 0.24},
+  {top: 501050, rate: 0.32},
+  {top: 751600, rate: 0.35},
+  {top: null,   rate: 0.37},
+];
+const FED_LTCG = [
+  {top: 96700,  rate: 0.00},
+  {top: 600050, rate: 0.15},
+  {top: null,   rate: 0.20},
+];
+const CA_ORD = [
+  {top: 20824,  rate: 0.010},
+  {top: 49369,  rate: 0.020},
+  {top: 77918,  rate: 0.040},
+  {top: 108162, rate: 0.060},
+  {top: 136700, rate: 0.080},
+  {top: 698274, rate: 0.093},
+  {top: 837922, rate: 0.103},
+  {top: 1000000,rate: 0.113},
+  {top: null,   rate: 0.133},
+];
+
+// IRMAA 2024 Part B per person/month (couples = ×2)
+const IRMAA = [
+  {limit: 206000,  base: 174.70, surcharge: 0,      label: '≤$206K'},
+  {limit: 258000,  base: 174.70, surcharge: 69.90,  label: '$206K–$258K'},
+  {limit: 322000,  base: 174.70, surcharge: 174.70, label: '$258K–$322K'},
+  {limit: 386000,  base: 174.70, surcharge: 279.50, label: '$322K–$386K'},
+  {limit: 750000,  base: 174.70, surcharge: 384.30, label: '$386K–$750K'},
+  {limit: null,    base: 174.70, surcharge: 419.30, label: '>$750K'},
+];
+const PART_D_BASE_MONTHLY = 12; // approximate base Part D per person
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+function fmt(n) { return '$' + Math.round(n).toLocaleString(); }
+function pct(n) { return (n * 100).toFixed(1) + '%'; }
+
+function progTax(amount, ytd, brackets) {
+  if (amount <= 0) return 0;
+  let tax = 0, rem = amount, prev = ytd;
+  for (const br of brackets) {
+    const cap = br.top;
+    if (cap !== null) {
+      const room = Math.max(0, cap - prev);
+      const take = Math.min(rem, room);
+      tax += take * br.rate;
+      rem -= take; prev = cap;
+      if (rem <= 0) break;
+    } else {
+      tax += rem * br.rate;
+      rem = 0; break;
+    }
+  }
+  return tax;
+}
+
+function marginalRate(ytd, brackets) {
+  let prev = 0;
+  for (const br of brackets) {
+    if (br.top === null || ytd < br.top) return br.rate;
+    prev = br.top;
+  }
+  return brackets[brackets.length - 1].rate;
+}
+
+function computeSSIter(grossSS, baseOrdinary, filing = 'MFJ') {
+  const [lo, hi] = filing === 'MFJ' ? [32000, 44000] : [25000, 34000];
+  let taxSS = grossSS * 0.85; // initial guess
+  for (let i = 0; i < 8; i++) {
+    const agi = baseOrdinary + taxSS;
+    const pi = agi + 0.5 * grossSS;
+    let newTax;
+    if (pi < lo) {
+      newTax = 0;
+    } else if (pi < hi) {
+      newTax = Math.min(0.5 * grossSS, 0.5 * (pi - lo));
+    } else {
+      newTax = Math.min(0.85 * grossSS, 0.85 * (pi - hi) + 0.5 * (hi - lo));
+    }
+    if (Math.abs(newTax - taxSS) < 1) break;
+    taxSS = newTax;
+  }
+  return taxSS;
+}
+
+function irmaaTotal(magi, numPeople = 2) {
+  let tier = IRMAA[IRMAA.length - 1];
+  for (const t of IRMAA) {
+    if (t.limit === null || magi <= t.limit) { tier = t; break; }
+  }
+  const monthly = (tier.base + tier.surcharge) * numPeople + PART_D_BASE_MONTHLY * numPeople;
+  return monthly * 12;
+}
+
+function irmaaActiveTier(magi) {
+  for (let i = 0; i < IRMAA.length; i++) {
+    const t = IRMAA[i];
+    if (t.limit === null || magi <= t.limit) return i;
+  }
+  return IRMAA.length - 1;
+}
+
+// ── Scenario state ─────────────────────────────────────────────────────────
+let scenario = 'working';
+function setScenario(s) {
+  scenario = s;
+  document.querySelectorAll('.scen-btn').forEach((b, i) => {
+    b.classList.toggle('active', ['working','gap','rmd'][i] === s);
+  });
+  ['working','gap','rmd'].forEach(k => {
+    document.getElementById('sliders-'+k).classList.toggle('hidden', k !== s);
+  });
+  // Show/hide panels
+  const isWorking = s === 'working';
+  document.getElementById('fica-panel').classList.toggle('hidden', !isWorking);
+  document.getElementById('ss-panel').classList.toggle('hidden', isWorking);
+  document.getElementById('irmaa-panel').classList.toggle('hidden', isWorking);
+  document.getElementById('card-fica').classList.toggle('hidden', !isWorking);
+  document.getElementById('card-irmaa').classList.toggle('hidden', isWorking);
+  document.getElementById('fica-badge').classList.toggle('hidden', !isWorking);
+  document.getElementById('irmaa-badge').classList.toggle('hidden', isWorking);
+  update();
+}
+
+// ── Main update ────────────────────────────────────────────────────────────
+function update() {
+  if (scenario === 'working') updateWorking();
+  else if (scenario === 'gap') updateRetirement(false);
+  else updateRetirement(true);
+}
+
+function updateWorking() {
+  const w2 = +document.getElementById('sl-w2').value;
+  const qdiv = +document.getElementById('sl-qdiv').value;
+  const cg = +document.getElementById('sl-cg').value;
+  document.getElementById('lbl-w2').textContent = fmt(w2);
+  document.getElementById('lbl-qdiv').textContent = fmt(qdiv);
+  document.getElementById('lbl-cg').textContent = fmt(cg);
+
+  // Federal ordinary
+  const fedOrdTaxable = Math.max(0, w2 - FED_STD);
+  const fedTaxOrd = progTax(fedOrdTaxable, 0, FED_ORD);
+  const fedTaxQdiv = progTax(qdiv, fedOrdTaxable, FED_LTCG);
+  const fedTaxCg = progTax(cg, fedOrdTaxable + qdiv, FED_LTCG);
+  const fedTax = fedTaxOrd + fedTaxQdiv + fedTaxCg;
+  const fedMarg = marginalRate(fedOrdTaxable, FED_ORD);
+
+  // Additional Medicare Tax (0.9% on wages >$250K MFJ) — NOT in simulator
+  const addMed = w2 > 250000 ? (w2 - 250000) * 0.009 : 0;
+
+  // CA state
+  const caOrdTaxable = Math.max(0, w2 - CA_STD);
+  const caOrdTax = progTax(caOrdTaxable, 0, CA_ORD);
+  const caCgTax = progTax(cg, caOrdTaxable, CA_ORD); // CA taxes CG as ordinary
+  const caQdivTax = progTax(qdiv, caOrdTaxable + cg, CA_ORD);
+  const caTax = caOrdTax + caCgTax + caQdivTax;
+
+  // NIIT: 3.8% on investment income when MAGI >$250K
+  const magi = w2 + qdiv + cg;
+  const niit = magi > 250000 ? (qdiv + cg) * 0.038 : 0;
+
+  // FICA (not in simulator)
+  const ficaSS = Math.min(w2, 168600) * 0.062;
+  const ficaMed = w2 * 0.0145;
+  const ficaAddMed = w2 > 250000 ? (w2 - 250000) * 0.009 : 0;
+  const ficaTotal = ficaSS + ficaMed + ficaAddMed;
+
+  const totalIncTax = fedTax + caTax + niit;
+  const totalAll = totalIncTax + ficaTotal;
+
+  // Update UI
+  setCard('fed', fedTax, `Marg ${pct(fedMarg)} · Add'l Med ${fmt(addMed)}`, fedMarg >= 0.32 ? 'danger' : fedMarg >= 0.22 ? 'warning' : '');
+  setCard('state', caTax, `CA marg ${pct(marginalRate(caOrdTaxable, CA_ORD))}`, '');
+  setCard('niit', niit, niit > 0 ? 'MAGI $'+Math.round(magi/1000)+'K > $250K threshold' : 'MAGI below $250K threshold', niit > 0 ? 'warning' : '');
+  setCard('fica', ficaTotal, 'Employee share only (not in sim)', 'warning');
+  setCard('total', totalIncTax, `Incl FICA: ${fmt(totalAll)} · Eff all-in: ${pct(totalAll/Math.max(w2,1))}`, 'highlight');
+
+  document.getElementById('badge-marginal').textContent = pct(fedMarg);
+  document.getElementById('badge-eff').textContent = w2 > 0 ? pct(fedTax / w2) : '—';
+  document.getElementById('badge-allin').textContent = w2 > 0 ? pct(totalAll / w2) : '—';
+
+  // FICA panel
+  document.getElementById('fica-ss').textContent = fmt(ficaSS) + ' (SS wage base $168,600)';
+  document.getElementById('fica-med').textContent = fmt(ficaMed);
+  document.getElementById('fica-addmed').textContent = w2 > 250000 ? fmt(ficaAddMed) + ' ← NOT in fed tax calc' : '$0 (wages ≤$250K)';
+  document.getElementById('fica-total').textContent = fmt(ficaTotal);
+
+  // Bracket bar
+  renderBracketBar(fedOrdTaxable, 0, 0, qdiv + cg, 'working');
+}
+
+function updateRetirement(isRMD) {
+  const ssGross = isRMD
+    ? +document.getElementById('sl-ss-rmd').value
+    : +document.getElementById('sl-ss-gap').value;
+  const rmd = isRMD ? +document.getElementById('sl-rmd').value : 0;
+  const conv = isRMD
+    ? +document.getElementById('sl-conv-rmd').value
+    : +document.getElementById('sl-conv').value;
+  const qdiv = isRMD
+    ? +document.getElementById('sl-qdiv-rmd').value
+    : +document.getElementById('sl-qdiv-gap').value;
+  const cg = isRMD
+    ? +document.getElementById('sl-cg-rmd').value
+    : +document.getElementById('sl-cg-gap').value;
+
+  // Labels
+  if (isRMD) {
+    document.getElementById('lbl-ss-rmd').textContent = fmt(ssGross);
+    document.getElementById('lbl-rmd').textContent = fmt(rmd);
+    document.getElementById('lbl-conv-rmd').textContent = fmt(conv);
+    document.getElementById('lbl-qdiv-rmd').textContent = fmt(qdiv);
+    document.getElementById('lbl-cg-rmd').textContent = fmt(cg);
+  } else {
+    document.getElementById('lbl-ss-gap').textContent = fmt(ssGross);
+    document.getElementById('lbl-conv').textContent = fmt(conv);
+    document.getElementById('lbl-qdiv-gap').textContent = fmt(qdiv);
+    document.getElementById('lbl-cg-gap').textContent = fmt(cg);
+  }
+
+  // SS provisional income (iterative)
+  const baseOrdinary = rmd + conv; // non-SS ordinary
+  const ssTaxable = computeSSIter(ssGross, baseOrdinary);
+  const ssFlat85 = ssGross * 0.85;
+
+  // Total ordinary income (including SS taxable)
+  const totalOrd = baseOrdinary + ssTaxable;
+
+  // Federal
+  const fedOrdTaxable = Math.max(0, totalOrd - FED_STD);
+  const fedTaxOrd = progTax(fedOrdTaxable, 0, FED_ORD);
+  const fedTaxQdiv = progTax(qdiv, fedOrdTaxable, FED_LTCG);
+  const fedTaxCg = progTax(cg, fedOrdTaxable + qdiv, FED_LTCG);
+  const fedTax = fedTaxOrd + fedTaxQdiv + fedTaxCg;
+  const fedMarg = marginalRate(fedOrdTaxable, FED_ORD);
+
+  // CA state
+  const caOrdTaxable = Math.max(0, totalOrd - CA_STD);
+  const caOrdTax = progTax(caOrdTaxable, 0, CA_ORD);
+  const caCgTax = progTax(cg, caOrdTaxable, CA_ORD);
+  const caQdivTax = progTax(qdiv, caOrdTaxable + cg, CA_ORD);
+  const caTax = caOrdTax + caCgTax + caQdivTax;
+
+  // NIIT
+  const magi = totalOrd + qdiv + cg;
+  const niit = magi > 250000 ? (qdiv + cg) * 0.038 : 0;
+
+  // IRMAA (2 people, MFJ, using current MAGI as proxy)
+  const irmaa = irmaaTotal(magi);
+  const activeT = irmaaActiveTier(magi);
+
+  const totalIncTax = fedTax + caTax + niit;
+  const totalAll = totalIncTax + irmaa;
+  const totalIncome = totalOrd + qdiv + cg + (ssGross - ssTaxable); // gross income including non-taxable SS
+
+  // Update cards
+  setCard('fed', fedTax, `Marg ${pct(fedMarg)} · On $${Math.round(fedOrdTaxable/1000)}K taxable`, fedMarg >= 0.32 ? 'danger' : fedMarg >= 0.22 ? 'warning' : '');
+  setCard('state', caTax, `CA marg ${pct(marginalRate(caOrdTaxable, CA_ORD))}`, '');
+  setCard('niit', niit, niit > 0 ? `MAGI $${Math.round(magi/1000)}K > $250K` : 'MAGI below $250K', niit > 0 ? 'warning' : '');
+  setCard('irmaa', irmaa, `IRMAA Tier ${activeT+1}/6 · MAGI $${Math.round(magi/1000)}K (not in sim)`, irmaa > 8000 ? 'danger' : 'warning');
+  setCard('total', totalIncTax, `With IRMAA: ${fmt(totalAll)} · Eff on gross: ${pct(totalAll/Math.max(totalIncome,1))}`, 'highlight');
+
+  document.getElementById('badge-marginal').textContent = pct(fedMarg);
+  document.getElementById('badge-eff').textContent = totalOrd > 0 ? pct(fedTax / (totalOrd + qdiv + cg)) : '—';
+  document.getElementById('badge-allin').textContent = totalIncome > 0 ? pct(totalAll / totalIncome) : '—';
+
+  // SS panel
+  document.getElementById('ss-gross').textContent = fmt(ssGross);
+  document.getElementById('ss-base').textContent = fmt(baseOrdinary);
+  document.getElementById('ss-half').textContent = fmt(ssGross * 0.5);
+  const pi = baseOrdinary + ssTaxable + ssGross * 0.5;
+  document.getElementById('ss-pi').textContent = fmt(pi);
+  const threshLabel = pi < 32000 ? 'Below $32K → 0% taxable' : pi < 44000 ? '$32K–$44K → up to 50%' : 'Above $44K → up to 85%';
+  document.getElementById('ss-thresh').textContent = threshLabel;
+  document.getElementById('ss-taxable').textContent = `${fmt(ssTaxable)} (${pct(ssTaxable/Math.max(ssGross,1))})`;
+  document.getElementById('ss-current').textContent = `Flat 85% = ${fmt(ssFlat85)} · Diff: ${fmt(ssFlat85 - ssTaxable)}`;
+
+  // IRMAA tiers
+  renderIRMAATiers(magi, activeT);
+
+  // Bracket bar
+  renderBracketBar(rmd + conv, ssTaxable, rmd, qdiv + cg, 'retirement');
+}
+
+function setCard(id, val, sub, cls) {
+  const card = document.getElementById('card-'+id);
+  card.className = 'tax-card' + (cls ? ' '+cls : '');
+  document.getElementById('val-'+id).textContent = fmt(val);
+  document.getElementById('sub-'+id).textContent = sub;
+}
+
+function renderIRMAATiers(magi, activeIdx) {
+  const list = document.getElementById('irmaa-tiers-list');
+  list.innerHTML = '';
+  IRMAA.forEach((t, i) => {
+    const annual = (t.base + t.surcharge) * 2 * 12 + PART_D_BASE_MONTHLY * 2 * 12;
+    const div = document.createElement('div');
+    div.className = 'irmaa-tier' + (i === activeIdx ? ' active-tier' : '');
+    div.innerHTML = `<span class="tier-range">${t.label}</span><span class="tier-cost">${fmt(annual)}/yr (couple)</span>`;
+    list.appendChild(div);
+  });
+}
+
+// ── Bracket bar ──────────────────────────────────────────────────────────
+function renderBracketBar(ordIncome, ssTaxable, rmdAmount, investment, mode) {
+  const bar = document.getElementById('bracket-bar');
+  const ticks = document.getElementById('bracket-ticks');
+  const legend = document.getElementById('bracket-labels');
+
+  const topBracket = 751600;
+  const taxable = Math.max(0, ordIncome - FED_STD);
+  const scale = Math.min(1, (taxable + investment) / topBracket) * 100 || 1;
+  const maxIncome = Math.max(taxable + investment, topBracket * 0.5);
+
+  bar.innerHTML = '';
+  ticks.innerHTML = '';
+  legend.innerHTML = '';
+
+  // std deduction block
+  const stdPct = Math.min(FED_STD / maxIncome * 100, 8);
+  addSeg(bar, 0, stdPct, 'std-ded');
+
+  // bracket fill
+  let pos = stdPct;
+  const brackets = FED_ORD;
+  let remaining = taxable;
+  let prev = 0;
+  const colors = ['b10','b12','b22','b24','b32','b35','b37'];
+  brackets.forEach((br, i) => {
+    const cap = br.top !== null ? br.top : maxIncome * 1.2;
+    const bandFull = cap - prev;
+    const take = Math.min(remaining, bandFull);
+    if (take > 0) {
+      const w = take / maxIncome * 100;
+      addSeg(bar, pos, w, colors[i]);
+      pos += w;
+    }
+    remaining -= take;
+    prev = br.top || prev;
+    if (remaining <= 0) return;
+  });
+
+  // investment income overlay
+  if (investment > 0) {
+    const cgW = investment / maxIncome * 100;
+    addSeg(bar, pos, Math.min(cgW, 100 - pos), 'cg');
+  }
+
+  // Bracket tick marks
+  [100000, 200000, 394600, 501050].forEach(amt => {
+    const p = (amt / maxIncome) * 100;
+    if (p < 98) {
+      const t = document.createElement('div');
+      t.className = 'tick';
+      t.style.left = p + '%';
+      t.textContent = '$' + Math.round(amt/1000) + 'K';
+      ticks.appendChild(t);
+    }
+  });
+
+  // Legend
+  const items = [
+    ['std-ded', 'Std ded $31.5K'],
+    ['b10','10%'], ['b12','12%'], ['b22','22%'],
+    ['b24','24%'], ['b32','32%'], ['b35','35%'],
+    ['cg','Invest income'],
+  ];
+  items.forEach(([cls, label]) => {
+    const el = document.createElement('div');
+    el.className = 'bracket-label';
+    el.innerHTML = `<div class="bracket-swatch ${cls}"></div><span>${label}</span>`;
+    legend.appendChild(el);
+  });
+}
+
+function addSeg(bar, left, width, cls) {
+  if (width <= 0) return;
+  const s = document.createElement('div');
+  s.className = 'bracket-seg ' + cls;
+  s.style.left = left + '%';
+  s.style.width = Math.min(width, 100 - left) + '%';
+  bar.appendChild(s);
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────
+setScenario('working');
+</script>
+</body>
+</html>
