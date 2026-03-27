@@ -32,3 +32,8 @@ src/profiles/*/.versions/
 src/ui/package-lock.json
 src/test_results/
 src/test_results/
+src/profiles/*/
+!src/profiles/default/
+!src/profiles/Test/
+!src/profiles/__system__*/
+!src/profiles/__testui__/
