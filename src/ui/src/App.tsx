@@ -305,16 +305,1991 @@ async function apiPost<T>(path: string, body: unknown): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-// Global files (taxes, benchmarks, assets, economicglobal) live at APP_ROOT and are not shown here.
-const CONFIG_FILES = [
-  "allocation_yearly.json",
-  "withdrawal_schedule.json",
-  "inflation_yearly.json",
-  "shocks_yearly.json",
-  "person.json",
-  "income.json",
-  "economic.json",
+// ── Constants for person.json guided editor ───────────────────────────────────
+const US_STATES = [
+  "Alabama","Alaska","Arizona","Arkansas","California","Colorado","Connecticut",
+  "Delaware","Florida","Georgia","Hawaii","Idaho","Illinois","Indiana","Iowa",
+  "Kansas","Kentucky","Louisiana","Maine","Maryland","Massachusetts","Michigan",
+  "Minnesota","Mississippi","Missouri","Montana","Nebraska","Nevada",
+  "New Hampshire","New Jersey","New Mexico","New York","North Carolina",
+  "North Dakota","Ohio","Oklahoma","Oregon","Pennsylvania","Rhode Island",
+  "South Carolina","South Dakota","Tennessee","Texas","Utah","Vermont",
+  "Virginia","Washington","West Virginia","Wisconsin","Wyoming",
 ];
+const NO_INCOME_TAX_STATES = new Set(["Alaska","Florida","Nevada","New Hampshire","South Dakota","Tennessee","Texas","Washington","Wyoming"]);
+const RELATIONSHIP_OPTIONS = ["spouse","child","sibling","parent","non-designated","trust","estate"];
+const FILING_STATUS_OPTIONS = [
+  { value: "MFJ", label: "MFJ — Married Filing Jointly" },
+  { value: "single", label: "Single" },
+  { value: "MFS", label: "MFS — Married Filing Separately" },
+  { value: "HOH", label: "HOH — Head of Household" },
+];
+const SIMULATION_MODE_OPTIONS = [
+  { value: "automatic", label: "Automatic — glide path blend (recommended)" },
+  { value: "retirement", label: "Retirement-first — survival probability" },
+  { value: "investment", label: "Investment-first — growth maximizing" },
+  { value: "balanced", label: "Balanced — equal weight" },
+];
+const RMD_TABLE_OPTIONS = [
+  { value: "uniform_lifetime", label: "Uniform Lifetime (default — all account owners)" },
+  { value: "joint_survivor", label: "Joint Survivor (spouse sole beneficiary + 10+ yr younger)" },
+];
+const RMD_EXTRA_HANDLING_OPTIONS = [
+  { value: "reinvest_in_brokerage", label: "Reinvest in brokerage (recommended)" },
+  { value: "spend", label: "Spend as extra cash income" },
+  { value: "hold_cash", label: "Hold as uninvested cash reserve" },
+];
+const ROTH_BRACKET_OPTIONS = [
+  { value: "fill the bracket", label: "Fill the bracket — maximize without jumping" },
+  { value: "22%", label: "Stay below 22% bracket" },
+  { value: "24%", label: "Stay below 24% bracket" },
+  { value: "32%", label: "Stay below 32% bracket" },
+  { value: "35%", label: "Stay below 35% bracket" },
+  { value: "none", label: "None — no rate cap" },
+];
+const ROTH_RMD_ASSIST_OPTIONS = [
+  { value: "convert", label: "Convert — count RMD toward conversion room" },
+  { value: "none", label: "None — treat RMD independently" },
+];
+const ROTH_TAX_SOURCE_OPTIONS = [
+  { value: "BROKERAGE", label: "Brokerage — pay tax from brokerage (preserves conversion)" },
+  { value: "withhold", label: "Withhold — deduct tax from conversion amount" },
+];
+
+// ── person.json guided editor ────────────────────────────────────────────────
+const PERSON_SECTIONS = [
+  { id: "identity",    label: "Identity & Horizon" },
+  { id: "spouse",      label: "Spouse" },
+  { id: "ss",          label: "Social Security" },
+  { id: "bene",        label: "Beneficiaries" },
+  { id: "rmd",         label: "RMD Policy" },
+  { id: "roth_policy", label: "Roth Conversion Policy" },
+  { id: "roth_opt",    label: "Roth Optimizer Config" },
+];
+
+// Shared tiny sub-components used inside PersonJsonGuidedEditor
+
+
+const fldStyle: React.CSSProperties = { marginBottom: 14 };
+const labelStyle: React.CSSProperties = { fontSize: 11, color: "#6b7280", display: "block", marginBottom: 3, fontWeight: 500 };
+const inputStyle: React.CSSProperties = { width: "100%", fontSize: 13, padding: "5px 9px", border: "1px solid #d1d5db", borderRadius: 6, boxSizing: "border-box", background: "#fff", color: "#111827" };
+const selectStyle: React.CSSProperties = { ...inputStyle };
+const hintStyle: React.CSSProperties = { fontSize: 11, color: "#9ca3af", marginTop: 3, lineHeight: 1.4 };
+const sectionTitleStyle: React.CSSProperties = { fontSize: 13, fontWeight: 600, color: "#374151", marginBottom: 14, paddingBottom: 8, borderBottom: "1px solid #f3f4f6" };
+const subLabelStyle: React.CSSProperties = { fontSize: 10, fontWeight: 600, color: "#6b7280", textTransform: "uppercase" as const, letterSpacing: ".05em", marginBottom: 8, marginTop: 16 };
+
+interface PersonJsonEditorProps {
+  parsed: any;
+  readonly: boolean;
+  onSave: (updated: any, note: string) => Promise<void>;
+  fileLabel?: string;
+}
+
+// ── Shared guided editor shell ────────────────────────────────────────────────
+// Wraps any guided editor: provides dirty bar, save/discard, error/success.
+const GuidedShell: React.FC<{
+  draft: any; parsed: any; saving: boolean; error: string; success: string;
+  readonly: boolean; onSave: () => void; onDiscard: () => void; children: React.ReactNode;
+}> = ({ draft, parsed, saving, error, success, readonly, onSave, onDiscard, children }) => {
+  const isDirty = JSON.stringify(draft) !== JSON.stringify(parsed);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", border: "1px solid #e5e7eb", borderRadius: 8, overflow: "hidden" }}>
+      {isDirty && !readonly && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 16px", background: "#fffbeb", borderBottom: "1px solid #fde68a" }}>
+          <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#f59e0b", display: "inline-block", flexShrink: 0 }} />
+          <span style={{ fontSize: 13, color: "#92400e", fontWeight: 500, flex: 1 }}>
+            Unsaved changes — click <strong>Save Profile</strong> to commit, or <strong>Discard</strong> to revert.
+          </span>
+          <button onClick={onSave} disabled={saving}
+            style={{ padding: "6px 18px", background: "#7F77DD", color: "#fff", border: "none", borderRadius: 6, cursor: saving ? "wait" : "pointer", fontWeight: 600, fontSize: 13, opacity: saving ? 0.7 : 1 }}>
+            {saving ? "Saving…" : "Save Profile"}
+          </button>
+          <button onClick={onDiscard}
+            style={{ padding: "6px 14px", background: "none", border: "1px solid #d1d5db", borderRadius: 6, cursor: "pointer", fontSize: 13, color: "#6b7280" }}>
+            Discard
+          </button>
+        </div>
+      )}
+      {error && <div style={{ padding: "8px 16px", background: "#fef2f2", borderBottom: "1px solid #fecaca", fontSize: 13, color: "#b91c1c" }}>⚠ {error}</div>}
+      {success && !isDirty && <div style={{ padding: "8px 16px", background: "#f0fdf4", borderBottom: "1px solid #86efac", fontSize: 13, color: "#15803d", fontWeight: 500 }}>✓ {success}</div>}
+      <div style={{ overflowY: "auto", maxHeight: "70vh" }}>{children}</div>
+    </div>
+  );
+};
+
+// Shared styles for guided table editors
+const tblHeader: React.CSSProperties = { padding: "8px 12px", fontSize: 11, fontWeight: 700, color: "#374151", background: "#f3f4f6", textTransform: "uppercase", letterSpacing: ".06em" };
+const tblCell: React.CSSProperties = { padding: "8px 12px", fontSize: 13, borderBottom: "1px solid #f0f0f0", verticalAlign: "middle" };
+const tblInput: React.CSSProperties = { width: "100%", padding: "5px 8px", fontSize: 13, border: "1px solid #d1d5db", borderRadius: 5, outline: "none" };
+const tblAddBtn: React.CSSProperties = { padding: "5px 14px", fontSize: 12, background: "none", border: "1px dashed #9ca3af", borderRadius: 6, cursor: "pointer", color: "#6b7280" };
+const tblDelBtn: React.CSSProperties = { padding: "2px 7px", fontSize: 11, background: "none", border: "none", cursor: "pointer", color: "#d1d5db" };
+const sectionHdr: React.CSSProperties = { padding: "10px 16px", fontSize: 12, fontWeight: 700, color: "#1f2937", background: "#e8e8ec", borderTop: "1px solid #d1d5db", textTransform: "uppercase", letterSpacing: ".06em" };
+const descBox: React.CSSProperties = { margin: "0 16px 12px", padding: "8px 12px", fontSize: 12, color: "#6b7280", lineHeight: 1.6, background: "#f8faff", borderRadius: 6, borderLeft: "3px solid #c7d2fe" };
+
+// ── Income guided editor ──────────────────────────────────────────────────────
+const IncomeGuidedEditor: React.FC<PersonJsonEditorProps> = ({ parsed, readonly, onSave }) => {
+  const [draft, setDraft] = React.useState<any>(() => JSON.parse(JSON.stringify(parsed)));
+  const [saving, setSaving] = React.useState(false);
+  const [error, setError] = React.useState("");
+  const [success, setSuccess] = React.useState("");
+  React.useEffect(() => { setDraft(JSON.parse(JSON.stringify(parsed))); }, [JSON.stringify(parsed)]);
+
+  const INCOME_TYPES: { key: string; label: string; taxNote: string }[] = [
+    { key: "w2",            label: "W-2 / Salary",          taxNote: "Ordinary income rates. Taxed at the bottom of your bracket stack." },
+    { key: "ordinary_other",label: "SS / Pension / Annuity", taxNote: "Ordinary income rates. Enter the taxable portion of SS (typically 85%)." },
+    { key: "rental",        label: "Rental Income",          taxNote: "Net rental income after expenses. Ordinary income rates." },
+    { key: "interest",      label: "Interest Income",        taxNote: "Taxable interest from accounts outside the simulator." },
+    { key: "qualified_div", label: "Qualified Dividends",    taxNote: "From outside brokerage accounts. Long-term capital gains rates." },
+    { key: "cap_gains",     label: "Capital Gains",          taxNote: "Realized gains from outside assets. Long-term capital gains rates." },
+  ];
+
+  const updateRow = (type: string, idx: number, field: string, val: any) => {
+    setDraft((prev: any) => {
+      const next = JSON.parse(JSON.stringify(prev));
+      next[type] = next[type] || [];
+      next[type][idx] = { ...next[type][idx], [field]: val };
+      return next;
+    });
+  };
+  const addRow = (type: string) => {
+    setDraft((prev: any) => {
+      const next = JSON.parse(JSON.stringify(prev));
+      next[type] = [...(next[type] || []), { ages: "", amount: 0 }];
+      return next;
+    });
+  };
+  const delRow = (type: string, idx: number) => {
+    setDraft((prev: any) => {
+      const next = JSON.parse(JSON.stringify(prev));
+      next[type] = (next[type] || []).filter((_: any, i: number) => i !== idx);
+      return next;
+    });
+  };
+
+  const save = async () => {
+    setSaving(true); setError("");
+    try {
+      await onSave(draft, "guided: income saved");
+      setSuccess("Saved ✓"); setTimeout(() => setSuccess(""), 2500);
+    } catch (e: any) { setError(String(e?.message || e)); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <GuidedShell draft={draft} parsed={parsed} saving={saving} error={error} success={success} readonly={readonly} onSave={save} onDiscard={() => setDraft(JSON.parse(JSON.stringify(parsed)))}>
+      <div style={{ padding: "12px 16px 4px", fontSize: 12, color: "#6b7280", background: "#fafafa", borderBottom: "1px solid #f0f0f0" }}>
+        Enter income from sources <strong>outside</strong> your investment accounts. Do not enter portfolio dividends, RMDs, or Roth conversion amounts — those are computed automatically.
+      </div>
+      {INCOME_TYPES.map(({ key, label, taxNote }) => {
+        const rows: any[] = draft[key] || [];
+        return (
+          <div key={key}>
+            <div style={sectionHdr}>{label}</div>
+            <div style={descBox}>{taxNote}</div>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr>
+                  <th style={{ ...tblHeader, width: "30%" }}>Age Range</th>
+                  <th style={{ ...tblHeader, width: "40%" }}>Annual Amount ($)</th>
+                  <th style={{ ...tblHeader, width: "25%" }}>Note</th>
+                  <th style={{ ...tblHeader, width: "5%" }}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row: any, idx: number) => (
+                  <tr key={idx} style={{ background: idx % 2 === 0 ? "#fafafa" : "#fff" }}>
+                    <td style={tblCell}>
+                      <input value={row.ages ?? row.years ?? ""} readOnly={readonly}
+                        onChange={e => updateRow(key, idx, "ages", e.target.value)}
+                        style={{ ...tblInput }} placeholder="e.g. 47-64" />
+                    </td>
+                    <td style={tblCell}>
+                      <input type="number" value={row.amount ?? row.amount_nom ?? 0} readOnly={readonly}
+                        onChange={e => updateRow(key, idx, "amount", Number(e.target.value))}
+                        style={{ ...tblInput }} />
+                    </td>
+                    <td style={tblCell}>
+                      <input value={row._note ?? ""} readOnly={readonly}
+                        onChange={e => updateRow(key, idx, "_note", e.target.value)}
+                        style={{ ...tblInput }} placeholder="optional note" />
+                    </td>
+                    <td style={tblCell}>
+                      {!readonly && <button onClick={() => delRow(key, idx)} style={tblDelBtn}>✕</button>}
+                    </td>
+                  </tr>
+                ))}
+                {rows.length === 0 && (
+                  <tr><td colSpan={4} style={{ ...tblCell, color: "#9ca3af", fontStyle: "italic", textAlign: "center" }}>No {label} entries — click Add to create one</td></tr>
+                )}
+              </tbody>
+            </table>
+            {!readonly && (
+              <div style={{ padding: "8px 16px" }}>
+                <button onClick={() => addRow(key)} style={tblAddBtn}>+ Add {label} entry</button>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </GuidedShell>
+  );
+};
+
+// ── Withdrawal / Spending Plan guided editor ───────────────────────────────────
+const WithdrawalGuidedEditor: React.FC<PersonJsonEditorProps> = ({ parsed, readonly, onSave }) => {
+  const [draft, setDraft] = React.useState<any>(() => JSON.parse(JSON.stringify(parsed)));
+  const [saving, setSaving] = React.useState(false);
+  const [error, setError] = React.useState("");
+  const [success, setSuccess] = React.useState("");
+  React.useEffect(() => { setDraft(JSON.parse(JSON.stringify(parsed))); }, [JSON.stringify(parsed)]);
+
+  const updateRow = (idx: number, field: string, val: any) => {
+    setDraft((prev: any) => {
+      const next = JSON.parse(JSON.stringify(prev));
+      next.schedule[idx] = { ...next.schedule[idx], [field]: val };
+      return next;
+    });
+  };
+  const addRow = () => {
+    setDraft((prev: any) => {
+      const next = JSON.parse(JSON.stringify(prev));
+      next.schedule = [...(next.schedule || []), { ages: "", amount_k: 0, base_k: 0 }];
+      return next;
+    });
+  };
+  const delRow = (idx: number) => {
+    setDraft((prev: any) => {
+      const next = JSON.parse(JSON.stringify(prev));
+      next.schedule = next.schedule.filter((_: any, i: number) => i !== idx);
+      return next;
+    });
+  };
+
+  const save = async () => {
+    for (const row of draft.schedule || []) {
+      if (Number(row.base_k) > Number(row.amount_k)) { setError(`base_k (${row.base_k}K) exceeds amount_k (${row.amount_k}K) for ages ${row.ages}`); return; }
+    }
+    setSaving(true); setError("");
+    try {
+      await onSave(draft, "guided: spending plan saved");
+      setSuccess("Saved ✓"); setTimeout(() => setSuccess(""), 2500);
+    } catch (e: any) { setError(String(e?.message || e)); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <GuidedShell draft={draft} parsed={parsed} saving={saving} error={error} success={success} readonly={readonly} onSave={save} onDiscard={() => setDraft(JSON.parse(JSON.stringify(parsed)))}>
+      {/* Global floor */}
+      <div style={{ padding: 16, borderBottom: "1px solid #f0f0f0" }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "#111827", marginBottom: 4 }}>Global Spending Floor</div>
+        <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 10 }}>Absolute minimum take-home in any market scenario ($K/yr). The simulator never cuts below this, even in a severe downturn.</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 13, color: "#6b7280" }}>$</span>
+          <input type="number" value={draft.floor_k ?? 0} readOnly={readonly}
+            onChange={e => setDraft((p: any) => ({ ...p, floor_k: Number(e.target.value) }))}
+            style={{ ...tblInput, width: 100 }} />
+          <span style={{ fontSize: 13, color: "#6b7280" }}>K / year</span>
+        </div>
+      </div>
+
+      {/* Spending tiers */}
+      <div style={sectionHdr}>Spending Tiers by Life Stage</div>
+      <div style={descBox}>
+        Define spending in $K/year per age range. <strong>Target</strong> = what you want to spend in a normal market. <strong>Minimum</strong> = what you can live on in a bad market. Amounts are in today's dollars — inflation adjusts them each year automatically.
+        Age ranges must not overlap. Amounts are post-tax (what hits your bank account).
+      </div>
+      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <thead>
+          <tr>
+            <th style={{ ...tblHeader, width: "22%" }}>Age Range</th>
+            <th style={{ ...tblHeader, width: "25%" }}>Target Spending ($K/yr)</th>
+            <th style={{ ...tblHeader, width: "25%" }}>Minimum Spending ($K/yr)</th>
+            <th style={{ ...tblHeader, width: "23%" }}>Life Stage Note</th>
+            <th style={{ ...tblHeader, width: "5%" }}></th>
+          </tr>
+        </thead>
+        <tbody>
+          {(draft.schedule || []).map((row: any, idx: number) => (
+            <tr key={idx} style={{ background: idx % 2 === 0 ? "#fafafa" : "#fff" }}>
+              <td style={tblCell}>
+                <input value={row.ages ?? row.years ?? ""} readOnly={readonly}
+                  onChange={e => updateRow(idx, "ages", e.target.value)}
+                  style={tblInput} placeholder="e.g. 65-74" />
+              </td>
+              <td style={tblCell}>
+                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <input type="number" value={row.amount_k ?? 0} readOnly={readonly}
+                    onChange={e => updateRow(idx, "amount_k", Number(e.target.value))}
+                    style={{ ...tblInput, width: 80 }} />
+                  <span style={{ fontSize: 11, color: "#9ca3af" }}>K</span>
+                </div>
+              </td>
+              <td style={tblCell}>
+                <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <input type="number" value={row.base_k ?? 0} readOnly={readonly}
+                    onChange={e => updateRow(idx, "base_k", Number(e.target.value))}
+                    style={{ ...tblInput, width: 80 }} />
+                  <span style={{ fontSize: 11, color: "#9ca3af" }}>K</span>
+                </div>
+              </td>
+              <td style={tblCell}>
+                <input value={row._note ?? ""} readOnly={readonly}
+                  onChange={e => updateRow(idx, "_note", e.target.value)}
+                  style={tblInput} placeholder="e.g. Pre-retirement" />
+              </td>
+              <td style={tblCell}>
+                {!readonly && <button onClick={() => delRow(idx)} style={tblDelBtn}>✕</button>}
+              </td>
+            </tr>
+          ))}
+          {(draft.schedule || []).length === 0 && (
+            <tr><td colSpan={5} style={{ ...tblCell, color: "#9ca3af", fontStyle: "italic", textAlign: "center" }}>No spending tiers — add one below</td></tr>
+          )}
+        </tbody>
+      </table>
+      {!readonly && (
+        <div style={{ padding: "10px 16px" }}>
+          <button onClick={addRow} style={tblAddBtn}>+ Add spending tier</button>
+        </div>
+      )}
+    </GuidedShell>
+  );
+};
+
+// ── Inflation guided editor ────────────────────────────────────────────────────
+const InflationGuidedEditor: React.FC<PersonJsonEditorProps> = ({ parsed, readonly, onSave }) => {
+  const [draft, setDraft] = React.useState<any>(() => JSON.parse(JSON.stringify(parsed)));
+  const [saving, setSaving] = React.useState(false);
+  const [error, setError] = React.useState("");
+  const [success, setSuccess] = React.useState("");
+  React.useEffect(() => { setDraft(JSON.parse(JSON.stringify(parsed))); }, [JSON.stringify(parsed)]);
+
+  const save = async () => {
+    setSaving(true); setError("");
+    try {
+      await onSave(draft, "guided: inflation saved");
+      setSuccess("Saved ✓"); setTimeout(() => setSuccess(""), 2500);
+    } catch (e: any) { setError(String(e?.message || e)); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <GuidedShell draft={draft} parsed={parsed} saving={saving} error={error} success={success} readonly={readonly} onSave={save} onDiscard={() => setDraft(JSON.parse(JSON.stringify(parsed)))}>
+      <div style={{ padding: 16, borderBottom: "1px solid #f0f0f0" }}>
+        <div style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.65 }}>
+          Annual inflation applied to spending targets and tax brackets. Fed long-run target ≈ 2.0%. Recent 2022–2024 experience was 4–9%. Year 1 = your first simulation year (current age + 1).
+        </div>
+      </div>
+      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <thead>
+          <tr>
+            <th style={{ ...tblHeader, width: "35%" }}>Year Range</th>
+            <th style={{ ...tblHeader, width: "35%" }}>Annual Inflation Rate (%)</th>
+            <th style={{ ...tblHeader, width: "25%" }}>Implied Period</th>
+            <th style={{ ...tblHeader, width: "5%" }}></th>
+          </tr>
+        </thead>
+        <tbody>
+          {(draft.inflation || []).map((row: any, idx: number) => (
+            <tr key={idx} style={{ background: idx % 2 === 0 ? "#fafafa" : "#fff" }}>
+              <td style={tblCell}>
+                <input value={row.years ?? ""} readOnly={readonly}
+                  onChange={e => setDraft((prev: any) => { const n = JSON.parse(JSON.stringify(prev)); n.inflation[idx].years = e.target.value; return n; })}
+                  style={tblInput} placeholder="e.g. 1-10" />
+              </td>
+              <td style={tblCell}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <input type="number" step="0.1" value={row.rate_pct ?? 2.5} readOnly={readonly}
+                    onChange={e => setDraft((prev: any) => { const n = JSON.parse(JSON.stringify(prev)); n.inflation[idx].rate_pct = Number(e.target.value); return n; })}
+                    style={{ ...tblInput, width: 80 }} />
+                  <span style={{ fontSize: 12, color: "#9ca3af" }}>% / yr</span>
+                  <span style={{ fontSize: 11, padding: "2px 7px", borderRadius: 10, background: row.rate_pct <= 2.5 ? "#f0fdf4" : row.rate_pct <= 4 ? "#fef3c7" : "#fef2f2", color: row.rate_pct <= 2.5 ? "#15803d" : row.rate_pct <= 4 ? "#92400e" : "#b91c1c" }}>
+                    {row.rate_pct <= 2.5 ? "low" : row.rate_pct <= 4 ? "moderate" : "high"}
+                  </span>
+                </div>
+              </td>
+              <td style={{ ...tblCell, color: "#9ca3af", fontSize: 12 }}>
+                {row.years ? `sim years ${row.years}` : "—"}
+              </td>
+              <td style={tblCell}>
+                {!readonly && <button onClick={() => setDraft((prev: any) => { const n = JSON.parse(JSON.stringify(prev)); n.inflation = n.inflation.filter((_: any, i: number) => i !== idx); return n; })} style={tblDelBtn}>✕</button>}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {!readonly && (
+        <div style={{ padding: "10px 16px" }}>
+          <button onClick={() => setDraft((prev: any) => { const n = JSON.parse(JSON.stringify(prev)); n.inflation = [...(n.inflation || []), { years: "", rate_pct: 2.5 }]; return n; })} style={tblAddBtn}>
+            + Add inflation period
+          </button>
+        </div>
+      )}
+    </GuidedShell>
+  );
+};
+
+// ── Economic / Withdrawal Strategy guided editor ────────────────────────────────
+const EconomicGuidedEditor: React.FC<PersonJsonEditorProps> = ({ parsed, readonly, onSave }) => {
+  const [draft, setDraft] = React.useState<any>(() => JSON.parse(JSON.stringify(parsed)));
+  const [saving, setSaving] = React.useState(false);
+  const [error, setError] = React.useState("");
+  const [success, setSuccess] = React.useState("");
+  React.useEffect(() => { setDraft(JSON.parse(JSON.stringify(parsed))); }, [JSON.stringify(parsed)]);
+
+  const seq = draft.defaults?.withdrawal_sequence || {};
+  const setSeq = (field: string, value: any) => {
+    setDraft((prev: any) => {
+      const n = JSON.parse(JSON.stringify(prev));
+      if (!n.defaults) n.defaults = {};
+      if (!n.defaults.withdrawal_sequence) n.defaults.withdrawal_sequence = {};
+      n.defaults.withdrawal_sequence[field] = value;
+      return n;
+    });
+  };
+
+  const SEQUENCES = [
+    { key: "order_good_market",              label: "Good Market",                   color: "#15803d", bg: "#f0fdf4", desc: "Portfolio above drawdown threshold. Drain Traditional IRA first to reduce future RMD burden while assets are up." },
+    { key: "order_bad_market",               label: "Bad Market (no conversion)",    color: "#92400e", bg: "#fffbeb", desc: "Portfolio below threshold, Roth conversion off. Bonds first to avoid selling depressed equities." },
+    { key: "order_bad_market_with_conversion", label: "Bad Market + Roth Conversion", color: "#1d4ed8", bg: "#eff6ff", desc: "Portfolio below threshold, conversion on. Convert Traditional IRA cheaply while depressed; use brokerage bonds for expenses." },
+  ];
+
+  const moveItem = (seqKey: string, fromIdx: number, toIdx: number) => {
+    if (toIdx < 0 || toIdx >= (seq[seqKey] || []).length) return;
+    setSeq(seqKey, (() => {
+      const arr = [...(seq[seqKey] || [])];
+      const [item] = arr.splice(fromIdx, 1);
+      arr.splice(toIdx, 0, item);
+      return arr;
+    })());
+  };
+
+  const save = async () => {
+    setSaving(true); setError("");
+    try {
+      await onSave(draft, "guided: withdrawal strategy saved");
+      setSuccess("Saved ✓"); setTimeout(() => setSuccess(""), 2500);
+    } catch (e: any) { setError(String(e?.message || e)); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <GuidedShell draft={draft} parsed={parsed} saving={saving} error={error} success={success} readonly={readonly} onSave={save} onDiscard={() => setDraft(JSON.parse(JSON.stringify(parsed)))}>
+      <div style={{ padding: 16, borderBottom: "1px solid #f0f0f0" }}>
+        <div style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.65 }}>
+          Controls which accounts are drawn from first in different market conditions. Items listed first are drained first. Roth IRA is always protected as long as possible.
+        </div>
+      </div>
+
+      {SEQUENCES.map(({ key, label, color, bg, desc }) => (
+        <div key={key}>
+          <div style={{ ...sectionHdr, color, background: bg, borderLeft: `3px solid ${color}` }}>{label}</div>
+          <div style={descBox}>{desc}</div>
+          <div style={{ padding: "0 16px 12px" }}>
+            {(seq[key] || []).map((item: string, idx: number) => (
+              <div key={idx} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", marginBottom: 6, background: "#fff", border: "1px solid #e5e7eb", borderRadius: 6 }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: "#9ca3af", width: 20 }}>{idx + 1}</span>
+                <span style={{ flex: 1, fontSize: 13, fontFamily: "monospace", color: "#374151" }}>{item}</span>
+                {!readonly && (
+                  <div style={{ display: "flex", gap: 4 }}>
+                    <button onClick={() => moveItem(key, idx, idx - 1)} disabled={idx === 0}
+                      style={{ padding: "2px 8px", fontSize: 12, border: "1px solid #e5e7eb", borderRadius: 4, cursor: idx === 0 ? "default" : "pointer", background: "#fff", color: idx === 0 ? "#e5e7eb" : "#374151" }}>▲</button>
+                    <button onClick={() => moveItem(key, idx, idx + 1)} disabled={idx === (seq[key] || []).length - 1}
+                      style={{ padding: "2px 8px", fontSize: 12, border: "1px solid #e5e7eb", borderRadius: 4, cursor: idx === (seq[key] || []).length - 1 ? "default" : "pointer", background: "#fff", color: idx === (seq[key] || []).length - 1 ? "#e5e7eb" : "#374151" }}>▼</button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+
+      <div style={sectionHdr}>Settings</div>
+      <div style={{ padding: 16, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "#111827", marginBottom: 4 }}>TIRA Age Gate</div>
+          <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>Age below which Traditional IRA withdrawals trigger 10% early withdrawal penalty. IRS rule — default 59.5.</div>
+          <input type="number" step="0.5" value={seq.tira_age_gate ?? 59.5} readOnly={readonly}
+            onChange={e => setSeq("tira_age_gate", Number(e.target.value))}
+            style={{ ...tblInput, width: 80 }} />
+        </div>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "#111827", marginBottom: 4 }}>Roth Last Resort</div>
+          <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>Never draw from Roth until all other accounts exhausted. Preserves tax-free compounding as long as possible.</div>
+          <div style={{ display: "flex", gap: 0, border: "1px solid #d1d5db", borderRadius: 6, overflow: "hidden", width: "fit-content" }}>
+            {[true, false].map(opt => (
+              <button key={String(opt)} disabled={readonly} onClick={() => setSeq("roth_last_resort", opt)}
+                style={{ padding: "6px 16px", fontSize: 13, border: "none", cursor: readonly ? "default" : "pointer", background: seq.roth_last_resort === opt ? (opt ? "#f0fdf4" : "#fef2f2") : "#fff", color: seq.roth_last_resort === opt ? (opt ? "#15803d" : "#b91c1c") : "#6b7280", fontWeight: seq.roth_last_resort === opt ? 600 : 400 }}>
+                {opt ? "Yes" : "No"}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    </GuidedShell>
+  );
+};
+
+// ── Shocks / Market Events guided editor ─────────────────────────────────────
+const ShocksGuidedEditor: React.FC<PersonJsonEditorProps> = ({ parsed, readonly, onSave }) => {
+  const [draft, setDraft] = React.useState<any>(() => JSON.parse(JSON.stringify(parsed)));
+  const [expanded, setExpanded] = React.useState<number | null>(null);
+  const [saving, setSaving] = React.useState(false);
+  const [error, setError] = React.useState("");
+  const [success, setSuccess] = React.useState("");
+  React.useEffect(() => { setDraft(JSON.parse(JSON.stringify(parsed))); }, [JSON.stringify(parsed)]);
+
+  const ASSET_CLASSES = ["US_STOCKS","INTL_STOCKS","GOLD","COMMOD","LONG_TREAS","INT_TREAS","TIPS","CASH"];
+
+  const updateEvent = (idx: number, field: string, value: any) => {
+    setDraft((prev: any) => { const n = JSON.parse(JSON.stringify(prev)); n.events[idx][field] = value; return n; });
+  };
+  const addEvent = () => {
+    const blank = { class: "US_STOCKS", start_year: 10, start_quarter: 1, depth: 0.2, dip_quarters: 4, recovery_quarters: 8, override_mode: "strict", recovery_to: "baseline", dip_profile: { type: "poly", alpha: 1.3 }, rise_profile: { type: "poly", alpha: 1.6 } };
+    setDraft((prev: any) => { const n = JSON.parse(JSON.stringify(prev)); n.events = [...(n.events || []), blank]; return n; });
+    setExpanded((draft.events || []).length);
+  };
+  const delEvent = (idx: number) => {
+    setDraft((prev: any) => { const n = JSON.parse(JSON.stringify(prev)); n.events = n.events.filter((_: any, i: number) => i !== idx); return n; });
+    setExpanded(null);
+  };
+
+  const save = async () => {
+    setSaving(true); setError("");
+    try {
+      await onSave(draft, "guided: shocks saved");
+      setSuccess("Saved ✓"); setTimeout(() => setSuccess(""), 2500);
+    } catch (e: any) { setError(String(e?.message || e)); }
+    finally { setSaving(false); }
+  };
+
+  return (
+    <GuidedShell draft={draft} parsed={parsed} saving={saving} error={error} success={success} readonly={readonly} onSave={save} onDiscard={() => { setDraft(JSON.parse(JSON.stringify(parsed))); setExpanded(null); }}>
+      <div style={{ padding: 16, borderBottom: "1px solid #f0f0f0" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 10 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>Shock Mode</div>
+          <div style={{ display: "flex", gap: 0, border: "1px solid #d1d5db", borderRadius: 6, overflow: "hidden" }}>
+            {["augment","replace"].map(opt => (
+              <button key={opt} disabled={readonly} onClick={() => setDraft((p: any) => ({ ...p, mode: opt }))}
+                style={{ padding: "5px 14px", fontSize: 12, border: "none", cursor: readonly ? "default" : "pointer", background: draft.mode === opt ? "#EEEDFE" : "#fff", color: draft.mode === opt ? "#3C3489" : "#6b7280", fontWeight: draft.mode === opt ? 600 : 400 }}>
+                {opt}
+              </button>
+            ))}
+          </div>
+          <span style={{ fontSize: 12, color: "#9ca3af" }}>
+            {draft.mode === "augment" ? "Layer on top of system shocks" : "Replace system shocks entirely"}
+          </span>
+        </div>
+        <div style={{ fontSize: 12, color: "#6b7280" }}>Shocks affect portfolio returns only — they do not create direct tax events. Taxes are triggered by withdrawals and conversions.</div>
+      </div>
+
+      {(draft.events || []).map((evt: any, idx: number) => {
+        const isOpen = expanded === idx;
+        return (
+          <div key={idx} style={{ borderBottom: "1px solid #f0f0f0" }}>
+            <div onClick={() => setExpanded(isOpen ? null : idx)}
+              style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px", cursor: "pointer", background: isOpen ? "#f8faff" : "#fff" }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "#7F77DD", background: "#EEEDFE", padding: "2px 8px", borderRadius: 4 }}>Shock {idx + 1}</span>
+              <span style={{ fontSize: 13, fontWeight: 500, color: "#111827" }}>{evt.class}</span>
+              <span style={{ fontSize: 12, color: "#9ca3af" }}>Year {evt.start_year} Q{evt.start_quarter} · {(evt.depth * 100).toFixed(0)}% drawdown · {evt.dip_quarters}Q dip · {evt.recovery_quarters}Q recovery</span>
+              <span style={{ marginLeft: "auto", fontSize: 12, color: "#9ca3af" }}>{isOpen ? "▼" : "▶"}</span>
+              {!readonly && <button onClick={e => { e.stopPropagation(); delEvent(idx); }} style={{ ...tblDelBtn, color: "#fca5a5" }}>✕</button>}
+            </div>
+            {isOpen && (
+              <div style={{ padding: "0 16px 16px", background: "#fafafa" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginTop: 10 }}>
+                  <div><label style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", display: "block", marginBottom: 4 }}>Asset Class</label>
+                    <select value={evt.class} disabled={readonly} onChange={e => updateEvent(idx, "class", e.target.value)}
+                      style={{ ...tblInput }}>
+                      {ASSET_CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select></div>
+                  <div><label style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", display: "block", marginBottom: 4 }}>Start Year</label>
+                    <input type="number" value={evt.start_year} readOnly={readonly}
+                      onChange={e => updateEvent(idx, "start_year", Number(e.target.value))} style={tblInput} /></div>
+                  <div><label style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", display: "block", marginBottom: 4 }}>Start Quarter (1-4)</label>
+                    <select value={evt.start_quarter} disabled={readonly} onChange={e => updateEvent(idx, "start_quarter", Number(e.target.value))} style={tblInput}>
+                      {[1,2,3,4].map(q => <option key={q} value={q}>Q{q}</option>)}</select></div>
+                  <div><label style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", display: "block", marginBottom: 4 }}>Max Drawdown (%)</label>
+                    <input type="number" step="1" min={1} max={90} value={Math.round(evt.depth * 100)} readOnly={readonly}
+                      onChange={e => updateEvent(idx, "depth", Number(e.target.value) / 100)} style={tblInput} /></div>
+                  <div><label style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", display: "block", marginBottom: 4 }}>Dip Duration (quarters)</label>
+                    <input type="number" value={evt.dip_quarters} readOnly={readonly}
+                      onChange={e => updateEvent(idx, "dip_quarters", Number(e.target.value))} style={tblInput} /></div>
+                  <div><label style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", display: "block", marginBottom: 4 }}>Recovery Duration (quarters)</label>
+                    <input type="number" value={evt.recovery_quarters} readOnly={readonly}
+                      onChange={e => updateEvent(idx, "recovery_quarters", Number(e.target.value))} style={tblInput} /></div>
+                  <div><label style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", display: "block", marginBottom: 4 }}>Override Mode</label>
+                    <select value={evt.override_mode} disabled={readonly} onChange={e => updateEvent(idx, "override_mode", e.target.value)} style={tblInput}>
+                      <option value="strict">strict — replaces stochastic return</option>
+                      <option value="augment">augment — adds to stochastic return</option>
+                    </select></div>
+                  <div><label style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", display: "block", marginBottom: 4 }}>Recovery Target</label>
+                    <select value={evt.recovery_to} disabled={readonly} onChange={e => updateEvent(idx, "recovery_to", e.target.value)} style={tblInput}>
+                      <option value="baseline">baseline — returns to pre-shock trend</option>
+                      <option value="none">none — stays at trough</option>
+                    </select></div>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {!readonly && (
+        <div style={{ padding: "10px 16px" }}>
+          <button onClick={addEvent} style={tblAddBtn}>+ Add market shock event</button>
+        </div>
+      )}
+    </GuidedShell>
+  );
+};
+
+// ── Allocation guided editor ─────────────────────────────────────────────────
+const AllocationGuidedEditor: React.FC<PersonJsonEditorProps> = ({ parsed, readonly, onSave }) => {
+  const [draft, setDraft] = React.useState<any>(() => JSON.parse(JSON.stringify(parsed)));
+  const [saving, setSaving] = React.useState(false);
+  const [error, setError] = React.useState("");
+  const [success, setSuccess] = React.useState("");
+  const [activeAcct, setActiveAcct] = React.useState<string | null>(null);
+  React.useEffect(() => { setDraft(JSON.parse(JSON.stringify(parsed))); }, [JSON.stringify(parsed)]);
+
+  const ACCT_TYPES = ["taxable","traditional_ira","roth_ira"];
+  const ACCT_TYPE_LABELS: Record<string,string> = { taxable: "Taxable Brokerage", traditional_ira: "Traditional IRA (pre-tax)", roth_ira: "Roth IRA (post-tax)" };
+  const ACCT_TYPE_COLORS: Record<string,string> = { taxable: "#1d4ed8", traditional_ira: "#b45309", roth_ira: "#15803d" };
+
+  const accounts: any[] = draft.accounts || [];
+  const starting: any = draft.starting || {};
+  const deposits: any[] = draft.deposits_yearly || [];
+
+  const setStarting = (name: string, val: number) => {
+    setDraft((p: any) => { const n = JSON.parse(JSON.stringify(p)); n.starting = { ...n.starting, [name]: val }; return n; });
+  };
+  const setDeposit = (rowIdx: number, acct: string, val: number) => {
+    setDraft((p: any) => { const n = JSON.parse(JSON.stringify(p)); n.deposits_yearly[rowIdx][acct] = val; return n; });
+  };
+
+  const save = async () => {
+    setSaving(true); setError("");
+    try {
+      await onSave(draft, "guided: allocation saved");
+      setSuccess("Saved ✓"); setTimeout(() => setSuccess(""), 2500);
+    } catch (e: any) { setError(String(e?.message || e)); }
+    finally { setSaving(false); }
+  };
+
+  const totalBalance = Object.values(starting).reduce((s: number, v: any) => s + Number(v || 0), 0);
+
+  return (
+    <GuidedShell draft={draft} parsed={parsed} saving={saving} error={error} success={success} readonly={readonly} onSave={save} onDiscard={() => setDraft(JSON.parse(JSON.stringify(parsed)))}>
+
+      {/* ── Section 1: Account balances ── */}
+      <div style={sectionHdr}>Accounts & Starting Balances</div>
+      <div style={descBox}>Current balances as of today. Traditional IRA is fully pre-tax — the government has a claim on every dollar. Roth is post-tax — withdrawals are tax-free. Brokerage gains may have embedded capital gains (cost basis not modeled).</div>
+      <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <thead>
+          <tr>
+            <th style={{ ...tblHeader, width: "28%" }}>Account</th>
+            <th style={{ ...tblHeader, width: "25%" }}>Type</th>
+            <th style={{ ...tblHeader, width: "35%" }}>Starting Balance ($)</th>
+            <th style={{ ...tblHeader, width: "12%" }}>% of Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {accounts.map((acct: any) => {
+            const bal = Number(starting[acct.name] || 0);
+            const pct = totalBalance > 0 ? ((bal / totalBalance) * 100).toFixed(1) : "0";
+            return (
+              <tr key={acct.name} style={{ background: activeAcct === acct.name ? "#f8faff" : "transparent" }}
+                onClick={() => setActiveAcct(activeAcct === acct.name ? null : acct.name)}>
+                <td style={{ ...tblCell, fontWeight: 500, color: ACCT_TYPE_COLORS[acct.type] }}>{acct.name}</td>
+                <td style={{ ...tblCell, fontSize: 12, color: "#6b7280" }}>{ACCT_TYPE_LABELS[acct.type] || acct.type}</td>
+                <td style={tblCell}>
+                  <input type="number" value={bal} readOnly={readonly}
+                    onClick={e => e.stopPropagation()}
+                    onChange={e => setStarting(acct.name, Number(e.target.value))}
+                    style={{ ...tblInput, width: 160 }} />
+                </td>
+                <td style={{ ...tblCell, fontSize: 12, color: "#9ca3af" }}>{pct}%</td>
+              </tr>
+            );
+          })}
+          <tr style={{ background: "#f3f4f6" }}>
+            <td colSpan={2} style={{ ...tblCell, fontWeight: 700 }}>Total Portfolio</td>
+            <td style={{ ...tblCell, fontWeight: 700 }}>${totalBalance.toLocaleString()}</td>
+            <td style={{ ...tblCell, fontWeight: 700 }}>100%</td>
+          </tr>
+        </tbody>
+      </table>
+
+      {/* ── Section 2: Annual deposits ── */}
+      <div style={sectionHdr}>Annual Contributions by Period</div>
+      <div style={descBox}>Additional contributions per year range in nominal dollars. Set to 0 if not contributing. IRA contribution limits are not enforced here — set amounts you plan to contribute.</div>
+      {deposits.length > 0 && (
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
+            <thead>
+              <tr>
+                <th style={{ ...tblHeader, width: 120 }}>Year Range</th>
+                {accounts.map((a: any) => <th key={a.name} style={{ ...tblHeader, color: ACCT_TYPE_COLORS[a.type] }}>{a.name}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {deposits.map((row: any, ridx: number) => (
+                <tr key={ridx} style={{ background: ridx % 2 === 0 ? "#fafafa" : "#fff" }}>
+                  <td style={tblCell}>
+                    <input value={row.years ?? ""} readOnly={readonly}
+                      onChange={e => setDraft((p: any) => { const n = JSON.parse(JSON.stringify(p)); n.deposits_yearly[ridx].years = e.target.value; return n; })}
+                      style={{ ...tblInput, width: 100 }} placeholder="e.g. 1-5" />
+                  </td>
+                  {accounts.map((a: any) => (
+                    <td key={a.name} style={tblCell}>
+                      <input type="number" value={row[a.name] ?? 0} readOnly={readonly}
+                        onChange={e => setDeposit(ridx, a.name, Number(e.target.value))}
+                        style={{ ...tblInput, width: 90 }} />
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {!readonly && (
+        <div style={{ padding: "10px 16px" }}>
+          <button onClick={() => {
+            const blank: any = { years: "" };
+            accounts.forEach((a: any) => { blank[a.name] = 0; });
+            setDraft((p: any) => { const n = JSON.parse(JSON.stringify(p)); n.deposits_yearly = [...(n.deposits_yearly || []), blank]; return n; });
+          }} style={tblAddBtn}>+ Add contribution period</button>
+        </div>
+      )}
+
+      {/* ── Section 3: Allocation summary (read-only display) ── */}
+      <div style={sectionHdr}>Asset Allocation — Default (Global)</div>
+      <div style={descBox}>Default allocation for all simulation years. Overrides apply to specific year ranges only. To change allocations, use the EDIT tab for precise JSON control — the allocation structure is complex and best edited directly.</div>
+      <div style={{ padding: "8px 16px 16px" }}>
+        {accounts.map((acct: any) => {
+          const alloc = draft.global_allocation?.[acct.name];
+          if (!alloc?.portfolios) return null;
+          const portfolios = Object.entries(alloc.portfolios as Record<string, any>);
+          return (
+            <div key={acct.name} style={{ marginBottom: 12, padding: "10px 12px", border: "1px solid #e5e7eb", borderRadius: 6 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: ACCT_TYPE_COLORS[acct.type], marginBottom: 8 }}>{acct.name}</div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" as const }}>
+                {portfolios.map(([pname, pdata]: [string, any]) => (
+                  <div key={pname} style={{ fontSize: 12, padding: "4px 10px", background: "#f3f4f6", borderRadius: 4 }}>
+                    <span style={{ fontWeight: 600, color: "#374151" }}>{pname}</span>
+                    <span style={{ color: "#9ca3af", marginLeft: 4 }}>{pdata.weight_pct}%</span>
+                    <span style={{ color: "#6b7280", marginLeft: 6, fontSize: 11 }}>
+                      [{Object.entries(pdata.classes_pct || {}).map(([c, w]) => `${c} ${w}%`).join(", ")}]
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+        <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 4 }}>
+          Allocation overrides ({(draft.overrides || []).length} defined) are shown in the raw JSON — switch to EDIT tab to modify override periods.
+        </div>
+      </div>
+    </GuidedShell>
+  );
+};
+
+const PersonJsonGuidedEditor: React.FC<PersonJsonEditorProps> = ({ parsed, readonly, onSave, fileLabel = "Personal Profile" }) => {
+  const [section, setSection] = React.useState("");
+  const [draft, setDraft] = React.useState<any>(() => JSON.parse(JSON.stringify(parsed)));
+  const [saving, setSaving] = React.useState(false);
+  const [error, setError] = React.useState("");
+  const [success, setSuccess] = React.useState("");
+  const [fieldError, setFieldError] = React.useState("");
+
+  // localValue: what's currently in the detail panel control (may differ from draft)
+  const [localValue, setLocalValue] = React.useState<any>(undefined);
+  const localValueChanged = localValue !== undefined &&
+    JSON.stringify(localValue) !== JSON.stringify(getPath(draft, section));
+
+  // expandedSections: set of IDs that are currently open. Empty = all collapsed (default).
+  const [expandedSections, setExpandedSections] = React.useState<Set<string>>(new Set());
+  const isExpanded = (id: string) => expandedSections.has(id);
+  const toggleSection = (id: string) => {
+    const wasExpanded = expandedSections.has(id);
+    // Create new Set every time — never mutate
+    setExpandedSections(prev => {
+      const next = new Set(Array.from(prev));
+      if (wasExpanded) next.delete(id); else next.add(id);
+      return next;
+    });
+    if (wasExpanded) {
+      // Collapsing — clear selection if it belongs to this section
+      const sectionMap: Record<string, string[]> = {
+        identity: ["current_age","birth_year","filing_status","state","retirement_age","simulation_mode"],
+        horizon: ["target_age","rmd_table"],
+        ss: ["ss_self_start","ss_spouse_start","ss_gross","ss_exclude"],
+        spouse: ["spouse_name","spouse_birth_year","spouse_longevity","spouse_sole_ira"],
+        roth: ["roth_enabled","roth_bracket","roth_avoid_niit","roth_annual_k","roth_window"],
+        rmd: ["rmd_extra"],
+      };
+      const fieldsInSection = sectionMap[id] || [];
+      setSection(prev => (fieldsInSection.includes(prev) || (id === "beneficiaries" && prev.startsWith("bene-"))) ? "" : prev);
+    }
+  };
+
+  // Field list ref for scroll-to-selected
+  const fieldListRef = React.useRef<HTMLDivElement>(null);
+
+  // Keep draft in sync when parsed changes from outside (e.g. version restore)
+  React.useEffect(() => {
+    const normalized = JSON.parse(JSON.stringify(parsed));
+    if (normalized.spouse && normalized.spouse.sole_beneficiary_for_ira === undefined) {
+      normalized.spouse.sole_beneficiary_for_ira = false;
+    }
+    setDraft(normalized);
+    setError(""); setSuccess(""); setFieldError(""); setLocalValue(undefined);
+  }, [JSON.stringify(parsed)]);
+
+  // When section changes, reset localValue to current draft value
+  React.useEffect(() => {
+    setLocalValue(getPath(draft, section));
+    setFieldError("");
+    // Capture original bene for change detection
+    const pm = section.match(/^bene-p-(\d+)-edit$/);
+    const cm = section.match(/^bene-c-(\d+)-edit$/);
+    if (pm) setBeneOriginal(JSON.parse(JSON.stringify(draft.beneficiaries?.primary?.[Number(pm[1])] || null)));
+    else if (cm) setBeneOriginal(JSON.parse(JSON.stringify(draft.beneficiaries?.contingent?.[Number(cm[1])] || null)));
+    else setBeneOriginal(null);
+  }, [section]);
+
+  // Scroll selected field row into view at top of list
+  React.useEffect(() => {
+    if (!fieldListRef.current || !section) return;
+    const selected = fieldListRef.current.querySelector("[data-selected='true']") as HTMLElement;
+    if (selected) selected.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [section]);
+
+  // Dirty = draft differs from saved (parsed)
+  const isDirty = JSON.stringify(draft) !== JSON.stringify(parsed);
+
+  const setDraftPath = (path: string, value: any) => {
+    setDraft((prev: any) => {
+      const next = JSON.parse(JSON.stringify(prev));
+      const parts = path.split(".");
+      let obj = next;
+      for (let i = 0; i < parts.length - 1; i++) {
+        if (!obj[parts[i]]) obj[parts[i]] = {};
+        obj = obj[parts[i]];
+      }
+      obj[parts[parts.length - 1]] = value;
+      return next;
+    });
+  };
+
+  // Validate all fields — returns error string or ""
+  const validate = (): string => {
+    if (!draft.birth_year || draft.birth_year < 1900 || draft.birth_year > 2010)
+      return "Birth year must be between 1900 and 2010";
+    if (!draft.target_age || draft.target_age < 50 || draft.target_age > 110)
+      return "Planning horizon (target age) must be between 50 and 110";
+    if (draft.retirement_age && (draft.retirement_age < 40 || draft.retirement_age > 90))
+      return "Retirement age must be between 40 and 90";
+    const primaryShares = (draft.beneficiaries?.primary || []).reduce((s: number, b: any) => s + Number(b.share_percent || 0), 0);
+    const contingentShares = (draft.beneficiaries?.contingent || []).reduce((s: number, b: any) => s + Number(b.share_percent || 0), 0);
+    if ((draft.beneficiaries?.primary || []).length > 0 && Math.abs(primaryShares - 100) > 0.1)
+      return `Primary beneficiary shares must sum to 100% (currently ${primaryShares}%)`;
+    if ((draft.beneficiaries?.contingent || []).length > 0 && Math.abs(contingentShares - 100) > 0.1)
+      return `Contingent beneficiary shares must sum to 100% (currently ${contingentShares}%)`;
+    if (draft.social_security?.self_start_age && (draft.social_security.self_start_age < 62 || draft.social_security.self_start_age > 70))
+      return "Social Security start age must be 62–70";
+    return "";
+  };
+
+  // Commit localValue → draft (called by Update button)
+  const updateField = (fieldPath: string) => {
+    if (localValue === undefined) return;
+    const err = validate();
+    if (err) { setFieldError(err); return; }
+    setFieldError("");
+    setDraftPath(fieldPath, localValue);
+    // localValue now matches draft — Update button hides
+    setSuccess("Updated — save profile when done");
+    setTimeout(() => setSuccess(""), 2000);
+  };
+
+  // Save entire draft to server — one version entry for all changes
+  const saveProfile = async () => {
+    const err = validate();
+    if (err) { setError(err); return; }
+    setSaving(true); setError(""); setSuccess("");
+    try {
+      await onSave(draft, "guided: profile saved");
+      setSuccess("Saved ✓");
+      setTimeout(() => setSuccess(""), 2500);
+    } catch (e: any) {
+      setError(String(e?.message || e));
+    } finally { setSaving(false); }
+  };
+
+  const discard = () => {
+    setDraft(JSON.parse(JSON.stringify(parsed)));
+    setLocalValue(undefined);
+    setError(""); setSuccess(""); setFieldError("");
+  };
+
+  // Control helpers — bind to localValue, not draft
+  const inp = (path: string, type = "text", placeholder = "") => (
+    <input type={type}
+      value={localValue !== undefined ? (localValue ?? "") : (getPath(draft, path) ?? "")}
+      readOnly={readonly}
+      onChange={e => {
+        const raw = e.target.value;
+        setLocalValue(type === "number" ? (raw === "" ? "" : Number(raw)) : raw);
+      }}
+      style={{ ...inputStyle, fontSize: 14, background: readonly ? "#f9fafb" : "#fff" }}
+      placeholder={placeholder} />
+  );
+
+  const sel = (path: string, options: {value:string; label:string}[]) => (
+    <select
+      value={localValue !== undefined ? String(localValue ?? "") : String(getPath(draft, path) ?? "")}
+      disabled={readonly}
+      onChange={e => setLocalValue(e.target.value)}
+      style={{ ...selectStyle, fontSize: 14, background: readonly ? "#f9fafb" : "#fff" }}>
+      {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+    </select>
+  );
+
+  const tog = (path: string) => {
+    const val = localValue !== undefined ? localValue : getPath(draft, path);
+    return readonly ? (
+      <span style={{ fontSize: 14, color: val ? "#15803d" : "#6b7280", fontWeight: 500 }}>{val ? "Yes" : "No"}</span>
+    ) : (
+      <div style={{ display: "flex", gap: 0, border: "1px solid #d1d5db", borderRadius: 6, overflow: "hidden", width: "fit-content" }}>
+        {[true, false].map(opt => (
+          <button key={String(opt)} onClick={() => setLocalValue(opt)}
+            style={{ padding: "6px 20px", fontSize: 13, border: "none", cursor: "pointer",
+              background: val === opt ? (opt ? "#f0fdf4" : "#fef2f2") : "#fff",
+              color: val === opt ? (opt ? "#15803d" : "#b91c1c") : "#6b7280",
+              fontWeight: val === opt ? 600 : 400 }}>
+            {opt ? "Yes" : "No"}
+          </button>
+        ))}
+      </div>
+    );
+  };
+
+  const renderSection = () => {
+
+    switch (section) {
+      case "identity": return (
+        <div>
+          <div style={sectionTitleStyle}>Identity &amp; Horizon</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            <div style={fldStyle}>
+              <label style={labelStyle}>Birth year</label>
+              {inp("birth_year", "number", "e.g. 1967")}
+              <span style={hintStyle}>Determines SECURE 2.0 RMD start age: ≤1950=72, 1951–1959=73, ≥1960=75</span>
+            </div>
+            <div style={fldStyle}>
+              <label style={labelStyle}>Current age</label>
+              <select value={getPath(draft, "current_age") ?? "compute"} disabled={readonly}
+                onChange={e => set("current_age", e.target.value === "compute" ? "compute" : Number(e.target.value))}
+                style={{ ...selectStyle, background: readonly ? "#f9fafb" : "#fff" }}>
+                <option value="compute">compute (auto from birth_year)</option>
+                {Array.from({length: 80}, (_, i) => i + 20).map(a => <option key={a} value={a}>{a}</option>)}
+              </select>
+              <span style={hintStyle}>Year 1 of simulation = this age + 1</span>
+            </div>
+            <div style={fldStyle}>
+              <label style={labelStyle}>Filing status</label>
+              {sel("filing_status", FILING_STATUS_OPTIONS)}
+              <span style={hintStyle}>Drives federal and state bracket widths, standard deduction, NIIT thresholds</span>
+            </div>
+            <div style={fldStyle}>
+              <label style={labelStyle}>State</label>
+              <select value={getPath(draft, "state") ?? ""} disabled={readonly}
+                onChange={e => set("state", e.target.value)}
+                style={{ ...selectStyle, background: readonly ? "#f9fafb" : "#fff" }}>
+                {US_STATES.map(s => (
+                  <option key={s} value={s}>{s}{NO_INCOME_TAX_STATES.has(s) ? " ★ no income tax" : ""}</option>
+                ))}
+              </select>
+              <span style={hintStyle}>★ = no state income tax</span>
+            </div>
+            <div style={fldStyle}>
+              <label style={labelStyle}>Retirement age</label>
+              {inp("retirement_age", "number", "e.g. 65")}
+              <span style={hintStyle}>Used for simulation mode blend and Roth conversion window planning</span>
+            </div>
+            <div style={fldStyle}>
+              <label style={labelStyle}>Target age (simulation end)</label>
+              {inp("target_age", "number", "e.g. 95")}
+              <span style={hintStyle}>n_years = target_age − current_age. Range: 50–110.</span>
+            </div>
+            <div style={fldStyle}>
+              <label style={labelStyle}>Simulation mode</label>
+              {sel("simulation_mode", SIMULATION_MODE_OPTIONS)}
+            </div>
+            <div style={fldStyle}>
+              <label style={labelStyle}>RMD table</label>
+              {sel("rmd_table", RMD_TABLE_OPTIONS)}
+              <span style={hintStyle}>Joint Survivor: use only if spouse is sole IRA beneficiary AND 10+ years younger</span>
+            </div>
+          </div>
+        </div>
+      );
+
+      case "spouse": return (
+        <div>
+          <div style={sectionTitleStyle}>Spouse</div>
+          <div style={{ marginBottom: 12, fontSize: 12, color: "#6b7280", background: "#f8faff", borderRadius: 6, padding: "8px 10px", borderLeft: "3px solid #c7d2fe" }}>
+            Include only when filing_status is MFJ. Used for survivor scenario in Roth optimizer and spousal IRA rollover rules.
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            <div style={fldStyle}><label style={labelStyle}>Spouse name</label>{inp("spouse.name", "text", "e.g. Jane")}</div>
+            <div style={fldStyle}>
+              <label style={labelStyle}>Spouse birth year</label>
+              {inp("spouse.birth_year", "number", "e.g. 1970")}
+              <span style={hintStyle}>Used to compute survivor age in Roth optimizer</span>
+            </div>
+            <div style={fldStyle}>
+              <label style={labelStyle}>Sole IRA beneficiary</label>
+              {tog("spouse.sole_beneficiary_for_ira")}
+              <span style={hintStyle}>true = enables spousal rollover RMD rules after inheritance</span>
+            </div>
+          </div>
+        </div>
+      );
+
+      case "ss": return (
+        <div>
+          <div style={sectionTitleStyle}>Social Security</div>
+          <div style={{ marginBottom: 12, fontSize: 12, color: "#6b7280", background: "#f8faff", borderRadius: 6, padding: "8px 10px", borderLeft: "3px solid #c7d2fe" }}>
+            Enter gross monthly benefit at Full Retirement Age (FRA). Start age 62 = reduced ~25–30%, 67 = FRA, 70 = +24% delayed credit.
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            <div style={fldStyle}>
+              <label style={labelStyle}>Your monthly benefit (at FRA, $)</label>
+              {inp("social_security.self_benefit_monthly", "number", "e.g. 2500")}
+            </div>
+            <div style={fldStyle}>
+              <label style={labelStyle}>Your start age</label>
+              <select value={getPath(draft, "social_security.self_start_age") ?? 67} disabled={readonly}
+                onChange={e => set("social_security.self_start_age", Number(e.target.value))}
+                style={{ ...selectStyle, background: readonly ? "#f9fafb" : "#fff" }}>
+                {[62,63,64,65,66,67,68,69,70].map(a => (
+                  <option key={a} value={a}>{a}{a===62?" (early — reduced)":" "}{a===67?" (FRA)":" "}{a===70?" (+24% delayed)":""}</option>
+                ))}
+              </select>
+            </div>
+            <div style={fldStyle}>
+              <label style={labelStyle}>Spouse monthly benefit (at FRA, $)</label>
+              {inp("social_security.spouse_benefit_monthly", "number", "e.g. 1800")}
+            </div>
+            <div style={fldStyle}>
+              <label style={labelStyle}>Spouse start age</label>
+              <select value={getPath(draft, "social_security.spouse_start_age") ?? 67} disabled={readonly}
+                onChange={e => set("social_security.spouse_start_age", Number(e.target.value))}
+                style={{ ...selectStyle, background: readonly ? "#f9fafb" : "#fff" }}>
+                {[62,63,64,65,66,67,68,69,70].map(a => (
+                  <option key={a} value={a}>{a}{a===67?" (FRA)":""}{a===70?" (+24%)":""}</option>
+                ))}
+              </select>
+            </div>
+            <div style={fldStyle}>
+              <label style={labelStyle}>Exclude SS from plan</label>
+              {tog("social_security.exclude_from_plan")}
+              <span style={hintStyle}>true = tests whether portfolio alone covers expenses without SS</span>
+            </div>
+          </div>
+        </div>
+      );
+
+      case "bene": return null;  // Handled by renderDetailPanel bene-p-N-edit / bene-c-N-edit / bene-c-N-new
+
+      case "rmd": return (
+        <div>
+          <div style={sectionTitleStyle}>RMD Policy</div>
+          <div style={fldStyle}>
+            <label style={labelStyle}>Surplus RMD handling</label>
+            {sel("rmd_policy.extra_handling", RMD_EXTRA_HANDLING_OPTIONS)}
+            <span style={hintStyle}>What to do with RMD above the spending plan. Reinvest keeps money working; spend = extra income; hold_cash = idle reserve.</span>
+          </div>
+        </div>
+      );
+
+      case "roth_policy": return (
+        <div>
+          <div style={sectionTitleStyle}>Roth Conversion Policy</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            <div style={fldStyle}>
+              <label style={labelStyle}>Enabled</label>
+              {tog("roth_conversion_policy.enabled")}
+              <span style={hintStyle}>Master switch. When false, Roth Insights shows opportunity cost — click Apply there to activate.</span>
+            </div>
+            <div style={fldStyle}>
+              <label style={labelStyle}>Stay below bracket</label>
+              {sel("roth_conversion_policy.keepit_below_max_marginal_fed_rate", ROTH_BRACKET_OPTIONS)}
+              <span style={hintStyle}>Caps conversion amount to avoid hitting this marginal rate</span>
+            </div>
+            <div style={fldStyle}>
+              <label style={labelStyle}>Avoid NIIT threshold</label>
+              {tog("roth_conversion_policy.avoid_niit")}
+              <span style={hintStyle}>true = halt conversion before $250K NIIT threshold (avoids 3.8% surcharge)</span>
+            </div>
+            <div style={fldStyle}>
+              <label style={labelStyle}>RMD assist</label>
+              {sel("roth_conversion_policy.rmd_assist", ROTH_RMD_ASSIST_OPTIONS)}
+            </div>
+            <div style={fldStyle}>
+              <label style={labelStyle}>Tax payment source</label>
+              {sel("roth_conversion_policy.tax_payment_source", ROTH_TAX_SOURCE_OPTIONS)}
+            </div>
+            <div style={fldStyle}>
+              <label style={labelStyle}>IRMAA guard</label>
+              {tog("roth_conversion_policy.irmaa_guard.enabled")}
+              <span style={hintStyle}>Cap conversion to avoid crossing Medicare IRMAA premium tier (relevant age 65+)</span>
+            </div>
+            <div style={fldStyle}>
+              <label style={labelStyle}>Conversion window</label>
+              {inp("roth_conversion_policy.window_years.0", "text", "e.g. now-75")}
+              <span style={hintStyle}>"now-75" = convert from today until age 75. "now" = current_age.</span>
+            </div>
+            <div style={fldStyle}>
+              <label style={labelStyle}>Annual conversion ($K)</label>
+              {inp("roth_conversion_policy.annual_conversion_k", "number", "e.g. 83")}
+              <span style={hintStyle}>Set by the Roth optimizer Apply button. Override manually here.</span>
+            </div>
+          </div>
+        </div>
+      );
+
+      case "roth_opt": return (
+        <div>
+          <div style={sectionTitleStyle}>Roth Optimizer Config</div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            <div style={fldStyle}>
+              <label style={labelStyle}>Include survivor scenario</label>
+              {tog("roth_optimizer_config.include_survivor_scenario")}
+              <span style={hintStyle}>Model single-filer bracket cliff when spouse predeceases</span>
+            </div>
+            <div style={fldStyle}>
+              <label style={labelStyle}>Include heir scenario</label>
+              {tog("roth_optimizer_config.include_heir_scenario")}
+              <span style={hintStyle}>Model 10-year forced liquidation for non-spouse beneficiaries (SECURE 2.0)</span>
+            </div>
+            <div style={fldStyle}>
+              <label style={labelStyle}>IRMAA sensitivity</label>
+              <select value={getPath(draft, "roth_optimizer_config.irmaa_sensitivity") ?? "low"} disabled={readonly}
+                onChange={e => setDraftPath("roth_optimizer_config.irmaa_sensitivity", e.target.value)}
+                style={{ ...selectStyle, background: readonly ? "#f9fafb" : "#fff" }}>
+                <option value="low">low — IRMAA flagged but doesn't tip recommendation</option>
+                <option value="high">high — IRMAA cliff near-hard constraint</option>
+              </select>
+            </div>
+            <div style={fldStyle}>
+              <label style={labelStyle}>Conversion window (years)</label>
+              {inp("roth_optimizer_config.window_years", "number", "e.g. 29")}
+              <span style={hintStyle}>Defaults to min(29, 75 − current_age)</span>
+            </div>
+          </div>
+        </div>
+      );
+
+      default: return null;
+    }
+  };
+
+  const sectionNote = section;
+
+  // ── Shared sub-components ────────────────────────────────────────────────
+  const SectionLabel = ({ label, id }: { label: string; id: string }) => {
+    const collapsed = !isExpanded(id);
+    return (
+      <div onClick={() => toggleSection(id)} style={{
+        display: "flex", alignItems: "center", gap: 7,
+        padding: "9px 14px 8px", fontSize: 11, fontWeight: 700,
+        color: "#1f2937", textTransform: "uppercase" as const, letterSpacing: ".07em",
+        background: "#dde1e9", marginTop: 2, cursor: "pointer",
+        borderLeft: "3px solid #9ca3af", userSelect: "none" as const,
+      }}>
+        <span style={{ fontSize: 8, color: "#6b7280", marginRight: 2 }}>{collapsed ? "▶" : "▼"}</span>
+        {label}
+      </div>
+    );
+  };
+
+  const FieldRow = ({ fieldKey, val, selected, onClick, indent = false, sectionId }: {
+    fieldKey: string; val: any; selected: boolean; onClick: () => void; indent?: boolean; sectionId?: string;
+  }) => {
+    if (sectionId && !isExpanded(sectionId)) return null;
+    const displayVal = val === undefined || val === null ? "—" : typeof val === "boolean" ? (val ? "Yes" : "No") : typeof val === "object" ? JSON.stringify(val) : String(val);
+    const truncated = displayVal.length > 26 ? displayVal.slice(0, 26) + "…" : displayVal;
+    return (
+      <div data-selected={selected ? "true" : "false"} onClick={onClick} style={{
+        display: "flex", alignItems: "center", gap: 8,
+        padding: "8px 14px", paddingLeft: indent ? 22 : 14,
+        cursor: "pointer",
+        background: selected ? "#EEEDFE" : "transparent",
+        borderLeft: `2px solid ${selected ? "#7F77DD" : "transparent"}`,
+        borderBottom: "1px solid #f0f0f0",
+      }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 500, color: selected ? "#3C3489" : "#111827" }}>{fieldKey}</div>
+          <div style={{ fontSize: 12, color: "#9ca3af", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: 1 }}>{truncated}</div>
+        </div>
+        <div style={{ width: 16, height: 16, borderRadius: "50%", background: "#EEEDFE", border: "0.5px solid #AFA9EC", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "#3C3489", flexShrink: 0 }}>?</div>
+      </div>
+    );
+  };
+
+  // Beneficiary type for the Add form — must be at component level (Rules of Hooks)
+  const [beneType, setBeneType] = React.useState<"primary" | "contingent">("contingent");
+  const blankBene = { name: "", relationship: "child", birth_year: 2000, share_percent: 0, eligible_designated_beneficiary: false, per_stirpes: true, estimated_income_moderate: 150000, estimated_income_high: 300000, filing_status: "MFJ" };
+  const [beneDraft, setBeneDraft] = React.useState<any>({ ...blankBene });
+  const updateBD = (field: string, value: any) => setBeneDraft((p: any) => ({ ...p, [field]: value }));
+  // Track original bene values when edit section opens — Done only shows when changed
+  const [beneOriginal, setBeneOriginal] = React.useState<any>(null);
+
+
+  // ── ShareIndicator: live share total with split-equally button ───────────
+  const ShareIndicator = ({ total, label, count, onSplit, ro }: {
+    total: number; label: string; count: number; onSplit: () => void; ro: boolean;
+  }) => {
+    const ok = Math.abs(total - 100) <= 0.1;
+    return (
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14,
+        padding: "8px 12px", borderRadius: 6, border: `1px solid ${ok ? "#86efac" : "#fecaca"}`,
+        background: ok ? "#f0fdf4" : "#fef2f2" }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: ok ? "#15803d" : "#b91c1c", flex: 1 }}>
+          {label}: {total}% {ok ? "✓" : `— ${(100 - total) > 0 ? `${(100-total).toFixed(0)}% unassigned` : `${(total-100).toFixed(0)}% over`}`}
+        </span>
+        {!ro && count >= 2 && (
+          <button onClick={onSplit} style={{ fontSize: 11, color: "#7F77DD", background: "none",
+            border: "1px solid #AFA9EC", borderRadius: 5, cursor: "pointer", padding: "3px 10px", whiteSpace: "nowrap" as const }}>
+            Split equally ({count})
+          </button>
+        )}
+      </div>
+    );
+  };
+
+  // ── BeneActionBar: Done + Delete footer for beneficiary edit forms ────────
+  const BeneActionBar = ({ onDone, onDelete, err, msg, changed }: {
+    onDone: () => void; onDelete: () => void; err: string; msg: string; changed: boolean;
+  }) => (
+    <div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px solid #f3f4f6",
+      display: "flex", alignItems: "center", gap: 10 }}>
+      {changed ? (
+        <button onClick={onDone} style={{ padding: "7px 20px", background: "#7F77DD", color: "#fff",
+          border: "none", borderRadius: 7, cursor: "pointer", fontWeight: 600, fontSize: 13 }}>
+          Done
+        </button>
+      ) : (
+        <span style={{ fontSize: 12, color: "#9ca3af" }}>Make a change above to enable Done</span>
+      )}
+      <button onClick={onDelete} style={{ padding: "7px 14px", background: "none",
+        border: "1px solid #fca5a5", borderRadius: 7, cursor: "pointer", fontSize: 13, color: "#b91c1c" }}>
+        Delete
+      </button>
+      {err  && <span style={{ fontSize: 12, color: "#b91c1c", marginLeft: 4 }}>{err}</span>}
+      {!err && msg && <span style={{ fontSize: 12, color: "#15803d", marginLeft: 4 }}>{msg}</span>}
+    </div>
+  );
+
+  // ── Detail panel: renders edit form for selected field ────────────────────
+  const renderDetailPanel = () => {
+    if (!section) {
+      // Profile overview — shown when nothing selected (e.g. all sections collapsed)
+      const name = getPath(draft, "filing_status") || "—";
+      const state = getPath(draft, "state") || "—";
+      const age = getPath(draft, "current_age") === "compute"
+        ? `${2026 - Number(getPath(draft, "birth_year") || 2000)} (from birth year ${getPath(draft, "birth_year") || "—"})`
+        : String(getPath(draft, "current_age") || "—");
+      const retAge = getPath(draft, "retirement_age") || "—";
+      const targetAge = getPath(draft, "target_age") || "—";
+      const simMode = getPath(draft, "simulation_mode") || "—";
+      const ssAge = getPath(draft, "social_security.self_start_age");
+      const rothEnabled = getPath(draft, "roth_conversion_policy.enabled");
+      const numBene = (draft.beneficiaries?.contingent || []).length;
+
+      return (
+        <div style={{ padding: 24 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: "#111827", marginBottom: 16, paddingBottom: 10, borderBottom: "1px solid #f3f4f6" }}>
+            Profile Overview
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+            {[
+              { label: "Current Age", value: age },
+              { label: "Filing Status", value: String(name) },
+              { label: "State", value: String(state) },
+              { label: "Retirement Age", value: String(retAge) },
+              { label: "Planning Horizon", value: String(targetAge) },
+              { label: "Simulation Mode", value: String(simMode) },
+              { label: "SS Start Age", value: ssAge ? String(ssAge) : "—" },
+              { label: "Roth Conversions", value: rothEnabled ? "Enabled" : "Disabled" },
+              { label: "Contingent Beneficiaries", value: String(numBene) },
+            ].map(({ label, value }) => (
+              <div key={label} style={{ background: "#f8fafc", borderRadius: 6, padding: "10px 12px", border: "1px solid #f0f0f0" }}>
+                <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 3, textTransform: "uppercase" as const, letterSpacing: ".04em" }}>{label}</div>
+                <div style={{ fontSize: 14, fontWeight: 500, color: "#111827" }}>{value}</div>
+              </div>
+            ))}
+          </div>
+          <div style={{ marginTop: 16, fontSize: 13, color: "#9ca3af" }}>
+            Expand a section on the left and click any field to view or edit it.
+          </div>
+        </div>
+      );
+    }
+
+    // Current Age needs both compute and manual entry options
+    if (section === "current_age") {
+      const currentVal = getPath(draft, "current_age");
+      const useCompute = currentVal === "compute" || currentVal === undefined;
+      return (
+        <div style={{ padding: 24 }}>
+          <DetailHeader title="Current Age" />
+          <DetailDesc text="How your current age is set for the simulation. 'Calculate from birth year' is recommended — it stays accurate year over year. Use 'Enter a specific age' to model a hypothetical scenario at a different age." />
+          {!readonly ? (
+            <>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
+                {[true, false].map(isCompute => (
+                  <div key={String(isCompute)}
+                    onClick={() => { const v = isCompute ? "compute" : (getPath(draft, "birth_year") ? (2026 - Number(getPath(draft, "birth_year"))) : 50); setLocalValue(v); }}
+                    style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 7, cursor: "pointer", border: `1px solid ${(isCompute ? useCompute : !useCompute) ? "#7F77DD" : "#e5e7eb"}`, background: (isCompute ? useCompute : !useCompute) ? "#EEEDFE" : "#fafafa" }}>
+                    <div style={{ width: 12, height: 12, borderRadius: "50%", background: (isCompute ? useCompute : !useCompute) ? "#7F77DD" : "transparent", border: `1.5px solid ${(isCompute ? useCompute : !useCompute) ? "#7F77DD" : "#d1d5db"}`, flexShrink: 0 }} />
+                    <span style={{ fontSize: 14, color: (isCompute ? useCompute : !useCompute) ? "#3C3489" : "#374151", fontWeight: (isCompute ? useCompute : !useCompute) ? 600 : 400 }}>
+                      {isCompute ? "Calculate from birth year (recommended)" : "Enter a specific age"}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              {!useCompute && (
+                <div style={{ marginBottom: 14 }}>
+                  <label style={{ ...labelStyle, fontSize: 12 }}>Age at simulation start</label>
+                  <input type="number" min={18} max={100}
+                    value={typeof currentVal === "number" ? currentVal : ""}
+                    onChange={e => set("current_age", Number(e.target.value))}
+                    style={{ ...inputStyle, fontSize: 14 }} placeholder="e.g. 52" />
+                </div>
+              )}
+              <UpdateBar label="Current Age" fieldPath="current_age" ro={readonly} />
+            </>
+          ) : (
+            <div style={{ fontSize: 14, padding: "8px 10px", background: "#f8fafc", borderRadius: 6, border: "1px solid #e5e7eb" }}>
+              {String(currentVal ?? "—")}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // Map section key to edit control
+    const detailMap: Record<string, { title: string; desc: string; control: React.ReactNode; savePath?: string }> = {
+
+      birth_year: {
+        title: "Birth Year",
+        desc: "Your year of birth. Used to calculate your current age and to determine your RMD start age — age 75 if born 1960 or later, age 73 if born 1951–1959 (SECURE 2.0).",
+        control: inp("birth_year", "number", "e.g. 1967"),
+      },
+      filing_status: {
+        title: "Filing Status",
+        desc: "Your tax filing status. Affects federal bracket widths, standard deduction, NIIT thresholds, and Social Security provisional income thresholds.",
+        control: sel("filing_status", FILING_STATUS_OPTIONS),
+      },
+      state: {
+        title: "State of Residence",
+        desc: "Your state for state income tax. Texas, Florida, Washington, Nevada, and several others have no state income tax — selecting these sets state tax to zero.",
+        control: sel("state", US_STATES.map((s: string) => ({ value: s, label: s }))),
+      },
+      retirement_age: {
+        title: "Retirement Age",
+        desc: "The age you plan to stop working. Affects the simulation mode glide path and the Roth optimizer analysis window.",
+        control: inp("retirement_age", "number", "e.g. 65"),
+      },
+      simulation_mode: {
+        title: "Simulation Mode",
+        desc: "Controls the withdrawal objective. automatic = glide path; investment = growth-first; retirement = survival-first; balanced = 50/50.",
+        control: sel("simulation_mode", [
+          { value: "automatic", label: "automatic — glide path blend" },
+          { value: "investment", label: "investment — growth-first" },
+          { value: "retirement", label: "retirement — survival-first" },
+          { value: "balanced", label: "balanced — 50/50" },
+        ]),
+      },
+      target_age: {
+        title: "Planning Horizon",
+        desc: "The age your simulation runs to. Most people use 90–100 for a long retirement buffer.",
+        control: inp("target_age", "number", "e.g. 95"),
+      },
+      rmd_table: {
+        title: "RMD Table",
+        desc: "IRS RMD table to use for distribution factor. uniform_lifetime covers most married filers. joint_life when sole beneficiary is a spouse 10+ years younger.",
+        control: sel("rmd_table", [
+          { value: "uniform_lifetime", label: "uniform_lifetime (default)" },
+          { value: "joint_life", label: "joint_life (spouse 10+ yrs younger)" },
+        ]),
+      },
+      ss_self_start: {
+        title: "Your SS Start Age",
+        desc: "Age to start Social Security benefits. 62 = early (reduced). 67 = FRA (full). 70 = maximum (+24% over FRA).",
+        control: (<select value={getPath(draft, "social_security.self_start_age") ?? 67} disabled={readonly} onChange={e => set("social_security.self_start_age", Number(e.target.value))} style={{ ...selectStyle, background: readonly ? "#f9fafb" : "#fff" }}>
+          {[62,63,64,65,66,67,68,69,70].map(a => <option key={a} value={a}>{a}{a===67?" (FRA)":a===70?" (max +24%)":""}</option>)}
+        </select>),
+      },
+      ss_gross: {
+        title: "Your Annual SS Benefit",
+        desc: "Your gross annual Social Security benefit in today's dollars. Check ssa.gov for your personalised estimate.",
+        control: inp("social_security.annual_gross", "number", "e.g. 42000"),
+      },
+      ss_exclude: {
+        title: "Exclude SS from Plan",
+        desc: "Removes Social Security income from the plan entirely. Tests whether your portfolio alone covers expenses — a useful worst-case stress test.",
+        control: tog("social_security.exclude_from_plan"),
+      },
+      ss_spouse_start: {
+        title: "Spouse SS Start Age",
+        desc: "Age spouse starts SS benefits.",
+        control: (<select value={getPath(draft, "social_security.spouse_start_age") ?? 67} disabled={readonly} onChange={e => set("social_security.spouse_start_age", Number(e.target.value))} style={{ ...selectStyle, background: readonly ? "#f9fafb" : "#fff" }}>
+          {[62,63,64,65,66,67,68,69,70].map(a => <option key={a} value={a}>{a}{a===67?" (FRA)":""}</option>)}
+        </select>),
+      },
+      spouse_name: { title: "Spouse Name", desc: "Spouse name for display.", control: inp("spouse.name") },
+      spouse_birth_year: { title: "Spouse Birth Year", desc: "Spouse birth year. Used to model the transition to single-filer tax brackets in the Roth optimizer.", control: inp("spouse.birth_year", "number") },
+      spouse_longevity: { title: "Spouse Expected Longevity", desc: "The age your spouse is expected to live to. The Roth optimizer uses this to model the widowhood tax cliff.", control: inp("spouse.expected_longevity", "number", "e.g. 88") },
+      spouse_sole_ira: { title: "Spouse is Sole IRA Beneficiary", desc: "Set true when your spouse is the sole beneficiary of your IRA. Enables spousal rollover rules — after inheritance the spouse can roll your IRA into their own and use their own life expectancy for RMDs. Default: false.", control: tog("spouse.sole_beneficiary_for_ira") },
+      roth_enabled: {
+        title: "Roth Conversions Enabled",
+        desc: "Master switch for Roth conversions. When off, no conversions run — but Roth Insights still shows the opportunity cost with a one-click Apply button.",
+        control: tog("roth_conversion_policy.enabled"),
+      },
+      roth_bracket: {
+        title: "Stay Below Bracket",
+        desc: "Caps conversions to avoid pushing your marginal rate above this level. Fill the bracket converts up to your current bracket ceiling. None removes the cap.",
+        control: sel("roth_conversion_policy.keepit_below_max_marginal_fed_rate", ROTH_BRACKET_OPTIONS),
+      },
+      roth_avoid_niit: {
+        title: "Avoid NIIT Threshold",
+        desc: "Stops conversions before your income crosses the $250K NIIT threshold, avoiding the 3.8% Net Investment Income surcharge.",
+        control: tog("roth_conversion_policy.avoid_niit"),
+      },
+      roth_annual_k: {
+        title: "Annual Conversion ($K)",
+        desc: "Annual conversion amount in thousands of dollars. Set automatically by the Roth optimizer. Override here to test specific scenarios.",
+        control: inp("roth_conversion_policy.annual_conversion_k", "number", "e.g. 83"),
+      },
+      roth_window: {
+        title: "Conversion Window",
+        desc: "Age range over which conversions run. 'now-75' = from today until age 75. Defaults to now through RMD age or 75, whichever is earlier.",
+        control: inp("roth_conversion_policy.window_years.0", "text", "e.g. now-75"),
+      },
+      rmd_extra: {
+        title: "Surplus RMD Handling",
+        desc: "What happens when your RMD exceeds your spending plan. Reinvest keeps it in brokerage. Spend treats it as extra income. Hold cash leaves it idle.",
+        control: sel("rmd_policy.extra_handling", RMD_EXTRA_HANDLING_OPTIONS),
+      },
+    };
+
+    // New beneficiary form
+    // ── Add new beneficiary ── uses beneDraft (component-level state, no draft until Add) ──
+    if (section === "bene-new") {
+      const primaries: any[] = draft.beneficiaries?.primary || [];
+      const contingents: any[] = draft.beneficiaries?.contingent || [];
+      // Live share totals including the new entry
+      const newShare = Number(beneDraft.share_percent || 0);
+      const primTotalAfter = beneType === "primary"
+        ? primaries.reduce((s: number, x: any) => s + Number(x.share_percent || 0), 0) + newShare
+        : primaries.reduce((s: number, x: any) => s + Number(x.share_percent || 0), 0);
+      const contTotalAfter = beneType === "contingent"
+        ? contingents.reduce((s: number, x: any) => s + Number(x.share_percent || 0), 0) + newShare
+        : contingents.reduce((s: number, x: any) => s + Number(x.share_percent || 0), 0);
+
+      const splitNew = () => {
+        if (beneType === "primary") {
+          const n = primaries.length + 1;
+          const share = Math.floor(100 / n); const rem = 100 - share * n;
+          setDraftPath("beneficiaries.primary", primaries.map((x: any, i: number) => ({ ...x, share_percent: share + (i === 0 ? rem : 0) })));
+          updateBD("share_percent", share);
+        } else {
+          const n = contingents.length + 1;
+          const share = Math.floor(100 / n); const rem = 100 - share * n;
+          setDraftPath("beneficiaries.contingent", contingents.map((x: any, i: number) => ({ ...x, share_percent: share + (i === 0 ? rem : 0) })));
+          updateBD("share_percent", share + rem);
+        }
+      };
+
+      return (
+        <div style={{ padding: 24 }}>
+          <DetailHeader title="Add Beneficiary" />
+
+          {/* Type selector */}
+          <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+            {(["primary", "contingent"] as const).map(t => (
+              <div key={t} onClick={() => setBeneType(t)}
+                style={{ flex: 1, padding: "10px 14px", borderRadius: 7, cursor: "pointer", textAlign: "center" as const,
+                  border: `1px solid ${beneType === t ? "#7F77DD" : "#e5e7eb"}`,
+                  background: beneType === t ? "#EEEDFE" : "#fafafa" }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: beneType === t ? "#3C3489" : "#374151", textTransform: "capitalize" as const }}>{t}</div>
+                <div style={{ fontSize: 11, color: "#9ca3af", marginTop: 2 }}>
+                  {t === "primary" ? "Inherits first" : "Inherits if all primary predecease"}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Live share indicator */}
+          <ShareIndicator
+            total={beneType === "primary" ? primTotalAfter : contTotalAfter}
+            label={beneType === "primary" ? "Primary total (inc. new)" : "Contingent total (inc. new)"}
+            count={(beneType === "primary" ? primaries.length : contingents.length) + 1}
+            onSplit={splitNew} ro={false} />
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+            <div style={fldStyle}><label style={{ ...labelStyle, fontSize: 12 }}>Name</label>
+              <input value={beneDraft.name} onChange={e => updateBD("name", e.target.value)}
+                style={{ ...inputStyle, fontSize: 14 }} placeholder="e.g. Child A" /></div>
+            <div style={fldStyle}><label style={{ ...labelStyle, fontSize: 12 }}>Relationship</label>
+              <select value={beneDraft.relationship} onChange={e => updateBD("relationship", e.target.value)} style={{ ...selectStyle, fontSize: 14 }}>
+                {RELATIONSHIP_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}</select></div>
+            <div style={fldStyle}><label style={{ ...labelStyle, fontSize: 12 }}>Share (%)</label>
+              <input type="number" min={0} max={100} value={beneDraft.share_percent}
+                onChange={e => updateBD("share_percent", Number(e.target.value))}
+                style={{ ...inputStyle, fontSize: 14 }} /></div>
+            <div style={fldStyle}><label style={{ ...labelStyle, fontSize: 12 }}>Birth Year</label>
+              <input type="number" value={beneDraft.birth_year}
+                onChange={e => updateBD("birth_year", Number(e.target.value))}
+                style={{ ...inputStyle, fontSize: 14 }} /></div>
+            {beneType === "contingent" && <>
+              <div style={fldStyle}><label style={{ ...labelStyle, fontSize: 12 }}>Filing Status</label>
+                <select value={beneDraft.filing_status} onChange={e => updateBD("filing_status", e.target.value)} style={{ ...selectStyle, fontSize: 14 }}>
+                  {FILING_STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}</select></div>
+              <div style={fldStyle}><label style={{ ...labelStyle, fontSize: 12 }}>Moderate Income Est. ($)</label>
+                <input type="number" value={beneDraft.estimated_income_moderate}
+                  onChange={e => updateBD("estimated_income_moderate", Number(e.target.value))}
+                  style={{ ...inputStyle, fontSize: 14 }} /></div>
+              <div style={fldStyle}><label style={{ ...labelStyle, fontSize: 12 }}>High Income Est. ($)</label>
+                <input type="number" value={beneDraft.estimated_income_high}
+                  onChange={e => updateBD("estimated_income_high", Number(e.target.value))}
+                  style={{ ...inputStyle, fontSize: 14 }} /></div>
+              <div style={fldStyle}><label style={{ ...labelStyle, fontSize: 12 }}>Eligible designated beneficiary</label>
+                <div style={{ display: "flex", gap: 0, border: "1px solid #d1d5db", borderRadius: 6, overflow: "hidden", width: "fit-content" }}>
+                  {[true, false].map(opt => <button key={String(opt)} onClick={() => updateBD("eligible_designated_beneficiary", opt)}
+                    style={{ padding: "5px 14px", fontSize: 12, border: "none", cursor: "pointer", background: beneDraft.eligible_designated_beneficiary === opt ? (opt ? "#f0fdf4" : "#fef2f2") : "#fff", color: beneDraft.eligible_designated_beneficiary === opt ? (opt ? "#15803d" : "#b91c1c") : "#6b7280", fontWeight: beneDraft.eligible_designated_beneficiary === opt ? 600 : 400 }}>{opt ? "Yes" : "No"}</button>)}
+                </div>
+                <span style={hintStyle}>Yes = spouse, disabled, minor child, or within 10 yrs of owner age</span></div>
+              <div style={fldStyle}><label style={{ ...labelStyle, fontSize: 12 }}>Per stirpes</label>
+                <div style={{ display: "flex", gap: 0, border: "1px solid #d1d5db", borderRadius: 6, overflow: "hidden", width: "fit-content" }}>
+                  {[true, false].map(opt => <button key={String(opt)} onClick={() => updateBD("per_stirpes", opt)}
+                    style={{ padding: "5px 14px", fontSize: 12, border: "none", cursor: "pointer", background: beneDraft.per_stirpes === opt ? "#f0fdf4" : "#fff", color: beneDraft.per_stirpes === opt ? "#15803d" : "#6b7280", fontWeight: beneDraft.per_stirpes === opt ? 600 : 400 }}>{opt ? "Yes" : "No"}</button>)}
+                </div>
+                <span style={hintStyle}>Yes = share passes to their descendants if they predecease</span></div>
+            </>}
+          </div>
+
+          <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
+            <button onClick={() => {
+              if (!beneDraft.name.trim()) { setFieldError("Name is required"); return; }
+              if (beneType === "primary") {
+                const entry = { name: beneDraft.name, relationship: beneDraft.relationship, share_percent: beneDraft.share_percent, birth_year: beneDraft.birth_year };
+                setDraftPath("beneficiaries.primary", [...primaries, entry]);
+              } else {
+                setDraftPath("beneficiaries.contingent", [...contingents, { ...beneDraft }]);
+              }
+              setFieldError(""); setSuccess("Beneficiary added — save profile when done");
+              setBeneDraft({ ...blankBene }); setSection("");
+              setTimeout(() => setSuccess(""), 2500);
+            }} style={{ padding: "8px 20px", background: "#7F77DD", color: "#fff", border: "none", borderRadius: 7, cursor: "pointer", fontWeight: 600, fontSize: 14 }}>
+              Add
+            </button>
+            <button onClick={() => { setBeneDraft({ ...blankBene }); setSection(""); }}
+              style={{ padding: "8px 14px", background: "none", border: "1px solid #d1d5db", borderRadius: 7, cursor: "pointer", fontSize: 14, color: "#6b7280" }}>
+              Cancel
+            </button>
+          </div>
+          {fieldError && <div style={{ marginTop: 10, fontSize: 12, color: "#b91c1c", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 6, padding: "6px 10px" }}>{fieldError}</div>}
+        </div>
+      );
+    }
+
+    // ── Edit existing primary beneficiary ────────────────────────────────────
+    const beneEditPrimMatch = section.match(/^bene-p-(\d+)-edit$/);
+    if (beneEditPrimMatch) {
+      const idx = Number(beneEditPrimMatch[1]);
+      const primaries: any[] = draft.beneficiaries?.primary || [];
+      const b = primaries[idx] || {};
+      const primTotal = primaries.reduce((s: number, x: any) => s + Number(x.share_percent || 0), 0);
+      const updateP = (field: string, value: any) => {
+        const next = [...primaries]; next[idx] = { ...next[idx], [field]: value };
+        setDraftPath("beneficiaries.primary", next);
+      };
+      const splitEquallyPrim = () => {
+        const n = primaries.length; if (!n) return;
+        const share = Math.floor(100 / n); const rem = 100 - share * n;
+        setDraftPath("beneficiaries.primary", primaries.map((x: any, i: number) => ({ ...x, share_percent: share + (i === 0 ? rem : 0) })));
+      };
+      return (
+        <div style={{ padding: 24 }}>
+          <DetailHeader title={`Edit Primary — ${b.name || "Beneficiary"}`} />
+          <ShareIndicator total={primTotal} label="Primary total" count={primaries.length} onSplit={splitEquallyPrim} ro={readonly} />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+            <div style={fldStyle}><label style={{ ...labelStyle, fontSize: 12 }}>Name</label>
+              <input value={b.name || ""} readOnly={readonly} onChange={e => updateP("name", e.target.value)} style={{ ...inputStyle, fontSize: 14 }} /></div>
+            <div style={fldStyle}><label style={{ ...labelStyle, fontSize: 12 }}>Relationship</label>
+              <select value={b.relationship || "spouse"} disabled={readonly} onChange={e => updateP("relationship", e.target.value)} style={{ ...selectStyle, fontSize: 14 }}>
+                {RELATIONSHIP_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}</select></div>
+            <div style={fldStyle}><label style={{ ...labelStyle, fontSize: 12 }}>Share (%)</label>
+              <input type="number" min={0} max={100} value={b.share_percent ?? 0} readOnly={readonly} onChange={e => updateP("share_percent", Number(e.target.value))} style={{ ...inputStyle, fontSize: 14 }} /></div>
+          </div>
+          {!readonly && <BeneActionBar
+            changed={JSON.stringify(b) !== JSON.stringify(beneOriginal)}
+            onDone={() => { setBeneOriginal(JSON.parse(JSON.stringify(b))); setSuccess("Updated — save profile when done"); setFieldError(""); setTimeout(() => setSuccess(""), 2000); }}
+            onDelete={() => { setDraftPath("beneficiaries.primary", primaries.filter((_: any, i: number) => i !== idx)); setSection(""); }}
+            err={fieldError} msg={success} />}
+        </div>
+      );
+    }
+
+    // ── Edit existing contingent beneficiary ─────────────────────────────────
+    const beneEditContMatch = section.match(/^bene-c-(\d+)-edit$/);
+    if (beneEditContMatch) {
+      const idx = Number(beneEditContMatch[1]);
+      const contingents: any[] = draft.beneficiaries?.contingent || [];
+      const b = contingents[idx] || {};
+      const contTotal = contingents.reduce((s: number, x: any) => s + Number(x.share_percent || 0), 0);
+      const updateC = (field: string, value: any) => {
+        const next = [...contingents]; next[idx] = { ...next[idx], [field]: value };
+        setDraftPath("beneficiaries.contingent", next);
+      };
+      const splitEquallyCont = () => {
+        const n = contingents.length; if (!n) return;
+        const share = Math.floor(100 / n); const rem = 100 - share * n;
+        setDraftPath("beneficiaries.contingent", contingents.map((x: any, i: number) => ({ ...x, share_percent: share + (i === 0 ? rem : 0) })));
+      };
+      return (
+        <div style={{ padding: 24 }}>
+          <DetailHeader title={`Edit Contingent ${idx + 1} — ${b.name || "Beneficiary"}`} />
+          <ShareIndicator total={contTotal} label="Contingent total" count={contingents.length} onSplit={splitEquallyCont} ro={readonly} />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+            <div style={fldStyle}><label style={{ ...labelStyle, fontSize: 12 }}>Name</label>
+              <input value={b.name || ""} readOnly={readonly} onChange={e => updateC("name", e.target.value)} style={{ ...inputStyle, fontSize: 14 }} /></div>
+            <div style={fldStyle}><label style={{ ...labelStyle, fontSize: 12 }}>Relationship</label>
+              <select value={b.relationship || "child"} disabled={readonly} onChange={e => updateC("relationship", e.target.value)} style={{ ...selectStyle, fontSize: 14 }}>
+                {RELATIONSHIP_OPTIONS.map(r => <option key={r} value={r}>{r}</option>)}</select></div>
+            <div style={fldStyle}><label style={{ ...labelStyle, fontSize: 12 }}>Share (%)</label>
+              <input type="number" min={0} max={100} value={b.share_percent ?? 0} readOnly={readonly} onChange={e => updateC("share_percent", Number(e.target.value))} style={{ ...inputStyle, fontSize: 14 }} /></div>
+            <div style={fldStyle}><label style={{ ...labelStyle, fontSize: 12 }}>Birth Year</label>
+              <input type="number" value={b.birth_year || ""} readOnly={readonly} onChange={e => updateC("birth_year", Number(e.target.value))} style={{ ...inputStyle, fontSize: 14 }} /></div>
+            <div style={fldStyle}><label style={{ ...labelStyle, fontSize: 12 }}>Filing Status</label>
+              <select value={b.filing_status || "MFJ"} disabled={readonly} onChange={e => updateC("filing_status", e.target.value)} style={{ ...selectStyle, fontSize: 14 }}>
+                {FILING_STATUS_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}</select></div>
+            <div style={fldStyle}><label style={{ ...labelStyle, fontSize: 12 }}>Moderate Income Est. ($)</label>
+              <input type="number" value={b.estimated_income_moderate ?? 150000} readOnly={readonly} onChange={e => updateC("estimated_income_moderate", Number(e.target.value))} style={{ ...inputStyle, fontSize: 14 }} /></div>
+            <div style={fldStyle}><label style={{ ...labelStyle, fontSize: 12 }}>High Income Est. ($)</label>
+              <input type="number" value={b.estimated_income_high ?? 300000} readOnly={readonly} onChange={e => updateC("estimated_income_high", Number(e.target.value))} style={{ ...inputStyle, fontSize: 14 }} /></div>
+            <div style={fldStyle}><label style={{ ...labelStyle, fontSize: 12 }}>Eligible designated beneficiary</label>
+              <div style={{ display: "flex", gap: 0, border: "1px solid #d1d5db", borderRadius: 6, overflow: "hidden", width: "fit-content" }}>
+                {[true, false].map(opt => <button key={String(opt)} disabled={readonly} onClick={() => updateC("eligible_designated_beneficiary", opt)}
+                  style={{ padding: "5px 14px", fontSize: 12, border: "none", cursor: "pointer", background: b.eligible_designated_beneficiary === opt ? (opt ? "#f0fdf4" : "#fef2f2") : "#fff", color: b.eligible_designated_beneficiary === opt ? (opt ? "#15803d" : "#b91c1c") : "#6b7280", fontWeight: b.eligible_designated_beneficiary === opt ? 600 : 400 }}>{opt ? "Yes" : "No"}</button>)}
+              </div>
+              <span style={hintStyle}>Yes = surviving spouse, disabled/ill, minor child, or within 10 yrs of owner</span>
+            </div>
+            <div style={fldStyle}><label style={{ ...labelStyle, fontSize: 12 }}>Per stirpes</label>
+              <div style={{ display: "flex", gap: 0, border: "1px solid #d1d5db", borderRadius: 6, overflow: "hidden", width: "fit-content" }}>
+                {[true, false].map(opt => <button key={String(opt)} disabled={readonly} onClick={() => updateC("per_stirpes", opt)}
+                  style={{ padding: "5px 14px", fontSize: 12, border: "none", cursor: "pointer", background: b.per_stirpes === opt ? "#f0fdf4" : "#fff", color: b.per_stirpes === opt ? "#15803d" : "#6b7280", fontWeight: b.per_stirpes === opt ? 600 : 400 }}>{opt ? "Yes" : "No"}</button>)}
+              </div>
+              <span style={hintStyle}>Yes = their share passes to their descendants if they predecease</span>
+            </div>
+          </div>
+          {!readonly && <BeneActionBar
+            changed={JSON.stringify(b) !== JSON.stringify(beneOriginal)}
+            onDone={() => { setBeneOriginal(JSON.parse(JSON.stringify(b))); setSuccess("Updated — save profile when done"); setFieldError(""); setTimeout(() => setSuccess(""), 2000); }}
+            onDelete={() => { setDraftPath("beneficiaries.contingent", contingents.filter((_: any, i: number) => i !== idx)); setSection(""); }}
+            err={fieldError} msg={success} />}
+        </div>
+      );
+    }
+
+    // Legacy income field clicks → redirect to full edit
+    const beneMatch = section.match(/^bene-c-(\d+)-(income_mod|income_hi)$/);
+    if (beneMatch) { setSection(`bene-c-${beneMatch[1]}-edit`); return null; }
+    const benePRelMatch = section.match(/^bene-p-(\d+)-rel$/);
+    if (benePRelMatch) { setSection(`bene-p-${benePRelMatch[1]}-edit`); return null; }
+
+    const d = detailMap[section];
+    if (!d) return (
+      <div style={{ padding: 20, fontSize: 13, color: "#9ca3af" }}>
+        Select a field on the left to edit it.
+      </div>
+    );
+
+    return (
+      <div style={{ padding: 20 }}>
+        <DetailHeader title={d.title} />
+        <DetailDesc text={d.desc} />
+        {!readonly ? (
+          <>
+            <div style={fldStyle}>{d.control}</div>
+            <UpdateBar label={d.title} fieldPath={section} ro={readonly} />
+          </>
+        ) : (
+          <div style={{ fontSize: 13, fontFamily: "monospace", padding: "8px 10px", background: "#f8fafc", borderRadius: 6, border: "1px solid #e5e7eb", color: "#374151" }}>
+            {JSON.stringify(getPath(draft, d.title.split(".").slice(-1)[0]), null, 2)}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // ── Mini shared display components ────────────────────────────────────────
+  const DetailHeader = ({ title }: { title: string }) => (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, paddingBottom: 10, borderBottom: "1px solid #f3f4f6" }}>
+      <div style={{ width: 20, height: 20, borderRadius: "50%", background: "#EEEDFE", border: "0.5px solid #AFA9EC", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, color: "#3C3489", flexShrink: 0 }}>?</div>
+      <span style={{ fontWeight: 600, fontSize: 16, color: "#111827" }}>{title}</span>
+    </div>
+  );
+
+  const DetailDesc = ({ text }: { text: string }) => (
+    <div style={{ fontSize: 13, color: "#6b7280", lineHeight: 1.65, marginBottom: 16, padding: "9px 12px", background: "#f8faff", borderRadius: 6, borderLeft: "3px solid #c7d2fe" }}>
+      {text}
+    </div>
+  );
+
+  // Per-field Update button — only shown when local value differs from draft
+  const UpdateBar = ({ label, fieldPath, ro }: { label: string; fieldPath: string; ro: boolean }) => (
+    <div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px solid #f3f4f6", display: "flex", alignItems: "center", gap: 10 }}>
+      {!ro && localValueChanged && (
+        <button onClick={() => updateField(fieldPath)}
+          style={{ padding: "7px 20px", background: "#f0f0ff", color: "#3C3489", border: "1px solid #AFA9EC", borderRadius: 7, cursor: "pointer", fontWeight: 600, fontSize: 13 }}>
+          Update
+        </button>
+      )}
+      {!ro && !localValueChanged && (
+        <span style={{ fontSize: 12, color: "#9ca3af" }}>Make a change above to enable Update</span>
+      )}
+      {ro && <span style={{ fontSize: 13, color: "#9ca3af" }}>View only — switch to Guided (Edit) to make changes</span>}
+      {fieldError && <span style={{ fontSize: 12, color: "#b91c1c", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 6, padding: "5px 10px" }}>{fieldError}</span>}
+      {!fieldError && !localValueChanged && success && <span style={{ fontSize: 12, color: "#374151", background: "#f3f4f6", borderRadius: 6, padding: "5px 10px" }}>{success}</span>}
+    </div>
+  );
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", border: "1px solid #e5e7eb", borderRadius: 8, overflow: "hidden" }}>
+
+      {/* ── Dirty / status bar ──────────────────────────────────────────── */}
+      {isDirty && !readonly && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 16px", background: "#fffbeb", borderBottom: "1px solid #fde68a" }}>
+          <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#f59e0b", flexShrink: 0, display: "inline-block" }} />
+          <span style={{ fontSize: 13, color: "#92400e", fontWeight: 500, flex: 1 }}>
+            Unsaved changes — click <strong>Save Profile</strong> to commit, or <strong>Discard</strong> to revert all edits.
+          </span>
+          <button onClick={saveProfile} disabled={saving}
+            style={{ padding: "6px 18px", background: "#7F77DD", color: "#fff", border: "none", borderRadius: 6, cursor: saving ? "wait" : "pointer", fontWeight: 600, fontSize: 13, opacity: saving ? 0.7 : 1 }}>
+            {saving ? "Saving…" : "Save Profile"}
+          </button>
+          <button onClick={discard}
+            style={{ padding: "6px 14px", background: "none", border: "1px solid #d1d5db", borderRadius: 6, cursor: "pointer", fontSize: 13, color: "#6b7280" }}>
+            Discard
+          </button>
+        </div>
+      )}
+      {error && (
+        <div style={{ padding: "8px 16px", background: "#fef2f2", borderBottom: "1px solid #fecaca", fontSize: 13, color: "#b91c1c" }}>
+          ⚠ {error}
+        </div>
+      )}
+      {success && !isDirty && (
+        <div style={{ padding: "8px 16px", background: "#f0fdf4", borderBottom: "1px solid #86efac", fontSize: 13, color: "#15803d", fontWeight: 500 }}>
+          ✓ {success}
+        </div>
+      )}
+
+      <div style={{ display: "flex", minHeight: 520 }}>
+        {/* Centre: scrollable field list with inline section headers */}
+        <div ref={fieldListRef} style={{ width: 310, flexShrink: 0, borderRight: "1px solid #e5e7eb", overflowY: "auto", background: "#fafafa" }}>
+          <div style={{ padding: "9px 14px", fontSize: 11, fontWeight: 600, color: "#9ca3af", textTransform: "uppercase" as const, letterSpacing: ".05em", borderBottom: "1px solid #f3f4f6", display: "flex", alignItems: "center", gap: 6 }}>
+            {fileLabel}
+            {isDirty && !readonly
+              ? <span style={{ fontSize: 10, background: "#fef3c7", color: "#92400e", border: "1px solid #fde68a", borderRadius: 4, padding: "1px 6px", fontWeight: 600 }}>edited</span>
+              : <span style={{ fontSize: 10, color: "#9ca3af", fontWeight: 400, textTransform: "none" as const }}>{readonly ? "view only" : "click field to edit"}</span>}
+          </div>
+
+        {/* IDENTITY */}
+        <SectionLabel label="Identity" id="identity" />
+        {[
+          { key: "current_age",     label: "Current Age",     val: getPath(draft, "current_age") },
+          { key: "birth_year",      label: "Birth Year",      val: getPath(draft, "birth_year") },
+          { key: "filing_status",   label: "Filing Status",   val: getPath(draft, "filing_status") },
+          { key: "state",           label: "State",           val: getPath(draft, "state") },
+          { key: "retirement_age",  label: "Retirement Age",  val: getPath(draft, "retirement_age") },
+          { key: "simulation_mode", label: "Simulation Mode", val: getPath(draft, "simulation_mode") },
+        ].map(f => <FieldRow key={f.key} fieldKey={(f as any).label || f.key} val={f.val} selected={section === f.key} onClick={() => { setSection(f.key); }} sectionId="identity" />)}
+
+        {/* SIMULATION HORIZON */}
+        <SectionLabel label="Simulation Horizon" id="horizon" />
+        {[
+          { key: "target_age",  label: "Planning Horizon", val: getPath(draft, "target_age") },
+          { key: "rmd_table",   label: "RMD Table",       val: getPath(draft, "rmd_table") },
+        ].map(f => <FieldRow key={f.key} fieldKey={(f as any).label || f.key} val={f.val} selected={section === f.key} onClick={() => setSection(f.key)} sectionId="horizon" />)}
+
+        {/* SOCIAL SECURITY */}
+        <SectionLabel label="Social Security" id="ss" />
+        {[
+          { key: "ss_self_start",    label: "Your Start Age",      val: getPath(draft, "social_security.self_start_age") },
+          { key: "ss_spouse_start",  label: "Spouse Start Age",    val: getPath(draft, "social_security.spouse_start_age") },
+          { key: "ss_gross",         label: "Your Annual SS Benefit ($)",  val: getPath(draft, "social_security.annual_gross") },
+          { key: "ss_exclude",       label: "Exclude from Plan",   val: getPath(draft, "social_security.exclude_from_plan") },
+        ].map(f => <FieldRow key={f.key} fieldKey={(f as any).label || f.key} val={f.val} selected={section === f.key} onClick={() => setSection(f.key)} sectionId="ss" />)}
+
+        {/* SPOUSE */}
+        <SectionLabel label="Spouse" id="spouse" />
+        {[
+          { key: "spouse_name",       label: "Name",              val: getPath(draft, "spouse.name") },
+          { key: "spouse_birth_year", label: "Birth Year",        val: getPath(draft, "spouse.birth_year") },
+          { key: "spouse_longevity",  label: "Expected Longevity",  val: getPath(draft, "spouse.expected_longevity") },
+          { key: "spouse_sole_ira",   label: "Sole IRA Beneficiary", val: getPath(draft, "spouse.sole_beneficiary_for_ira") ?? false },
+        ].map(f => <FieldRow key={f.key} fieldKey={(f as any).label || f.key} val={f.val} selected={section === f.key} onClick={() => setSection(f.key)} sectionId="spouse" />)}
+
+        {/* BENEFICIARIES */}
+        {(() => {
+          const primaries: any[] = draft.beneficiaries?.primary || [];
+          const contingents: any[] = draft.beneficiaries?.contingent || [];
+          const primTotal = primaries.reduce((s: number, b: any) => s + Number(b.share_percent || 0), 0);
+          const contTotal = contingents.reduce((s: number, b: any) => s + Number(b.share_percent || 0), 0);
+          const pLabel = primaries.length === 0 ? "no primary" : `primary: ${primTotal}%${Math.abs(primTotal - 100) > 0.1 ? " ⚠" : " ✓"}`;
+          const cLabel = contingents.length === 0 ? "no contingent" : `contingent: ${contTotal}%${Math.abs(contTotal - 100) > 0.1 ? " ⚠" : " ✓"}`;
+          const expanded = isExpanded("beneficiaries");
+          return <>
+            <SectionLabel label={`Beneficiaries · ${pLabel} · ${cLabel}`} id="beneficiaries" />
+
+            {expanded && <>
+              {/* Primary sub-group */}
+              <div style={{ padding: "5px 14px 2px", fontSize: 10, fontWeight: 600, color: "#185FA5", textTransform: "uppercase" as const, letterSpacing: ".05em", background: "#f0f6ff" }}>
+                Primary
+                {primTotal > 0 && <span style={{ marginLeft: 8, fontWeight: 400, color: Math.abs(primTotal - 100) > 0.1 ? "#b91c1c" : "#15803d" }}>
+                  {primTotal}% {Math.abs(primTotal - 100) > 0.1 ? `— needs ${100 - primTotal}% more` : "✓"}
+                </span>}
+              </div>
+              {primaries.map((b: any, idx: number) => (
+                <div key={`bene-p-${idx}`}
+                  onClick={() => setSection(`bene-p-${idx}-edit`)}
+                  data-selected={section === `bene-p-${idx}-edit` ? "true" : "false"}
+                  style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px 8px 20px", cursor: "pointer", borderBottom: "1px solid #f0f0f0",
+                    background: section === `bene-p-${idx}-edit` ? "#eff6ff" : "transparent",
+                    borderLeft: `2px solid ${section === `bene-p-${idx}-edit` ? "#185FA5" : "transparent"}` }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 500, color: "#111827" }}>{b.name || "—"}</div>
+                    <div style={{ fontSize: 11, color: "#9ca3af" }}>{b.relationship} · {b.share_percent}%</div>
+                  </div>
+                  {!readonly && (
+                    <button onClick={e => { e.stopPropagation(); const next = primaries.filter((_: any, i: number) => i !== idx); setDraftPath("beneficiaries.primary", next); setSection(""); }}
+                      style={{ fontSize: 11, color: "#9ca3af", background: "none", border: "none", cursor: "pointer", padding: "2px 4px", lineHeight: 1 }}>✕</button>
+                  )}
+                </div>
+              ))}
+              {primaries.length === 0 && <div style={{ padding: "6px 20px", fontSize: 12, color: "#9ca3af", fontStyle: "italic" }}>No primary beneficiaries</div>}
+
+              {/* Contingent sub-group */}
+              <div style={{ padding: "5px 14px 2px", fontSize: 10, fontWeight: 600, color: "#3C3489", textTransform: "uppercase" as const, letterSpacing: ".05em", background: "#f5f3ff" }}>
+                Contingent
+                {contTotal > 0 && <span style={{ marginLeft: 8, fontWeight: 400, color: Math.abs(contTotal - 100) > 0.1 ? "#b91c1c" : "#15803d" }}>
+                  {contTotal}% {Math.abs(contTotal - 100) > 0.1 ? `— needs ${100 - contTotal}% more` : "✓"}
+                </span>}
+              </div>
+              {contingents.map((b: any, idx: number) => (
+                <div key={`bene-c-${idx}`}
+                  onClick={() => setSection(`bene-c-${idx}-edit`)}
+                  data-selected={section === `bene-c-${idx}-edit` ? "true" : "false"}
+                  style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px 8px 20px", cursor: "pointer", borderBottom: "1px solid #f0f0f0",
+                    background: section === `bene-c-${idx}-edit` ? "#EEEDFE" : "transparent",
+                    borderLeft: `2px solid ${section === `bene-c-${idx}-edit` ? "#7F77DD" : "transparent"}` }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 500, color: "#111827" }}>{b.name || "—"}</div>
+                    <div style={{ fontSize: 11, color: "#9ca3af" }}>{b.relationship} · {b.share_percent}% · income {b.estimated_income_moderate ? `$${(b.estimated_income_moderate/1000).toFixed(0)}K` : "—"}</div>
+                  </div>
+                  {!readonly && (
+                    <button onClick={e => { e.stopPropagation(); const next = contingents.filter((_: any, i: number) => i !== idx); setDraftPath("beneficiaries.contingent", next); setSection(""); }}
+                      style={{ fontSize: 11, color: "#9ca3af", background: "none", border: "none", cursor: "pointer", padding: "2px 4px", lineHeight: 1 }}>✕</button>
+                  )}
+                </div>
+              ))}
+              {contingents.length === 0 && <div style={{ padding: "6px 20px", fontSize: 12, color: "#9ca3af", fontStyle: "italic" }}>No contingent beneficiaries</div>}
+
+              {!readonly && (
+                <button onClick={() => {
+                  setBeneDraft({ ...blankBene });
+                  setBeneType("contingent");
+                  setSection("bene-new");
+                }}
+                  style={{ display: "block", width: "calc(100% - 16px)", margin: "6px 8px 4px", padding: "5px 0", fontSize: 11, border: "1px dashed #d1d5db", borderRadius: 6, background: "transparent", color: "#6b7280", cursor: "pointer" }}>
+                  + Add beneficiary
+                </button>
+              )}
+            </>}
+          </>;
+        })()}
+
+        {/* ROTH CONVERSION POLICY */}
+        <SectionLabel label="Roth Conversion Policy" id="roth" />
+        {[
+          { key: "roth_enabled",    label: "Conversions Enabled",  val: getPath(draft, "roth_conversion_policy.enabled") },
+          { key: "roth_bracket",    label: "Stay Below Bracket",   val: getPath(draft, "roth_conversion_policy.keepit_below_max_marginal_fed_rate") },
+          { key: "roth_avoid_niit", label: "Avoid NIIT Threshold", val: getPath(draft, "roth_conversion_policy.avoid_niit") },
+          { key: "roth_annual_k",   label: "Annual Amount ($K)",   val: getPath(draft, "roth_conversion_policy.annual_conversion_k") },
+          { key: "roth_window",     label: "Conversion Window",    val: getPath(draft, "roth_conversion_policy.window_years") },
+        ].map(f => <FieldRow key={f.key} fieldKey={f.label} val={f.val} selected={section === f.key} onClick={() => setSection(f.key)} sectionId="roth" />)}
+
+        {/* RMD POLICY */}
+        <SectionLabel label="RMD Policy" id="rmd" />
+        <FieldRow fieldKey="Surplus RMD Handling" val={getPath(draft, "rmd_policy.extra_handling")} selected={section === "rmd_extra"} onClick={() => setSection("rmd_extra")} sectionId="rmd" />
+        </div>
+
+        {/* Right: detail + edit panel */}
+        <div style={{ flex: 1, overflowY: "auto", background: "#fff" }}>
+          {renderDetailPanel()}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// Helper: get nested path from object
+function getPath(obj: any, path: string): any {
+  return path.split(".").reduce((o, k) => (o && o[k] !== undefined ? o[k] : undefined), obj);
+}
+
+// Global files (taxes, benchmarks, assets, economicglobal) live at APP_ROOT and are not shown here.
+// File groups — logical order a user thinks through their retirement plan
+const CONFIG_FILE_GROUPS = [
+  {
+    group: "You",
+    files: ["person.json"],
+  },
+  {
+    group: "Cash Flows",
+    files: ["income.json", "withdrawal_schedule.json"],
+  },
+  {
+    group: "Portfolio",
+    files: ["allocation_yearly.json", "economic.json"],
+  },
+  {
+    group: "Assumptions",
+    files: ["inflation_yearly.json", "shocks_yearly.json"],
+  },
+];
+const CONFIG_FILES = CONFIG_FILE_GROUPS.flatMap(g => g.files);
+
+// User-friendly names and descriptions for each config file
+const FILE_META: Record<string, { label: string; desc: string; icon: string; hint: string }> = {
+  "person.json":              { label: "Personal Profile",      icon: "👤", desc: "Who you are", hint: "Age, state, filing status, SS, beneficiaries, Roth policy" },
+  "income.json":              { label: "Income Sources",        icon: "💼", desc: "What you earn", hint: "W-2, self-employment, rental, pension — by age range" },
+  "withdrawal_schedule.json": { label: "Spending Plan",         icon: "🏧", desc: "What you'll spend", hint: "Retirement budget tiers and age ranges" },
+  "allocation_yearly.json":   { label: "Asset Allocation",      icon: "📊", desc: "How it's invested", hint: "Portfolio weights across IRA, Roth, brokerage by year" },
+  "economic.json":            { label: "Withdrawal Strategy",   icon: "⚙️",  desc: "How you draw it down", hint: "Withdrawal sequence, bad-market rules, surplus policy" },
+  "inflation_yearly.json":    { label: "Inflation",             icon: "📈", desc: "Price assumptions", hint: "Year-by-year inflation applied to spending and SS" },
+  "shocks_yearly.json":       { label: "Shocks & Windfalls",    icon: "⚡", desc: "One-time events", hint: "Inheritances, large expenses, market stress scenarios" },
+};
 
 // ── Readme renderer ──────────────────────────────────────────────────────────
 // Recursively renders a readme object as a readable field-reference panel.
@@ -351,11 +2326,16 @@ const App: React.FC = () => {
   const [profiles, setProfiles] = useState<string[]>([]);
   const [selectedProfile, setSelectedProfile] = useState<string>("");
 
-  const [configFile, setConfigFile] = useState<string>("allocation_yearly.json");
+  const [configFile, setConfigFile] = useState<string>("person.json");
   const [configContent, setConfigContent] = useState<string>("");
-  const [configMode, setConfigMode] = useState<"view" | "edit">("view");
+  const [configMode, setConfigMode] = useState<"view" | "edit" | "guided">("guided");
   const [configReadme, setConfigReadme] = useState<any>(null);
   const [editorDirty, setEditorDirty] = useState(false);
+
+  // Guided editor state
+  const [guidedSelectedField, setGuidedSelectedField] = useState<string | null>(null);
+  const [guidedPendingChanges, setGuidedPendingChanges] = useState<Record<string, any>>({});
+  const [guidedValidationError, setGuidedValidationError] = useState<string>("");
 
   const [runStatus, setRunStatus] = useState<"idle" | "running" | "error">(
     "idle",
@@ -460,7 +2440,7 @@ const App: React.FC = () => {
     setSnapshot(null);
     setRuns([]);
     loadRuns(selectedProfile);
-    loadConfig(selectedProfile, configFile, "view");
+    loadConfig(selectedProfile, configFile, "guided");
     loadPersonDefaults(selectedProfile);
     setEndingBalances(null);
     loadVersionHistory(selectedProfile);
@@ -524,13 +2504,16 @@ const App: React.FC = () => {
   const loadConfig = (
     profile: string,
     name: string,
-    mode: "view" | "edit",
+    mode: "view" | "edit" | "guided",
   ) => {
     setConfigMode(mode);
     setEditorDirty(false);
     setConfigFile(name);
     setConfigContent("");
     setConfigReadme(null);
+    setGuidedSelectedField(null);
+    setGuidedPendingChanges({});
+    setGuidedValidationError("");
 
     apiGet<any>(
       `/profile-config/${encodeURIComponent(profile)}/${encodeURIComponent(
@@ -601,6 +2584,42 @@ const App: React.FC = () => {
       setShowSaveVersionPrompt(false);
       loadVersionHistory(selectedProfile);
     } catch (e: any) { alert(`Save version failed: ${String(e?.message || e)}`); }
+  };
+
+  const applyGuidedChange = async (fieldPath: string, newValue: any, versionNote?: string) => {
+    if (isDefaultProfile || !selectedProfile || !configFile) return;
+    setGuidedValidationError("");
+    try {
+      // Parse current JSON, apply the change at the field path, validate, save
+      const parsed = JSON.parse(configContent);
+      // Apply nested path e.g. "roth_conversion_policy.enabled"
+      const parts = fieldPath.split(".");
+      let obj: any = parsed;
+      for (let i = 0; i < parts.length - 1; i++) {
+        if (obj[parts[i]] === undefined) obj[parts[i]] = {};
+        obj = obj[parts[i]];
+      }
+      obj[parts[parts.length - 1]] = newValue;
+      // Validate JSON is still parseable
+      const newContent = JSON.stringify(parsed, null, 2);
+      JSON.parse(newContent); // will throw if somehow corrupted
+      // Save with auto version note
+      const note = versionNote || `guided: ${fieldPath} → ${JSON.stringify(newValue)}`;
+      await apiPost<{ ok: boolean }>("/profile-config", {
+        profile: selectedProfile,
+        name: configFile,
+        content: newContent,
+        version_note: note,
+        version_source: "auto",
+      });
+      setConfigContent(newContent);
+      setOriginalContent(newContent);
+      setGuidedPendingChanges({});
+      setGuidedSelectedField(null);
+      loadVersionHistory(selectedProfile);
+    } catch (e: any) {
+      setGuidedValidationError(`Failed to apply: ${String(e?.message || e)}`);
+    }
   };
 
   const createProfile = () => {
@@ -1160,9 +3179,20 @@ const App: React.FC = () => {
               <button
                 onClick={() => {
                   if (!selectedProfile) return;
+                  guardDirty(() => loadConfig(selectedProfile, configFile, "guided"));
+                }}
+                disabled={!selectedProfile}
+                style={configMode === "guided" ? { background: "#EEEDFE", color: "#3C3489", borderColor: "#AFA9EC", fontWeight: 600 } : {}}
+              >
+                GUIDED
+              </button>
+              <button
+                onClick={() => {
+                  if (!selectedProfile) return;
                   guardDirty(() => loadConfig(selectedProfile, configFile, "edit"));
                 }}
                 disabled={!selectedProfile || isDefaultProfile}
+                style={configMode === "edit" ? { background: "#f0fdf4", color: "#15803d", borderColor: "#86efac", fontWeight: 600 } : {}}
               >
                 EDIT
               </button>
@@ -1172,6 +3202,7 @@ const App: React.FC = () => {
                   loadConfig(selectedProfile, configFile, "view")
                 }
                 disabled={!selectedProfile}
+                style={configMode === "view" ? { background: "#f8fafc", fontWeight: 600 } : {}}
               >
                 VIEW
               </button>
@@ -1511,22 +3542,62 @@ const App: React.FC = () => {
           {selectedProfile && (
             <div className="config-layout">
               <div className="config-files">
-                <div className="config-files-header">Configuration files</div>
-                <ul>
-                  {CONFIG_FILES.map((name) => (
-                    <li key={name}>
-                      <button
-                        className={
-                          name === configFile ? "config-file active" : "config-file"
-                        }
-                        onClick={() => {
-                          if (!selectedProfile) return;
-                          guardDirty(() => loadConfig(selectedProfile, name, configMode));
-                          loadConfig(selectedProfile, name, configMode);
-                        }}
-                      >
-                        {name}
-                      </button>
+                <div className="config-files-header">
+                  {configMode === "guided" ? "Profile Configuration" : "Configuration files"}
+                </div>
+                <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+                  {CONFIG_FILE_GROUPS.map(({ group, files }) => (
+                    <li key={group}>
+                      {/* Group header */}
+                      <div style={{
+                        padding: "6px 12px 4px",
+                        fontSize: 10, fontWeight: 700, color: "#6b7280",
+                        textTransform: "uppercase" as const, letterSpacing: ".07em",
+                        background: "#f3f4f6", borderTop: "1px solid #e5e7eb",
+                      }}>
+                        {group}
+                      </div>
+                      {/* Files in group */}
+                      {files.map(name => {
+                        const meta = FILE_META[name];
+                        const isGuided = configMode === "guided";
+                        const isActive = name === configFile;
+                        return (
+                          <button key={name}
+                            className={isActive ? "config-file active" : "config-file"}
+                            onClick={() => {
+                              if (!selectedProfile) return;
+                              guardDirty(() => loadConfig(selectedProfile, name, configMode));
+                              loadConfig(selectedProfile, name, configMode);
+                            }}
+                            title={name}
+                            style={{
+                              display: "flex", flexDirection: "column" as const,
+                              alignItems: "flex-start", gap: 2,
+                              padding: isGuided ? "9px 12px 9px 16px" : "7px 12px 7px 16px",
+                              width: "100%", textAlign: "left" as const,
+                              background: isActive ? "#EEEDFE" : "transparent",
+                              borderLeft: `3px solid ${isActive ? "#7F77DD" : "transparent"}`,
+                              border: "none", borderBottom: "1px solid #f3f4f6",
+                              cursor: "pointer",
+                            }}>
+                            {isGuided ? (
+                              <>
+                                <span style={{ fontSize: 13, fontWeight: isActive ? 600 : 500, color: isActive ? "#3C3489" : "#111827" }}>
+                                  {meta.icon} {meta.label}
+                                </span>
+                                <span style={{ fontSize: 11, color: isActive ? "#7F77DD" : "#9ca3af", fontWeight: 400 }}>
+                                  {meta.desc}
+                                </span>
+                              </>
+                            ) : (
+                              <span style={{ fontSize: 13, color: isActive ? "#3C3489" : "#374151", fontWeight: isActive ? 600 : 400 }}>
+                                {name}
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
                     </li>
                   ))}
                 </ul>
@@ -1534,6 +3605,213 @@ const App: React.FC = () => {
 
               {/* Editor on top, Readme below */}
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+
+                {/* ── MODE: Guided ─────────────────────────────────────── */}
+                {configMode === "guided" && configContent && (() => {
+                  let parsed: any = null;
+                  try { parsed = JSON.parse(configContent); } catch {}
+                  if (!parsed) return (
+                    <div style={{ padding: 16, color: "#b91c1c", fontSize: 13 }}>
+                      Could not parse JSON — switch to Edit mode to fix.
+                    </div>
+                  );
+
+                  // Route to the appropriate guided editor
+                  const guidedOnSave = async (updated: any, note: string) => {
+                    const newContent = JSON.stringify(updated, null, 2);
+                    await apiPost<{ ok: boolean }>("/profile-config", {
+                      profile: selectedProfile, name: configFile,
+                      content: newContent, version_note: note, version_source: "auto",
+                    });
+                    setConfigContent(newContent);
+                    setOriginalContent(newContent);
+                    loadVersionHistory(selectedProfile);
+                  };
+                  const editorProps = { parsed, readonly: isDefaultProfile || false, onSave: guidedOnSave };
+
+                  if (configFile === "person.json")
+                    return <PersonJsonGuidedEditor {...editorProps} fileLabel={FILE_META[configFile]?.label} />;
+                  if (configFile === "income.json")
+                    return <IncomeGuidedEditor {...editorProps} />;
+                  if (configFile === "withdrawal_schedule.json")
+                    return <WithdrawalGuidedEditor {...editorProps} />;
+                  if (configFile === "inflation_yearly.json")
+                    return <InflationGuidedEditor {...editorProps} />;
+                  if (configFile === "economic.json")
+                    return <EconomicGuidedEditor {...editorProps} />;
+                  if (configFile === "shocks_yearly.json")
+                    return <ShocksGuidedEditor {...editorProps} />;
+                  if (configFile === "allocation_yearly.json")
+                    return <AllocationGuidedEditor {...editorProps} />;
+
+                  // Build flat field list from parsed JSON (depth 1-2, skip readme/arrays)
+                  const fields: { path: string; label: string; value: any; type: string }[] = [];
+                  const addField = (obj: any, prefix = "") => {
+                    for (const [k, v] of Object.entries(obj)) {
+                      if (k === "readme" || k === "_comment") continue;
+                      const path = prefix ? `${prefix}.${k}` : k;
+                      const type = Array.isArray(v) ? "array" : typeof v;
+                      if (type === "object" && v !== null && !Array.isArray(v) && prefix === "") {
+                        // Expand one level for nested objects
+                        addField(v, k);
+                      } else {
+                        fields.push({ path, label: k, value: v, type });
+                      }
+                    }
+                  };
+                  addField(parsed);
+
+                  // Get readme description for a field
+                  const getReadme = (fieldPath: string): string => {
+                    if (!configReadme) return "";
+                    const parts = fieldPath.split(".");
+                    let node: any = configReadme;
+                    for (const p of parts) {
+                      if (!node || typeof node !== "object") return "";
+                      node = node[p];
+                    }
+                    return typeof node === "string" ? node : "";
+                  };
+
+                  const sel = guidedSelectedField;
+                  const selField = fields.find(f => f.path === sel);
+
+                  return (
+                    <div style={{ display: "flex", gap: 0, border: "1px solid #e5e7eb", borderRadius: 8, overflow: "hidden", minHeight: 420 }}>
+                      {/* Field list */}
+                      <div style={{ width: 300, flexShrink: 0, borderRight: "1px solid #e5e7eb", overflowY: "auto", background: "#fafafa" }}>
+                        <div style={{ padding: "8px 12px", fontSize: 10, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: ".05em", borderBottom: "1px solid #f3f4f6" }}>
+                          {configFile} — {isDefaultProfile ? "view only" : configMode === "view" ? "view" : "click to edit"}
+                        </div>
+                        {fields.map(f => {
+                          const isSelected = sel === f.path;
+                          const displayVal = f.type === "array"
+                            ? `[${(f.value as any[]).length} items]`
+                            : f.type === "object"
+                            ? "{...}"
+                            : String(f.value ?? "");
+                          return (
+                            <div key={f.path}
+                              onClick={() => {
+                                setGuidedSelectedField(f.path);
+                                setGuidedPendingChanges({ value: f.value });
+                                setGuidedValidationError("");
+                              }}
+                              style={{
+                                display: "flex", alignItems: "center", gap: 8,
+                                padding: "7px 12px", cursor: "pointer",
+                                background: isSelected ? "#EEEDFE" : "transparent",
+                                borderLeft: `2px solid ${isSelected ? "#7F77DD" : "transparent"}`,
+                                borderBottom: "1px solid #f3f4f6",
+                              }}>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontSize: 12, fontWeight: 500, color: isSelected ? "#3C3489" : "#111827" }}>
+                                  {f.label}
+                                </div>
+                                <div style={{ fontSize: 11, color: "#9ca3af", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                  {displayVal.length > 40 ? displayVal.slice(0, 40) + "…" : displayVal}
+                                </div>
+                              </div>
+                              <div style={{ width: 16, height: 16, borderRadius: "50%", background: "#EEEDFE", border: "0.5px solid #AFA9EC", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "#3C3489", flexShrink: 0 }}>?</div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Detail / edit panel */}
+                      <div style={{ flex: 1, display: "flex", flexDirection: "column", background: "#fff" }}>
+                        {!sel ? (
+                          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "#9ca3af", fontSize: 13 }}>
+                            Click any field on the left to view or edit it
+                          </div>
+                        ) : (
+                          <div style={{ padding: 16, overflowY: "auto" }}>
+                            {/* Field header */}
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, paddingBottom: 10, borderBottom: "1px solid #f3f4f6" }}>
+                              <div style={{ width: 18, height: 18, borderRadius: "50%", background: "#EEEDFE", border: "0.5px solid #AFA9EC", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "#3C3489" }}>?</div>
+                              <span style={{ fontWeight: 600, fontSize: 14, color: "#111827" }}>{sel}</span>
+                              <span style={{ fontSize: 11, color: "#9ca3af", background: "#f3f4f6", borderRadius: 4, padding: "1px 6px" }}>{selField?.type}</span>
+                            </div>
+
+                            {/* Description from readme */}
+                            {getReadme(sel) && (
+                              <div style={{ fontSize: 13, color: "#6b7280", lineHeight: 1.65, marginBottom: 16, padding: "9px 12px", background: "#f8faff", borderRadius: 6, borderLeft: "3px solid #c7d2fe" }}>
+                                {getReadme(sel)}
+                              </div>
+                            )}
+
+                            {/* Edit control */}
+                            {!isDefaultProfile && configMode !== "view" ? (
+                              <div>
+                                {selField?.type === "boolean" ? (
+                                  <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
+                                    {[true, false].map(opt => (
+                                      <div key={String(opt)} onClick={() => setGuidedPendingChanges({ value: opt })}
+                                        style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", borderRadius: 6, cursor: "pointer", border: `1px solid ${guidedPendingChanges.value === opt ? "#7F77DD" : "#e5e7eb"}`, background: guidedPendingChanges.value === opt ? "#EEEDFE" : "transparent" }}>
+                                        <div style={{ width: 10, height: 10, borderRadius: "50%", background: guidedPendingChanges.value === opt ? "#7F77DD" : "transparent", border: `1px solid ${guidedPendingChanges.value === opt ? "#7F77DD" : "#d1d5db"}` }} />
+                                        <span style={{ fontSize: 12, color: guidedPendingChanges.value === opt ? "#3C3489" : "#374151", fontWeight: guidedPendingChanges.value === opt ? 600 : 400 }}>{String(opt)}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : selField?.type === "array" ? (
+                                  <div style={{ fontSize: 12, color: "#6b7280", padding: "10px 12px", background: "#f8fafc", borderRadius: 6, border: "1px solid #e5e7eb" }}>
+                                    Array editing coming soon — switch to Raw JSON / Edit mode to modify array fields directly.
+                                  </div>
+                                ) : (
+                                  <div style={{ marginBottom: 12 }}>
+                                    <label style={{ fontSize: 11, color: "#6b7280", display: "block", marginBottom: 4 }}>Value</label>
+                                    <input
+                                      type={selField?.type === "number" ? "number" : "text"}
+                                      value={guidedPendingChanges.value !== undefined ? String(guidedPendingChanges.value) : ""}
+                                      onChange={e => {
+                                        const raw = e.target.value;
+                                        const v = selField?.type === "number" ? (isNaN(Number(raw)) ? raw : Number(raw)) : raw;
+                                        setGuidedPendingChanges({ value: v });
+                                        setGuidedValidationError("");
+                                      }}
+                                      style={{ width: "100%", fontSize: 13, padding: "6px 10px", border: `1px solid ${guidedValidationError ? "#fca5a5" : "#d1d5db"}`, borderRadius: 6, boxSizing: "border-box" as const }}
+                                    />
+                                  </div>
+                                )}
+
+                                {/* Validation error */}
+                                {guidedValidationError && (
+                                  <div style={{ fontSize: 12, color: "#b91c1c", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 6, padding: "6px 10px", marginBottom: 10 }}>
+                                    {guidedValidationError}
+                                  </div>
+                                )}
+
+                                {/* Apply button */}
+                                {selField?.type !== "array" && (
+                                  <button
+                                    onClick={() => {
+                                      if (guidedPendingChanges.value === undefined) {
+                                        setGuidedValidationError("No value to apply.");
+                                        return;
+                                      }
+                                      applyGuidedChange(sel, guidedPendingChanges.value);
+                                    }}
+                                    style={{ width: "100%", padding: "7px 12px", background: "#7F77DD", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 600, fontSize: 13 }}
+                                  >
+                                    Apply
+                                  </button>
+                                )}
+                              </div>
+                            ) : (
+                              /* View-only value display */
+                              <div style={{ fontSize: 13, padding: "8px 12px", background: "#f8fafc", borderRadius: 6, border: "1px solid #e5e7eb", fontFamily: "monospace", color: "#374151" }}>
+                                {JSON.stringify(selField?.value, null, 2)}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* ── MODE: View / Edit (raw textarea) ─────────────────── */}
+                {(configMode === "view" || configMode === "edit") && (
                 <div className="config-editor">
                   <div className="config-editor-header">
                     <div>
@@ -1577,7 +3855,7 @@ const App: React.FC = () => {
                         placeholder={generateVersionLabel(configFile, originalContent, configContent)}
                         style={{ fontSize: 12, padding: "4px 8px", borderRadius: 5,
                           border: "1px solid #d1d5db", color: "#374151", width: "100%",
-                          boxSizing: "border-box" }}
+                          boxSizing: "border-box" as const }}
                       />
                       <div style={{ fontSize: 11, color: "#9ca3af" }}>
                         Auto-label preview: <em>{generateVersionLabel(configFile, originalContent, configContent)}</em>
@@ -1647,7 +3925,7 @@ const App: React.FC = () => {
                         autoFocus
                         style={{ fontSize: 12, padding: "4px 8px", borderRadius: 5,
                           border: "1px solid #d1d5db", width: "100%",
-                          boxSizing: "border-box", marginBottom: 8 }}
+                          boxSizing: "border-box" as const, marginBottom: 8 }}
                       />
                       <div style={{ display: "flex", gap: 8 }}>
                         <button onClick={saveVersion}
@@ -1665,7 +3943,10 @@ const App: React.FC = () => {
                     </div>
                   )}
                 </div>
-                {configReadme ? (
+                )}
+
+                {/* Field reference — shown in view/edit mode only */}
+                {configMode !== "guided" && (configReadme ? (
                   <div className="config-readme" style={{ maxHeight: "40vh" }}>
                     <div className="config-readme-title">📖 Field Reference — {configFile}</div>
                     <div className="config-readme-scroll" style={{ maxHeight: "calc(40vh - 30px)" }}>
@@ -1679,7 +3960,7 @@ const App: React.FC = () => {
                   }}>
                     No field reference for this file
                   </div>
-                )}
+                ))}
               </div>
             </div>
           )}
