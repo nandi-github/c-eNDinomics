@@ -277,7 +277,13 @@ type RunResponse = {
 };
 
 type ProfileList = { profiles: string[] };
-type ReportsList = { runs: string[] };
+interface RunMeta {
+  run_id: string;
+  config_version: number | null;
+  config_version_ts: string | null;
+  config_version_note: string;
+}
+type ReportsList = { runs: RunMeta[] };
 
 type TabKey = "configure" | "simulation" | "investment" | "results";
 
@@ -1505,7 +1511,7 @@ const PersonJsonGuidedEditor: React.FC<PersonJsonEditorProps> = ({ parsed, reado
   const SectionLabel = ({ label, id }: { label: string; id: string }) => {
     const collapsed = !isExpanded(id);
     return (
-      <div onClick={() => toggleSection(id)} style={{
+      <div data-section={id} onClick={() => toggleSection(id)} style={{
         display: "flex", alignItems: "center", gap: 7,
         padding: "9px 14px 8px", fontSize: 11, fontWeight: 700,
         color: "#1f2937", textTransform: "uppercase" as const, letterSpacing: ".07em",
@@ -1525,7 +1531,7 @@ const PersonJsonGuidedEditor: React.FC<PersonJsonEditorProps> = ({ parsed, reado
     const displayVal = val === undefined || val === null ? "—" : typeof val === "boolean" ? (val ? "Yes" : "No") : typeof val === "object" ? JSON.stringify(val) : String(val);
     const truncated = displayVal.length > 26 ? displayVal.slice(0, 26) + "…" : displayVal;
     return (
-      <div data-selected={selected ? "true" : "false"} onClick={onClick} style={{
+      <div data-field-key={fieldKey} data-selected={selected ? "true" : "false"} onClick={onClick} style={{
         display: "flex", alignItems: "center", gap: 8,
         padding: "8px 14px", paddingLeft: indent ? 22 : 14,
         cursor: "pointer",
@@ -2164,7 +2170,7 @@ const PersonJsonGuidedEditor: React.FC<PersonJsonEditorProps> = ({ parsed, reado
 
             {expanded && <>
               {/* Primary sub-group */}
-              <div style={{ padding: "5px 14px 2px", fontSize: 10, fontWeight: 600, color: "#185FA5", textTransform: "uppercase" as const, letterSpacing: ".05em", background: "#f0f6ff" }}>
+              <div data-bene-group="primary" style={{ padding: "5px 14px 2px", fontSize: 10, fontWeight: 600, color: "#185FA5", textTransform: "uppercase" as const, letterSpacing: ".05em", background: "#f0f6ff" }}>
                 Primary
                 {primTotal > 0 && <span style={{ marginLeft: 8, fontWeight: 400, color: Math.abs(primTotal - 100) > 0.1 ? "#b91c1c" : "#15803d" }}>
                   {primTotal}% {Math.abs(primTotal - 100) > 0.1 ? `— needs ${100 - primTotal}% more` : "✓"}
@@ -2190,7 +2196,7 @@ const PersonJsonGuidedEditor: React.FC<PersonJsonEditorProps> = ({ parsed, reado
               {primaries.length === 0 && <div style={{ padding: "6px 20px", fontSize: 12, color: "#9ca3af", fontStyle: "italic" }}>No primary beneficiaries</div>}
 
               {/* Contingent sub-group */}
-              <div style={{ padding: "5px 14px 2px", fontSize: 10, fontWeight: 600, color: "#3C3489", textTransform: "uppercase" as const, letterSpacing: ".05em", background: "#f5f3ff" }}>
+              <div data-bene-group="contingent" style={{ padding: "5px 14px 2px", fontSize: 10, fontWeight: 600, color: "#3C3489", textTransform: "uppercase" as const, letterSpacing: ".05em", background: "#f5f3ff" }}>
                 Contingent
                 {contTotal > 0 && <span style={{ marginLeft: 8, fontWeight: 400, color: Math.abs(contTotal - 100) > 0.1 ? "#b91c1c" : "#15803d" }}>
                   {contTotal}% {Math.abs(contTotal - 100) > 0.1 ? `— needs ${100 - contTotal}% more` : "✓"}
@@ -2354,9 +2360,11 @@ const App: React.FC = () => {
   const [runIgnoreTaxes,       setRunIgnoreTaxes]       = useState(false);
   const [runSimulationMode,    setRunSimulationMode]    = useState<string>("automatic");
 
-  const [runs, setRuns] = useState<string[]>([]);
+  const [runs, setRuns] = useState<RunMeta[]>([]);
   const [snapshotReloadKey, setSnapshotReloadKey] = useState(0);  // increment to force snapshot reload
   const [selectedRun, setSelectedRun] = useState<string>("");
+  const [restoringConfig, setRestoringConfig] = useState(false);
+  const [restoreConfigMsg, setRestoreConfigMsg] = useState("");
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [resultsError, setResultsError] = useState<string>("");
 
@@ -2412,8 +2420,9 @@ const App: React.FC = () => {
   useEffect(() => {
     apiGet<ProfileList>("/profiles")
       .then((data) => {
-        const list = data.profiles || [];
-        setProfiles(list);
+        const all = data.profiles || [];
+        const list = all.filter((p: string) => !p.startsWith("__"));
+        setProfiles(list.filter((p: string) => !p.startsWith("__")));
         if (!selectedProfile) {
           const first = list.includes("default") ? "default" : list[0] || "";
           setSelectedProfile(first);
@@ -2464,10 +2473,8 @@ const App: React.FC = () => {
         setRuns(list);
         if (list.length > 0) {
           const latest = list[list.length - 1];
-          // Always increment reload key to force snapshot reload
-          // even when run ID is unchanged (e.g. page refresh, tab switch)
           setSnapshotReloadKey(k => k + 1);
-          setSelectedRun(latest);
+          setSelectedRun(latest.run_id);
         } else {
           setSelectedRun("");
           setSnapshot(null);
@@ -2667,7 +2674,7 @@ const App: React.FC = () => {
       await apiPost<{ ok: boolean; profile: string }>("/profiles/create", versionPayload);
       const data = await apiGet<ProfileList>("/profiles");
       const list = data.profiles || [];
-      setProfiles(list);
+      setProfiles(list.filter((p: string) => !p.startsWith("__")));
       setSelectedProfile(cloneNewName.trim());
     } catch (e: any) {
       alert(`Create profile failed: ${String(e?.message || e)}`);
@@ -2711,7 +2718,7 @@ const App: React.FC = () => {
       await apiPost("/profiles/delete", { profile: selectedProfile });
       const data = await apiGet<ProfileList>("/profiles");
       const list = data.profiles || [];
-      setProfiles(list);
+      setProfiles(list.filter((p: string) => !p.startsWith("__")));
       const next = list.includes("default") ? "default" : list[0] || "";
       setSelectedProfile(next);
       setEndingBalances(null);
@@ -4439,8 +4446,8 @@ const App: React.FC = () => {
               >
                 <option value="">(none)</option>
                 {runs.map((r) => (
-                  <option key={r} value={r}>
-                    {r}
+                  <option key={r.run_id} value={r.run_id}>
+                    {r.run_id}{r.config_version != null ? ` · v${r.config_version}` : ""}
                   </option>
                 ))}
               </select>
@@ -4504,6 +4511,43 @@ const App: React.FC = () => {
                     {snapshot.run_info.flags?.ignore_taxes ? "Yes" : "No"}
                   </div>
                 </div>
+
+                {/* Config version linked to this run */}
+                {(() => {
+                  const runMeta = runs.find(r => r.run_id === selectedRun);
+                  const cv = runMeta?.config_version;
+                  const cvTs = runMeta?.config_version_ts;
+                  const cvNote = runMeta?.config_version_note;
+                  if (!cv) return null;
+                  const doRestore = async () => {
+                    if (!window.confirm(`Restore config to v${cv}?\n\nYour current config will be auto-saved first so you can revert.`)) return;
+                    setRestoringConfig(true); setRestoreConfigMsg("");
+                    try {
+                      await apiPost(`/profile/${encodeURIComponent(selectedProfile)}/restore/${cv}`, {});
+                      setRestoreConfigMsg(`✓ Restored to v${cv} — current config auto-saved`);
+                      loadVersionHistory(selectedProfile);
+                    } catch (e: any) {
+                      setRestoreConfigMsg(`Error: ${e?.message || e}`);
+                    } finally { setRestoringConfig(false); }
+                  };
+                  return (
+                    <div style={{ marginTop: 14, padding: "10px 14px", background: "#f8faff", borderRadius: 7, border: "1px solid #e0e7ff", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" as const }}>
+                      <span style={{ fontSize: 12, color: "#6b7280" }}>Config used:</span>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: "#3C3489", background: "#EEEDFE", padding: "2px 10px", borderRadius: 4 }}>
+                        v{cv}
+                      </span>
+                      {cvTs && <span style={{ fontSize: 12, color: "#9ca3af" }}>{cvTs.replace("T", " ").slice(0, 16)}</span>}
+                      {cvNote && <span style={{ fontSize: 12, color: "#6b7280", fontStyle: "italic" }}>{cvNote}</span>}
+                      {!isDefaultProfile && (
+                        <button onClick={doRestore} disabled={restoringConfig}
+                          style={{ marginLeft: "auto", fontSize: 12, padding: "4px 14px", background: "none", border: "1px solid #AFA9EC", borderRadius: 6, cursor: restoringConfig ? "wait" : "pointer", color: "#3C3489", fontWeight: 500 }}>
+                          {restoringConfig ? "Restoring…" : "↩ Restore this config"}
+                        </button>
+                      )}
+                      {restoreConfigMsg && <span style={{ fontSize: 12, color: restoreConfigMsg.startsWith("✓") ? "#15803d" : "#b91c1c", width: "100%" }}>{restoreConfigMsg}</span>}
+                    </div>
+                  );
+                })()}
               </section>
 
 

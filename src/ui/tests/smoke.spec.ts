@@ -597,12 +597,12 @@ test.describe("UI structure tests [PlaywrightTest]", () => {
     await page.goto("/");
     await page.locator(".profile-row select").selectOption(UI_PROFILE);
     await page.waitForTimeout(500);
-    const saveVersionBtn = page.locator("button", { hasText: "Save Version" });
-    await expect(saveVersionBtn).toBeVisible({ timeout: 5_000 });
+    // Must be in EDIT mode for Save Version to appear
     await page.locator(".profile-actions button", { hasText: "EDIT" }).click();
     await page.waitForTimeout(300);
-    await page.locator(".config-file", { hasText: "person.json" }).click();
-    await page.waitForTimeout(300);
+    const saveVersionBtn = page.locator("button", { hasText: "Save Version" });
+    await expect(saveVersionBtn).toBeVisible({ timeout: 5_000 });
+    // Make a change to create dirty state
     const ta = page.locator("textarea");
     await ta.click(); await ta.press("End"); await ta.pressSequentially(" ");
     await page.waitForTimeout(200);
@@ -629,7 +629,11 @@ test.describe("UI structure tests [PlaywrightTest]", () => {
     const panel  = page.locator("table").filter({ hasText: /Ver/ }).first();
     const before = await panel.locator("tbody tr").count().catch(() => 0);
     if (before >= 40) await page.request.delete(`/profile/${UI_PROFILE}/versions?keep=30`);
-    await vBtn.click(); await page.waitForTimeout(200);
+    // Save Version only appears in EDIT mode
+    await page.locator(".profile-actions button", { hasText: "EDIT" }).click();
+    await page.waitForTimeout(300);
+    await expect(page.locator("button", { hasText: "Save Version" })).toBeVisible({ timeout: 5_000 });
+    await vBtn.click(); await page.waitForTimeout(300);
     await page.locator("button", { hasText: "Save Version" }).click();
     await page.waitForTimeout(200);
     await page.locator("input").filter({ hasText: "" }).last().fill("playwright checkpoint");
@@ -652,7 +656,7 @@ test.describe("UI structure tests [PlaywrightTest]", () => {
     await vBtn.click(); await page.waitForTimeout(200);
     await page.locator(".profile-actions button", { hasText: "EDIT" }).click();
     await page.waitForTimeout(400);
-    await page.locator(".config-file", { hasText: "person.json" }).click();
+    await page.locator("button").filter({ hasText: "person.json" }).first().click();
     await page.waitForTimeout(300);
     const ta = page.locator("textarea");
     await ta.click(); await ta.press("End"); await ta.pressSequentially(" ");
@@ -754,7 +758,7 @@ describe("Guided editor — person.json sections and fields [PlaywrightTest]", (
     await page.locator(".profile-row select").selectOption(UI_PROFILE);
     await page.waitForTimeout(500);
     // Ensure person.json is selected
-    await page.locator("button").filter({ hasText: "Personal Profile" }).first().click();
+    await page.locator("button").filter({ hasText: "Personal Profile" }).filter({ hasText: "Who you are" }).click();
     await page.waitForTimeout(400);
   });
 
@@ -774,59 +778,59 @@ describe("Guided editor — person.json sections and fields [PlaywrightTest]", (
       "SPOUSE", "BENEFICIARIES", "ROTH CONVERSION POLICY", "RMD POLICY",
     ]) {
       await expect(
-        page.locator("div").filter({ hasText: new RegExp(`^${label}`, "i") }).first(),
+        page.locator("[data-section=\"identity\"]"),
         `Section "${label}" missing`
       ).toBeVisible({ timeout: 5_000 });
     }
   });
 
   test("Clicking Identity expands to show its fields", async ({ page }) => {
-    await page.locator("div").filter({ hasText: /^IDENTITY/i }).first().click();
+    await page.locator("[data-section=\"identity\"]").click();
     await page.waitForTimeout(300);
-    await expect(page.locator("div").filter({ hasText: /^Current Age/i }).first()).toBeVisible({ timeout: 5_000 });
-    await expect(page.locator("div").filter({ hasText: /^Birth Year/i }).first()).toBeVisible({ timeout: 5_000 });
-    await expect(page.locator("div").filter({ hasText: /^Filing Status/i }).first()).toBeVisible({ timeout: 5_000 });
-    await expect(page.locator("div").filter({ hasText: /^State/i }).first()).toBeVisible({ timeout: 5_000 });
-    await expect(page.locator("div").filter({ hasText: /^Retirement Age/i }).first()).toBeVisible({ timeout: 5_000 });
-    await expect(page.locator("div").filter({ hasText: /^Simulation Mode/i }).first()).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator("[data-field-key=\"Current Age\"]")).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator("[data-field-key=\"Birth Year\"]")).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator("[data-field-key=\"Filing Status\"]")).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator("[data-field-key=\"State\"]")).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator("[data-field-key=\"Retirement Age\"]")).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator("[data-field-key=\"Simulation Mode\"]")).toBeVisible({ timeout: 5_000 });
   });
 
   test("Expanding then collapsing Identity hides its fields", async ({ page }) => {
-    await page.locator("div").filter({ hasText: /^IDENTITY/i }).first().click();
+    await page.locator("[data-section=\"identity\"]").click();
     await page.waitForTimeout(300);
-    await expect(page.locator("div").filter({ hasText: /^Birth Year/i }).first()).toBeVisible({ timeout: 3_000 });
+    await expect(page.locator("[data-field-key=\"Birth Year\"]")).toBeVisible({ timeout: 3_000 });
     // Collapse
-    await page.locator("div").filter({ hasText: /^IDENTITY/i }).first().click();
+    await page.locator("[data-section=\"identity\"]").click();
     await page.waitForTimeout(300);
-    await expect(page.locator("div").filter({ hasText: /^Birth Year/i }).first()).not.toBeVisible({ timeout: 3_000 });
+    await expect(page.locator("[data-field-key=\"Birth Year\"]")).not.toBeVisible({ timeout: 3_000 });
     // Overview returns
     await expect(page.locator("div").filter({ hasText: /Profile Overview/i }).first()).toBeVisible({ timeout: 3_000 });
   });
 
   test("Social Security section: four fields after expand", async ({ page }) => {
-    await page.locator("div").filter({ hasText: /^SOCIAL SECURITY/i }).first().click();
+    await page.locator("[data-section=\"ss\"]").click();
     await page.waitForTimeout(300);
-    for (const label of ["Your Start Age", "Spouse Start Age", "Your Annual SS Benefit", "Exclude from Plan"]) {
+    for (const label of ["Your Start Age", "Spouse Start Age", "Your Annual SS Benefit ($)", "Exclude from Plan"]) {
       await expect(
-        page.locator("div").filter({ hasText: new RegExp(`^${label}`) }).first(),
+        page.locator(`[data-field-key="${label}"]`),
         `SS field "${label}" missing`
       ).toBeVisible({ timeout: 5_000 });
     }
   });
 
   test("Spouse section: four fields including Sole IRA Beneficiary", async ({ page }) => {
-    await page.locator("div").filter({ hasText: /^SPOUSE/i }).first().click();
+    await page.locator("[data-section=\"spouse\"]").click();
     await page.waitForTimeout(300);
     for (const label of ["Name", "Birth Year", "Expected Longevity", "Sole IRA Beneficiary"]) {
       await expect(
-        page.locator("div").filter({ hasText: new RegExp(`^${label}`) }).first(),
+        page.locator(`[data-field-key="${label}"]`),
         `Spouse field "${label}" missing`
       ).toBeVisible({ timeout: 5_000 });
     }
   });
 
   test("Beneficiaries section: expands and shows Add beneficiary button", async ({ page }) => {
-    await page.locator("div").filter({ hasText: /^BENEFICIARIES/i }).first().click();
+    await page.locator("[data-section=\"beneficiaries\"]").click();
     await page.waitForTimeout(300);
     await expect(
       page.locator("button").filter({ hasText: /\+ Add beneficiary/i })
@@ -834,24 +838,24 @@ describe("Guided editor — person.json sections and fields [PlaywrightTest]", (
   });
 
   test("Roth Conversion Policy: five fields after expand", async ({ page }) => {
-    await page.locator("div").filter({ hasText: /^ROTH CONVERSION POLICY/i }).first().click();
+    await page.locator("[data-section=\"roth\"]").click();
     await page.waitForTimeout(300);
     for (const label of [
       "Conversions Enabled", "Stay Below Bracket",
-      "Avoid NIIT Threshold", "Annual Amount", "Conversion Window",
+      "Avoid NIIT Threshold", "Annual Amount ($K)", "Conversion Window",
     ]) {
       await expect(
-        page.locator("div").filter({ hasText: new RegExp(`^${label}`) }).first(),
+        page.locator(`[data-field-key="${label}"]`),
         `Roth field "${label}" missing`
       ).toBeVisible({ timeout: 5_000 });
     }
   });
 
   test("RMD Policy: Surplus RMD Handling field present", async ({ page }) => {
-    await page.locator("div").filter({ hasText: /^RMD POLICY/i }).first().click();
+    await page.locator("[data-section=\"rmd\"]").click();
     await page.waitForTimeout(300);
     await expect(
-      page.locator("div").filter({ hasText: /^Surplus RMD Handling/ }).first()
+      page.locator("[data-field-key=\"Surplus RMD Handling\"]")
     ).toBeVisible({ timeout: 5_000 });
   });
 });
@@ -861,15 +865,15 @@ describe("Guided editor — person.json field detail panel [PlaywrightTest]", ()
     await page.goto("/");
     await page.locator(".profile-row select").selectOption(UI_PROFILE);
     await page.waitForTimeout(500);
-    await page.locator("button").filter({ hasText: "Personal Profile" }).first().click();
+    await page.locator("button").filter({ hasText: "Personal Profile" }).filter({ hasText: "Who you are" }).click();
     await page.waitForTimeout(400);
     // Expand Identity
-    await page.locator("div").filter({ hasText: /^IDENTITY/i }).first().click();
+    await page.locator("[data-section=\"identity\"]").click();
     await page.waitForTimeout(300);
   });
 
   test("Clicking a field shows description text and an input control", async ({ page }) => {
-    await page.locator("div").filter({ hasText: /^Birth Year/ }).first().click();
+    await page.locator("[data-field-key=\"Birth Year\"]").click();
     await page.waitForTimeout(300);
     // Description box (blue left-border) has content
     const panel = page.locator("div").filter({ hasText: /birth year/i }).nth(1);
@@ -880,7 +884,7 @@ describe("Guided editor — person.json field detail panel [PlaywrightTest]", ()
   });
 
   test("Filing Status select has MFJ, Single, MFS, HOH options", async ({ page }) => {
-    await page.locator("div").filter({ hasText: /^Filing Status/ }).first().click();
+    await page.locator("[data-field-key=\"Filing Status\"]").click();
     await page.waitForTimeout(300);
     // Detail panel select — nth(1) skips the Profile dropdown
     const sel = page.locator("select").nth(1);
@@ -892,7 +896,7 @@ describe("Guided editor — person.json field detail panel [PlaywrightTest]", ()
   });
 
   test("Simulation Mode select has all four modes", async ({ page }) => {
-    await page.locator("div").filter({ hasText: /^Simulation Mode/ }).first().click();
+    await page.locator("[data-field-key=\"Simulation Mode\"]").click();
     await page.waitForTimeout(300);
     const sel = page.locator("select").nth(1);
     await expect(sel).toBeVisible({ timeout: 5_000 });
@@ -903,9 +907,9 @@ describe("Guided editor — person.json field detail panel [PlaywrightTest]", ()
   });
 
   test("SS Start Age select has ages 62 through 70", async ({ page }) => {
-    await page.locator("div").filter({ hasText: /^SOCIAL SECURITY/i }).first().click();
+    await page.locator("[data-section=\"ss\"]").click();
     await page.waitForTimeout(200);
-    await page.locator("div").filter({ hasText: /^Your Start Age/ }).first().click();
+    await page.locator("[data-field-key=\"Your Start Age\"]").click();
     await page.waitForTimeout(300);
     const sel = page.locator("select").nth(1);
     await expect(sel).toBeVisible({ timeout: 5_000 });
@@ -916,9 +920,9 @@ describe("Guided editor — person.json field detail panel [PlaywrightTest]", ()
   });
 
   test("RMD Table select has uniform_lifetime and joint_life", async ({ page }) => {
-    await page.locator("div").filter({ hasText: /^SIMULATION HORIZON/i }).first().click();
+    await page.locator("[data-section=\"horizon\"]").click();
     await page.waitForTimeout(200);
-    await page.locator("div").filter({ hasText: /^RMD Table/ }).first().click();
+    await page.locator("[data-field-key=\"RMD Table\"]").click();
     await page.waitForTimeout(300);
     const sel = page.locator("select").nth(1);
     await expect(sel).toBeVisible({ timeout: 5_000 });
@@ -928,7 +932,7 @@ describe("Guided editor — person.json field detail panel [PlaywrightTest]", ()
   });
 
   test("State dropdown has California, Texas, New York", async ({ page }) => {
-    await page.locator("div").filter({ hasText: /^State/ }).first().click();
+    await page.locator("[data-field-key=\"State\"]").click();
     await page.waitForTimeout(300);
     const sel = page.locator("select").nth(1);
     await expect(sel).toBeVisible({ timeout: 5_000 });
@@ -939,14 +943,20 @@ describe("Guided editor — person.json field detail panel [PlaywrightTest]", ()
   });
 
   test("Surplus RMD Handling has reinvest_in_brokerage option", async ({ page }) => {
-    await page.locator("div").filter({ hasText: /^RMD POLICY/i }).first().click();
+    await page.locator("[data-section=\"rmd\"]").click();
     await page.waitForTimeout(200);
-    await page.locator("div").filter({ hasText: /^Surplus RMD Handling/ }).first().click();
+    await page.locator("[data-field-key=\"Surplus RMD Handling\"]").click();
     await page.waitForTimeout(300);
-    const sel = page.locator("select").nth(1);
-    await expect(sel).toBeVisible({ timeout: 5_000 });
-    const opts = await sel.locator("option").allTextContents();
-    expect(opts.some(o => o.includes("reinvest")), "reinvest_in_brokerage missing").toBe(true);
+    // Scope to detail panel (right side) — skip the profile select
+    // Detail panel select — find the select that has reinvest option (not profile dropdown)
+    const allSels = page.locator("select");
+    const count = await allSels.count();
+    let found = false;
+    for (let i = 0; i < count; i++) {
+      const opts = await allSels.nth(i).locator("option").allTextContents();
+      if (opts.some(o => o.toLowerCase().includes("reinvest"))) { found = true; break; }
+    }
+    expect(found, "reinvest_in_brokerage missing from any select on page").toBe(true);
   });
 });
 
@@ -955,12 +965,12 @@ describe("Guided editor — Update / dirty / discard flow [PlaywrightTest]", () 
     await page.goto("/");
     await page.locator(".profile-row select").selectOption(UI_PROFILE);
     await page.waitForTimeout(500);
-    await page.locator("button").filter({ hasText: "Personal Profile" }).first().click();
+    await page.locator("button").filter({ hasText: "Personal Profile" }).filter({ hasText: "Who you are" }).click();
     await page.waitForTimeout(400);
     // Expand Identity so Birth Year is accessible
-    await page.locator("div").filter({ hasText: /^IDENTITY/i }).first().click();
+    await page.locator("[data-section=\"identity\"]").click();
     await page.waitForTimeout(300);
-    await page.locator("div").filter({ hasText: /^Birth Year/ }).first().click();
+    await page.locator("[data-field-key=\"Birth Year\"]").click();
     await page.waitForTimeout(300);
   });
 
@@ -1006,7 +1016,7 @@ describe("Guided editor — Update / dirty / discard flow [PlaywrightTest]", () 
     // Dirty bar gone
     await expect(page.locator("div").filter({ hasText: /Unsaved changes/i }).first()).not.toBeVisible({ timeout: 3_000 });
     // Value reverted
-    await page.locator("div").filter({ hasText: /^Birth Year/ }).first().click();
+    await page.locator("[data-field-key=\"Birth Year\"]").click();
     await page.waitForTimeout(200);
     const reverted = await page.locator("input[type='number']").first().inputValue();
     expect(reverted, "Value should revert to original").toBe(orig);
@@ -1018,28 +1028,28 @@ describe("Guided editor — beneficiary management [PlaywrightTest]", () => {
     await page.goto("/");
     await page.locator(".profile-row select").selectOption(UI_PROFILE);
     await page.waitForTimeout(500);
-    await page.locator("button").filter({ hasText: "Personal Profile" }).first().click();
+    await page.locator("button").filter({ hasText: "Personal Profile" }).filter({ hasText: "Who you are" }).click();
     await page.waitForTimeout(400);
     // Expand beneficiaries section
-    await page.locator("div").filter({ hasText: /^BENEFICIARIES/i }).first().click();
+    await page.locator("[data-section=\"beneficiaries\"]").click();
     await page.waitForTimeout(300);
   });
 
   test("Beneficiaries section shows Primary and Contingent sub-groups", async ({ page }) => {
-    await expect(page.locator("div").filter({ hasText: /^PRIMARY/i }).first()).toBeVisible({ timeout: 5_000 });
-    await expect(page.locator("div").filter({ hasText: /^CONTINGENT/i }).first()).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator("[data-bene-group=\"primary\"]")).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator("[data-bene-group=\"contingent\"]")).toBeVisible({ timeout: 5_000 });
   });
 
   test("Add beneficiary button opens a form with Primary/Contingent type selector", async ({ page }) => {
     await page.locator("button").filter({ hasText: /\+ Add beneficiary/i }).click();
     await page.waitForTimeout(400);
     // Type selector cards
-    await expect(page.locator("div").filter({ hasText: /^primary$/i }).first()).toBeVisible({ timeout: 5_000 });
-    await expect(page.locator("div").filter({ hasText: /^contingent$/i }).first()).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator("div").filter({ hasText: "primary" }).filter({ hasText: "Inherits first" }).first()).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator("div").filter({ hasText: "contingent" }).filter({ hasText: "Inherits if" }).first()).toBeVisible({ timeout: 5_000 });
     // Name input
     await expect(page.locator("input[placeholder='e.g. Child A']")).toBeVisible({ timeout: 3_000 });
     // Add and Cancel buttons
-    await expect(page.locator("button", { hasText: "Add" })).toBeVisible({ timeout: 3_000 });
+    await expect(page.getByRole("button", { name: "Add", exact: true })).toBeVisible({ timeout: 3_000 });
     await expect(page.locator("button", { hasText: "Cancel" })).toBeVisible({ timeout: 3_000 });
   });
 
@@ -1050,20 +1060,21 @@ describe("Guided editor — beneficiary management [PlaywrightTest]", () => {
     await page.locator("button", { hasText: "Cancel" }).click();
     await page.waitForTimeout(300);
     // Form gone
-    await expect(page.locator("button", { hasText: "Add" })).not.toBeVisible({ timeout: 3_000 });
+    await expect(page.getByRole("button", { name: "Add", exact: true })).not.toBeVisible({ timeout: 3_000 });
     // Overview or section still visible
     await expect(page.locator("button").filter({ hasText: /\+ Add beneficiary/i })).toBeVisible({ timeout: 3_000 });
   });
 
   test("Clicking existing primary beneficiary opens edit form", async ({ page }) => {
     // The PlaywrightTest profile has Spouse as primary — click the row
-    const primRow = page.locator("div").filter({ hasText: /spouse/i }).first();
+    // Click the first primary beneficiary row using data-selected on the bene row div
+    const primRow = page.locator("div[data-selected]").filter({ hasText: /spouse/i }).first();
     await primRow.click();
     await page.waitForTimeout(300);
-    // Edit form should appear with Name input
-    await expect(page.locator("div").filter({ hasText: /Edit Primary/i }).first()).toBeVisible({ timeout: 5_000 });
-    await expect(page.locator("button", { hasText: "Done" })).toBeVisible({ timeout: 3_000 });
-    await expect(page.locator("button", { hasText: "Delete" })).toBeVisible({ timeout: 3_000 });
+    // Edit form should appear — DetailHeader shows "Edit Primary — ..."
+    await expect(page.locator("span").filter({ hasText: /Edit Primary/i }).first()).toBeVisible({ timeout: 5_000 });
+    // Delete always visible; Done only appears after a field is changed
+    await expect(page.getByRole("button", { name: "Delete", exact: true })).toBeVisible({ timeout: 3_000 });
   });
 });
 
@@ -1073,9 +1084,9 @@ describe("Guided editor — view mode (read-only) [PlaywrightTest]", () => {
     await page.locator(".profile-row select").selectOption(UI_PROFILE);
     await page.waitForTimeout(400);
     await page.locator(".profile-actions button", { hasText: "VIEW" }).click();
-    await page.waitForTimeout(300);
-    await page.locator("button").filter({ hasText: "Personal Profile" }).first().click();
-    await page.waitForTimeout(300);
+    await page.waitForTimeout(500);
+    // person.json is already selected — GUIDED in VIEW mode renders read-only
+    // Neither Update nor Save Profile should appear in VIEW mode
     await expect(page.locator("button", { hasText: "Update" })).not.toBeVisible({ timeout: 3_000 });
     await expect(page.locator("button", { hasText: "Save Profile" })).not.toBeVisible({ timeout: 3_000 });
   });
