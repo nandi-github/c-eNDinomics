@@ -725,6 +725,13 @@ const InflationGuidedEditor: React.FC<PersonJsonEditorProps> = ({ parsed, readon
   const [success, setSuccess] = React.useState("");
   React.useEffect(() => { setDraft(JSON.parse(JSON.stringify(parsed))); }, [JSON.stringify(parsed)]);
 
+  const rateBadge = (pct: number) => {
+    const bg = pct <= 2.5 ? "#f0fdf4" : pct <= 4 ? "#fef3c7" : "#fef2f2";
+    const color = pct <= 2.5 ? "#15803d" : pct <= 4 ? "#92400e" : "#b91c1c";
+    const label = pct <= 2.5 ? "low" : pct <= 4 ? "moderate" : "high";
+    return <span style={{ fontSize: 11, padding: "2px 7px", borderRadius: 10, background: bg, color }}>{label}</span>;
+  };
+
   const save = async () => {
     setSaving(true); setError("");
     try {
@@ -734,19 +741,42 @@ const InflationGuidedEditor: React.FC<PersonJsonEditorProps> = ({ parsed, readon
     finally { setSaving(false); }
   };
 
+  const defaultRate = draft.default_rate_pct ?? 3.5;
+
   return (
     <GuidedShell draft={draft} parsed={parsed} saving={saving} error={error} success={success} readonly={readonly} onSave={save} onDiscard={() => setDraft(JSON.parse(JSON.stringify(parsed)))}>
-      <div style={{ padding: 16, borderBottom: "1px solid #f0f0f0" }}>
-        <div style={{ fontSize: 12, color: "#6b7280", lineHeight: 1.65 }}>
-          Annual inflation applied to spending targets and tax brackets. Fed long-run target ≈ 2.0%. Recent 2022–2024 experience was 4–9%. Year 1 = your first simulation year (current age + 1).
+
+      {/* ── Default rate ── */}
+      <div style={{ padding: 16, borderBottom: "1px solid #f0f0f0", background: "#fafafa" }}>
+        <div style={{ fontSize: 13, fontWeight: 600, color: "#111827", marginBottom: 4 }}>
+          Default Inflation Rate
         </div>
+        <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 12, lineHeight: 1.6 }}>
+          Applied to <strong>all years not covered</strong> by a period override below. Fed long-run target ≈ 2.0–2.5%. Recent 2022–2024 experience was 4–9%.
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <input type="number" step="0.1" value={defaultRate} readOnly={readonly}
+            onChange={e => setDraft((prev: any) => ({ ...prev, default_rate_pct: Number(e.target.value) }))}
+            style={{ ...tblInput, width: 90 }} />
+          <span style={{ fontSize: 13, color: "#6b7280" }}>% / yr</span>
+          {rateBadge(defaultRate)}
+          <span style={{ fontSize: 12, color: "#9ca3af", marginLeft: 4 }}>
+            (fallback for uncovered years — was hardcoded 3.5% before)
+          </span>
+        </div>
+      </div>
+
+      {/* ── Period overrides ── */}
+      <div style={sectionHdr}>Period Overrides</div>
+      <div style={descBox}>
+        Override the default rate for specific year ranges. Year 1 = current age + 1. Years not listed use the default rate above.
       </div>
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>
           <tr>
-            <th style={{ ...tblHeader, width: "35%" }}>Year Range</th>
-            <th style={{ ...tblHeader, width: "35%" }}>Annual Inflation Rate (%)</th>
-            <th style={{ ...tblHeader, width: "25%" }}>Implied Period</th>
+            <th style={{ ...tblHeader, width: "30%" }}>Year Range</th>
+            <th style={{ ...tblHeader, width: "40%" }}>Annual Inflation Rate (%)</th>
+            <th style={{ ...tblHeader, width: "25%" }}>Period</th>
             <th style={{ ...tblHeader, width: "5%" }}></th>
           </tr>
         </thead>
@@ -760,13 +790,11 @@ const InflationGuidedEditor: React.FC<PersonJsonEditorProps> = ({ parsed, readon
               </td>
               <td style={tblCell}>
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <input type="number" step="0.1" value={row.rate_pct ?? 2.5} readOnly={readonly}
+                  <input type="number" step="0.1" value={row.rate_pct ?? defaultRate} readOnly={readonly}
                     onChange={e => setDraft((prev: any) => { const n = JSON.parse(JSON.stringify(prev)); n.inflation[idx].rate_pct = Number(e.target.value); return n; })}
                     style={{ ...tblInput, width: 80 }} />
                   <span style={{ fontSize: 12, color: "#9ca3af" }}>% / yr</span>
-                  <span style={{ fontSize: 11, padding: "2px 7px", borderRadius: 10, background: row.rate_pct <= 2.5 ? "#f0fdf4" : row.rate_pct <= 4 ? "#fef3c7" : "#fef2f2", color: row.rate_pct <= 2.5 ? "#15803d" : row.rate_pct <= 4 ? "#92400e" : "#b91c1c" }}>
-                    {row.rate_pct <= 2.5 ? "low" : row.rate_pct <= 4 ? "moderate" : "high"}
-                  </span>
+                  {rateBadge(row.rate_pct ?? defaultRate)}
                 </div>
               </td>
               <td style={{ ...tblCell, color: "#9ca3af", fontSize: 12 }}>
@@ -777,12 +805,15 @@ const InflationGuidedEditor: React.FC<PersonJsonEditorProps> = ({ parsed, readon
               </td>
             </tr>
           ))}
+          {(draft.inflation || []).length === 0 && (
+            <tr><td colSpan={4} style={{ ...tblCell, color: "#9ca3af", fontStyle: "italic", textAlign: "center" }}>No period overrides — default rate applies to all years</td></tr>
+          )}
         </tbody>
       </table>
       {!readonly && (
         <div style={{ padding: "10px 16px" }}>
-          <button onClick={() => setDraft((prev: any) => { const n = JSON.parse(JSON.stringify(prev)); n.inflation = [...(n.inflation || []), { years: "", rate_pct: 2.5 }]; return n; })} style={tblAddBtn}>
-            + Add inflation period
+          <button onClick={() => setDraft((prev: any) => { const n = JSON.parse(JSON.stringify(prev)); n.inflation = [...(n.inflation || []), { years: "", rate_pct: defaultRate }]; return n; })} style={tblAddBtn}>
+            + Add period override
           </button>
         </div>
       )}

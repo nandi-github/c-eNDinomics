@@ -5,7 +5,7 @@
   "_self_crc": "476a4dfa850a0851",
   "hashes": {
     "api.py": "e1435ac762111d06",
-    "loaders.py": "f95454ffc07c8104",
+    "loaders.py": "ce55ee62804f07a4",
     "simulator_new.py": "435ccfc3ae3dd627",
     "snapshot.py": "7a68ea20b50e7a86",
     "reporting.py": "ea328a157ffc6b24",
@@ -19,7 +19,7 @@
     "engines_assets.py": "6e230b012a752cf2",
     "simulation_core.py": "b8595b67f765701f",
     "taxes_core.py": "ef276bce9b4992b7",
-    "ui/src/App.tsx": "98b9de439ebab351",
+    "ui/src/App.tsx": "54f957bb854bcbab",
     "ui/tests/smoke.spec.ts": "5b60ce9e966014ec",
     "ui/tests/global-setup.ts": "16b4790e640b153e",
     "ui/tests/global-teardown.ts": "b49600b2b2430ec2",
@@ -34,7 +34,7 @@
     "profiles/default/withdrawal_schedule.json": "5444a7a6b5e8e4cb",
     "profiles/default/income.json": "9bf8b50ad6bded3a",
     "profiles/default/allocation_yearly.json": "d9b6483b2ee4a326",
-    "profiles/default/inflation_yearly.json": "7e543c03e8682953",
+    "profiles/default/inflation_yearly.json": "80225a3e60691064",
     "profiles/default/shocks_yearly.json": "e3b5debb99887328",
     "profiles/default/economic.json": "fd2a6cc8cfd04e1a",
     "rebuild_manifest.py": "bf735102872dadf2"

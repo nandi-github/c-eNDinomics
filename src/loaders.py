@@ -311,7 +311,12 @@ def load_inflation_yearly(path: Optional[str], years_count: int = YEARS) -> Opti
             arr = arr[:years_count]
         return arr
     infl_rows = data.get("inflation", []) or []
-    out = [INFL_BASELINE_ANNUAL] * years_count
+    # default_rate_pct: top-level field in inflation_yearly.json.
+    # Sets the fallback rate for any year not covered by an explicit row.
+    # If absent, falls back to INFL_BASELINE_ANNUAL (3.5%).
+    _default_pct = data.get("default_rate_pct")
+    _default_dec = max(-1.0, float(_default_pct) / 100.0) if _default_pct is not None else INFL_BASELINE_ANNUAL
+    out = [_default_dec] * years_count
     for r in infl_rows:
         yrs = _years_range(str(r.get("years", "*")), years_count)
         rate_pct = _safe_num(r.get("rate_pct", 0.0), 0.0)
