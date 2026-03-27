@@ -85,6 +85,7 @@ def _load_manifest_lock() -> Dict[str, str]:
     manifest.lock is Claude's voucher — lists every file Claude provided
     with the hash Claude computed when shipping it.
     The server tracks exactly these files — no hardcoding needed.
+    Adding a file to manifest.lock automatically adds it to the startup check.
     """
     _mpath = os.path.join(os.path.dirname(os.path.abspath(__file__)), "manifest.lock")
     try:
@@ -1414,6 +1415,36 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
             qual_div_cur,
             cap_gains_cur,
         ) = build_income_streams(income_cfg, years=_n_years)
+
+        # ── Apply dollar_type="future" deflation ─────────────────────────────
+        # loaders.py computed per-year _is_future flags (1.0 = future/nominal).
+        # future $ amounts are already nominal — divide by cumulative deflator
+        # to convert to current USD so the simulator sees consistent real values.
+        # current $ (default) amounts are already in real terms — no change needed.
+        if infl_yearly is not None and len(infl_yearly) > 0:
+            _infl_arr = np.asarray(infl_yearly, dtype=float)
+            if len(_infl_arr) < _n_years:
+                _infl_arr = np.concatenate([_infl_arr, np.full(_n_years - len(_infl_arr), _infl_arr[-1] if len(_infl_arr) > 0 else 0.03)])
+            _deflator = np.cumprod(1.0 + _infl_arr[:_n_years])
+        else:
+            _deflator = np.ones(_n_years, dtype=float)
+
+        for _inc_arr, _key in [
+            (w2_cur,            "w2"),
+            (rental_cur,        "rental"),
+            (interest_cur,      "interest"),
+            (ordinary_other_cur,"ordinary_other"),
+            (qual_div_cur,      "qualified_div"),
+            (cap_gains_cur,     "cap_gains"),
+        ]:
+            _is_fut = np.asarray(income_cfg.get(f"{_key}_is_future", np.zeros(_n_years)), dtype=float)
+            if len(_is_fut) < _n_years:
+                _is_fut = np.concatenate([_is_fut, np.zeros(_n_years - len(_is_fut))])
+            for _y in range(_n_years):
+                if _is_fut[_y] > 0.5:
+                    # Convert nominal future amount to current USD
+                    _inc_arr[_y] = _inc_arr[_y] / max(_deflator[_y], 1e-12)
+        # ── End dollar_type deflation ─────────────────────────────────────────
 
         ordinary_income_cur_paths = np.zeros((paths, _n_years), dtype=float)
         qual_div_cur_paths = np.zeros((paths, _n_years), dtype=float)

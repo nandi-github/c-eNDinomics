@@ -1,6 +1,6 @@
 # eNDinomics Developer Guide
 
-Last updated: Session 24b — March 2026  
+Last updated: Session 27 — March 2026  
 Repo: `https://github.com/nandi-github/c-eNDinomics`  
 Working dir: `/Volumes/My Shared Files/workspace/research/c-eNDinomics/`
 
@@ -103,40 +103,45 @@ The `vcleanbld_ui` script runs `npm run build` then starts `uvicorn`. It's the c
 
 ## 4. Deployment — Copying Claude-Provided Files
 
-Claude may provide any combination of these files in a session. **All must be copied** before running tests — a missed file causes hard-to-diagnose failures.
+Claude provides files in a session along with an updated `manifest.lock`. **Always copy all provided files including manifest.lock** before running tests.
 
-### Backend files
+### Step-by-step
+
 ```bash
+# 1. Copy each file Claude provided (only files Claude explicitly gave you)
 cp ~/Downloads/api.py           src/api.py
-cp ~/Downloads/loaders.py       src/loaders.py
-cp ~/Downloads/simulator_new.py src/simulator_new.py
-cp ~/Downloads/snapshot.py      src/snapshot.py
-cp ~/Downloads/roth_optimizer.py src/roth_optimizer.py
-cp ~/Downloads/test_flags.py    src/test_flags.py
-```
-
-### UI files (require UI rebuild after copy)
-```bash
 cp ~/Downloads/App.tsx          src/ui/src/App.tsx
-cp ~/Downloads/smoke.spec.ts    src/ui/tests/smoke.spec.ts
+cp ~/Downloads/manifest.lock    src/manifest.lock
+# ... etc for each file Claude provided this session
+
+# 2. Rebuild UI if App.tsx changed
+cd src/ui && npm run build && cd ..
+
+# 3. Restart server (picks up new manifest.lock + any .py changes)
+./vcleanbld_ui
+
+# 4. Verify all files match
+python3 -B test_flags.py --checkupdates
 ```
 
-### Profile config files
-```bash
-cp ~/Downloads/person.json              src/profiles/Test/person.json
-cp ~/Downloads/withdrawal_schedule.json src/profiles/Test/withdrawal_schedule.json
-cp ~/Downloads/income.json              src/profiles/Test/income.json
-cp ~/Downloads/allocation_yearly.json   src/profiles/Test/allocation_yearly.json
-cp ~/Downloads/inflation_yearly.json    src/profiles/Test/inflation_yearly.json
-cp ~/Downloads/shocks_yearly.json       src/profiles/Test/shocks_yearly.json
-cp ~/Downloads/economic.json            src/profiles/Test/economic.json
-```
+### What Claude tracks (34 files in manifest.lock)
 
-### After copying — always restart
-```bash
-cd src && ./vcleanbld_ui   # for any .tsx change
-# OR just restart uvicorn for .py-only changes
-```
+| Category | Files |
+|----------|-------|
+| Python backend | api.py, loaders.py, simulator_new.py, snapshot.py, reporting.py, roth_optimizer.py, roth_conversion_core.py, withdrawals_core.py, portfolio_analysis.py, rmd_core.py, assets_loader.py, engines_assets.py, simulation_core.py, taxes_core.py, test_flags.py |
+| UI | ui/src/App.tsx, ui/tests/smoke.spec.ts, ui/tests/global-setup.ts, ui/tests/global-teardown.ts, ui/playwright.config.ts |
+| Global config | config/economicglobal.json, config/system_shocks.json, config/rmd.json, config/taxes_states_mfj_single.json, config/cape_config.json, config/assets.json |
+| Default profile | profiles/default/person.json, profiles/default/withdrawal_schedule.json, profiles/default/income.json, profiles/default/allocation_yearly.json, profiles/default/inflation_yearly.json, profiles/default/shocks_yearly.json, profiles/default/economic.json |
+| Tools | rebuild_manifest.py |
+
+**Note:** Test profile files (`profiles/Test/`) are NOT tracked — they are managed by the test suite internally.
+
+### manifest.lock update rules (for Claude sessions)
+
+- Claude loads the **uploaded manifest.lock from disk** before every update
+- Claude updates **only the entries for files it changed** — all other 34 entries stay untouched
+- The hash count must always remain **34** after any update
+- After copying outputs to disk, run `python3 rebuild_manifest.py` (dry run) to verify disk matches Claude's hashes
 
 ---
 
@@ -181,17 +186,35 @@ python3 -B test_flags.py --checkupdates --server http://localhost:8001
 ```
 
 ### Tracked files
-The manifest covers all 16 files Claude may provide:
-- 6 Python backend files
-- 2 UI files (App.tsx, smoke.spec.ts)
-- 7 Test profile JSON configs
-- test_flags.py
+The manifest covers all **34** files Claude may provide. The server reads `manifest.lock` at startup — the startup log will show all 34 files. If the log shows fewer, the wrong manifest.lock was on disk when the server started.
 
 **Rule:** Always run `--checkupdates` before `--comprehensive-test`. A stale file is always the first thing to check when test results don't match expectations.
 
-### Planned extensions (future sessions)
-- `--checkupdates --full` — hash every `.py`/`.ts`/`.tsx` in `src/`
-- `--checkmodel` — verify reference data (`assets.json`, `rmd.json`, `cape_config.json`) against `manifest.lock`
+### How the manifest system works
+
+```
+manifest.lock["hashes"]          ← Claude's voucher: "I provided these files with these hashes"
+     ↓
+api.py _load_manifest_lock()      ← reads at import time → MANIFEST_FILES list
+     ↓
+/manifest endpoint                ← serves file hashes to test suite
+     ↓
+test_flags.py check_updates()     ← compares server hashes vs local disk hashes
+```
+
+### rebuild_manifest.py
+
+A utility for verifying disk state against Claude's manifest. Lives at `src/rebuild_manifest.py`.
+
+```bash
+# Dry run — show status of all 34 Claude-provided files
+python3 rebuild_manifest.py
+
+# Write mode — update manifest hashes from disk (run AFTER copying Claude outputs)
+python3 rebuild_manifest.py --write
+```
+
+**When to use `--write`:** Only after copying Claude's output files to disk. This updates the manifest to reflect what Claude actually provided. Never run `--write` on files Claude did not provide — it defeats the integrity check.
 
 ---
 
@@ -464,13 +487,19 @@ cat src/promotion_log.json | python3 -m json.tool | head -40
 cd src && python3 promote_model.py --candidate asset-model/candidate/assets.json
 ```
 
-### Planned: manifest.lock (future session)
-A `manifest.lock` file committed to git will track SHA256 hashes of all reference data. Server will verify on startup. `--checkmodel` flag will compare against lock.
+### manifest.lock — implemented
+
+`manifest.lock` is committed to git and tracks SHA256 hashes of all 34 Claude-provided files. The server reads it at startup and serves the hashes via `/manifest`. `--checkupdates` compares disk files against these hashes.
 
 ```bash
-# Future command
-python3 -B test_flags.py --checkmodel
+# Verify all 34 files match between disk and running server
+python3 -B test_flags.py --checkupdates
+
+# Verify disk state against Claude's manifest (no server needed)
+python3 rebuild_manifest.py
 ```
+
+**manifest.lock is Claude's voucher** — it says "I provided these exact file versions." Never manually edit hashes or run tools that stamp whatever is on disk as correct without verifying Claude provided those files.
 
 ---
 

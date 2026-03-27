@@ -441,12 +441,12 @@ const IncomeGuidedEditor: React.FC<PersonJsonEditorProps> = ({ parsed, readonly,
   React.useEffect(() => { setDraft(JSON.parse(JSON.stringify(parsed))); }, [JSON.stringify(parsed)]);
 
   const INCOME_TYPES: { key: string; label: string; taxNote: string }[] = [
-    { key: "w2",            label: "W-2 / Salary",          taxNote: "Ordinary income rates. Taxed at the bottom of your bracket stack." },
-    { key: "ordinary_other",label: "SS / Pension / Annuity", taxNote: "Ordinary income rates. Enter the taxable portion of SS (typically 85%)." },
-    { key: "rental",        label: "Rental Income",          taxNote: "Net rental income after expenses. Ordinary income rates." },
-    { key: "interest",      label: "Interest Income",        taxNote: "Taxable interest from accounts outside the simulator." },
-    { key: "qualified_div", label: "Qualified Dividends",    taxNote: "From outside brokerage accounts. Long-term capital gains rates." },
-    { key: "cap_gains",     label: "Capital Gains",          taxNote: "Realized gains from outside assets. Long-term capital gains rates." },
+    { key: "w2",            label: "W-2 / Salary",          taxNote: "Gross wages or salary from your employer — not from portfolio accounts. Ordinary income rates. Also triggers Additional Medicare Tax (0.9%) above $250K MFJ / $200K single." },
+    { key: "ordinary_other",label: "SS / Pension / Annuity", taxNote: "Social Security (enter taxable portion, typically 85%), pensions, annuities — not from portfolio accounts. Ordinary income rates. If SS is configured in Personal Profile, those years are handled automatically." },
+    { key: "rental",        label: "Rental Income",          taxNote: "Net rental income after expenses, from properties outside eNDinomics portfolio accounts. Ordinary income rates. Does not trigger Additional Medicare Tax." },
+    { key: "interest",      label: "Interest Income",        taxNote: "Taxable interest from bank accounts, CDs, or bonds held outside eNDinomics portfolio accounts (e.g. a separate savings account). Do not re-enter interest already inside a tracked account." },
+    { key: "qualified_div", label: "Qualified Dividends",    taxNote: "Qualified dividends from brokerage accounts or funds held outside eNDinomics portfolio accounts. Long-term capital gains rates apply. Do not re-enter dividends from tracked accounts." },
+    { key: "cap_gains",     label: "Capital Gains",          taxNote: "Realized capital gains from assets outside eNDinomics portfolio accounts — property sales, non-portfolio investments. Long-term capital gains rates. Do not re-enter gains from tracked accounts." },
   ];
 
   const updateRow = (type: string, idx: number, field: string, val: any) => {
@@ -484,7 +484,7 @@ const IncomeGuidedEditor: React.FC<PersonJsonEditorProps> = ({ parsed, readonly,
   return (
     <GuidedShell draft={draft} parsed={parsed} saving={saving} error={error} success={success} readonly={readonly} onSave={save} onDiscard={() => setDraft(JSON.parse(JSON.stringify(parsed)))}>
       <div style={{ padding: "12px 16px 4px", fontSize: 12, color: "#6b7280", background: "#fafafa", borderBottom: "1px solid #f0f0f0" }}>
-        Enter income from sources <strong>outside</strong> your investment accounts. Do not enter portfolio dividends, RMDs, or Roth conversion amounts — those are computed automatically.
+        Income from sources <strong>outside</strong> your eNDinomics portfolio accounts. Dividends, gains, RMDs, and Roth conversions from tracked accounts are computed automatically — entering them here causes double-counting.
       </div>
       {INCOME_TYPES.map(({ key, label, taxNote }) => {
         const rows: any[] = draft[key] || [];
@@ -495,9 +495,12 @@ const IncomeGuidedEditor: React.FC<PersonJsonEditorProps> = ({ parsed, readonly,
             <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
                 <tr>
-                  <th style={{ ...tblHeader, width: "30%" }}>Age Range</th>
-                  <th style={{ ...tblHeader, width: "40%" }}>Annual Amount ($)</th>
-                  <th style={{ ...tblHeader, width: "25%" }}>Note</th>
+                  <th style={{ ...tblHeader, width: "25%" }}>Age Range</th>
+                  <th style={{ ...tblHeader, width: "30%" }}>Annual Amount ($)</th>
+                  <th style={{ ...tblHeader, width: "20%" }}>
+                    <Tip label="Dollar Type" tip="Current $: enter in today's dollars — the simulator inflates this amount each year automatically. Future $: enter the actual nominal amount you expect to receive (e.g. a fixed pension payment that won't grow). Default is current $." />
+                  </th>
+                  <th style={{ ...tblHeader, width: "20%" }}>Note</th>
                   <th style={{ ...tblHeader, width: "5%" }}></th>
                 </tr>
               </thead>
@@ -513,6 +516,14 @@ const IncomeGuidedEditor: React.FC<PersonJsonEditorProps> = ({ parsed, readonly,
                       <input type="number" value={row.amount ?? row.amount_nom ?? 0} readOnly={readonly}
                         onChange={e => updateRow(key, idx, "amount", Number(e.target.value))}
                         style={{ ...tblInput }} />
+                    </td>
+                    <td style={tblCell}>
+                      <select value={row.dollar_type ?? "current"} disabled={readonly}
+                        onChange={e => updateRow(key, idx, "dollar_type", e.target.value)}
+                        style={{ ...tblInput, paddingRight: 4 }}>
+                        <option value="current">Current $</option>
+                        <option value="future">Future $</option>
+                      </select>
                     </td>
                     <td style={tblCell}>
                       <input value={row._note ?? ""} readOnly={readonly}
@@ -543,56 +554,93 @@ const IncomeGuidedEditor: React.FC<PersonJsonEditorProps> = ({ parsed, readonly,
 
 // ── Withdrawal / Spending Plan guided editor ───────────────────────────────────
 const WithdrawalGuidedEditor: React.FC<PersonJsonEditorProps> = ({ parsed, readonly, onSave }) => {
-  const [draft, setDraft] = React.useState<any>(() => JSON.parse(JSON.stringify(parsed)));
-  const [saving, setSaving] = React.useState(false);
-  const [error, setError] = React.useState("");
-  const [success, setSuccess] = React.useState("");
-  React.useEffect(() => { setDraft(JSON.parse(JSON.stringify(parsed))); }, [JSON.stringify(parsed)]);
+  // localDraft: live edits from table inputs (not yet committed to draft)
+  const [draft,      setDraft]      = React.useState<any>(() => JSON.parse(JSON.stringify(parsed)));
+  const [localRows,  setLocalRows]  = React.useState<any[]>(() => JSON.parse(JSON.stringify(parsed.schedule || [])));
+  const [localFloor, setLocalFloor] = React.useState<number>(() => parsed.floor_k ?? 0);
+  const [rowsDirty,  setRowsDirty]  = React.useState(false);
+  const [saving,     setSaving]     = React.useState(false);
+  const [error,      setError]      = React.useState("");
+  const [success,    setSuccess]    = React.useState("");
 
-  const updateRow = (idx: number, field: string, val: any) => {
-    setDraft((prev: any) => {
-      const next = JSON.parse(JSON.stringify(prev));
-      next.schedule[idx] = { ...next.schedule[idx], [field]: val };
+  React.useEffect(() => {
+    const p = JSON.parse(JSON.stringify(parsed));
+    setDraft(p);
+    setLocalRows(JSON.parse(JSON.stringify(p.schedule || [])));
+    setLocalFloor(p.floor_k ?? 0);
+    setRowsDirty(false);
+  }, [JSON.stringify(parsed)]);
+
+  const ageStart = (ages: string) => {
+    const m = String(ages).match(/^(\d+)/);
+    return m ? parseInt(m[1]) : 9999;
+  };
+
+  const updateLocalRow = (idx: number, field: string, val: any) => {
+    setLocalRows((prev: any[]) => {
+      const next = [...prev];
+      next[idx] = { ...next[idx], [field]: val };
       return next;
     });
+    setRowsDirty(true);
   };
+
   const addRow = () => {
-    setDraft((prev: any) => {
-      const next = JSON.parse(JSON.stringify(prev));
-      next.schedule = [...(next.schedule || []), { ages: "", amount_k: 0, base_k: 0 }];
-      return next;
-    });
+    setLocalRows((prev: any[]) => [...prev, { ages: "", amount_k: 0, base_k: 0 }]);
+    setRowsDirty(true);
   };
+
   const delRow = (idx: number) => {
-    setDraft((prev: any) => {
-      const next = JSON.parse(JSON.stringify(prev));
-      next.schedule = next.schedule.filter((_: any, i: number) => i !== idx);
-      return next;
-    });
+    setLocalRows((prev: any[]) => prev.filter((_: any, i: number) => i !== idx));
+    setRowsDirty(true);
+  };
+
+  // Apply: validate, sort by age start, commit localRows → draft
+  const applyRows = () => {
+    for (const row of localRows) {
+      if (Number(row.base_k) > Number(row.amount_k)) {
+        setError(`Minimum (${row.base_k}K) exceeds Target (${row.amount_k}K) for ages ${row.ages}`);
+        return;
+      }
+    }
+    setError("");
+    const sorted = [...localRows].sort((a: any, b: any) => ageStart(a.ages) - ageStart(b.ages));
+    setLocalRows(sorted);
+    setDraft((prev: any) => ({ ...prev, floor_k: localFloor, schedule: sorted }));
+    setRowsDirty(false);
   };
 
   const save = async () => {
-    for (const row of draft.schedule || []) {
-      if (Number(row.base_k) > Number(row.amount_k)) { setError(`base_k (${row.base_k}K) exceeds amount_k (${row.amount_k}K) for ages ${row.ages}`); return; }
-    }
+    // Sort on save as final safety net
+    const sorted = [...(draft.schedule || [])].sort((a: any, b: any) => ageStart(a.ages) - ageStart(b.ages));
+    const toSave = { ...draft, floor_k: localFloor, schedule: sorted };
     setSaving(true); setError("");
     try {
-      await onSave(draft, "guided: spending plan saved");
+      await onSave(toSave, "guided: spending plan saved");
       setSuccess("Saved ✓"); setTimeout(() => setSuccess(""), 2500);
     } catch (e: any) { setError(String(e?.message || e)); }
     finally { setSaving(false); }
   };
 
+  const discard = () => {
+    const p = JSON.parse(JSON.stringify(parsed));
+    setDraft(p);
+    setLocalRows(JSON.parse(JSON.stringify(p.schedule || [])));
+    setLocalFloor(p.floor_k ?? 0);
+    setRowsDirty(false);
+    setError("");
+  };
+
   return (
-    <GuidedShell draft={draft} parsed={parsed} saving={saving} error={error} success={success} readonly={readonly} onSave={save} onDiscard={() => setDraft(JSON.parse(JSON.stringify(parsed)))}>
+    <GuidedShell draft={draft} parsed={parsed} saving={saving} error={error} success={success} readonly={readonly} onSave={save} onDiscard={discard}>
       {/* Global floor */}
       <div style={{ padding: 16, borderBottom: "1px solid #f0f0f0" }}>
         <div style={{ fontSize: 13, fontWeight: 600, color: "#111827", marginBottom: 4 }}>Global Spending Floor</div>
         <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 10 }}>Absolute minimum take-home in any market scenario ($K/yr). The simulator never cuts below this, even in a severe downturn.</div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ fontSize: 13, color: "#6b7280" }}>$</span>
-          <input type="number" value={draft.floor_k ?? 0} readOnly={readonly}
-            onChange={e => setDraft((p: any) => ({ ...p, floor_k: Number(e.target.value) }))}
+          <input type="number" value={localFloor} readOnly={readonly}
+            onChange={e => { setLocalFloor(Number(e.target.value)); setRowsDirty(true); }}
             style={{ ...tblInput, width: 100 }} />
           <span style={{ fontSize: 13, color: "#6b7280" }}>K / year</span>
         </div>
@@ -615,17 +663,17 @@ const WithdrawalGuidedEditor: React.FC<PersonJsonEditorProps> = ({ parsed, reado
           </tr>
         </thead>
         <tbody>
-          {(draft.schedule || []).map((row: any, idx: number) => (
+          {localRows.map((row: any, idx: number) => (
             <tr key={idx} style={{ background: idx % 2 === 0 ? "#fafafa" : "#fff" }}>
               <td style={tblCell}>
                 <input value={row.ages ?? row.years ?? ""} readOnly={readonly}
-                  onChange={e => updateRow(idx, "ages", e.target.value)}
+                  onChange={e => updateLocalRow(idx, "ages", e.target.value)}
                   style={tblInput} placeholder="e.g. 65-74" />
               </td>
               <td style={tblCell}>
                 <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                   <input type="number" value={row.amount_k ?? 0} readOnly={readonly}
-                    onChange={e => updateRow(idx, "amount_k", Number(e.target.value))}
+                    onChange={e => updateLocalRow(idx, "amount_k", Number(e.target.value))}
                     style={{ ...tblInput, width: 80 }} />
                   <span style={{ fontSize: 11, color: "#9ca3af" }}>K</span>
                 </div>
@@ -633,14 +681,14 @@ const WithdrawalGuidedEditor: React.FC<PersonJsonEditorProps> = ({ parsed, reado
               <td style={tblCell}>
                 <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                   <input type="number" value={row.base_k ?? 0} readOnly={readonly}
-                    onChange={e => updateRow(idx, "base_k", Number(e.target.value))}
+                    onChange={e => updateLocalRow(idx, "base_k", Number(e.target.value))}
                     style={{ ...tblInput, width: 80 }} />
                   <span style={{ fontSize: 11, color: "#9ca3af" }}>K</span>
                 </div>
               </td>
               <td style={tblCell}>
                 <input value={row._note ?? ""} readOnly={readonly}
-                  onChange={e => updateRow(idx, "_note", e.target.value)}
+                  onChange={e => updateLocalRow(idx, "_note", e.target.value)}
                   style={tblInput} placeholder="e.g. Pre-retirement" />
               </td>
               <td style={tblCell}>
@@ -648,14 +696,21 @@ const WithdrawalGuidedEditor: React.FC<PersonJsonEditorProps> = ({ parsed, reado
               </td>
             </tr>
           ))}
-          {(draft.schedule || []).length === 0 && (
+          {localRows.length === 0 && (
             <tr><td colSpan={5} style={{ ...tblCell, color: "#9ca3af", fontStyle: "italic", textAlign: "center" }}>No spending tiers — add one below</td></tr>
           )}
         </tbody>
       </table>
       {!readonly && (
-        <div style={{ padding: "10px 16px" }}>
+        <div style={{ padding: "10px 16px", display: "flex", alignItems: "center", gap: 10 }}>
           <button onClick={addRow} style={tblAddBtn}>+ Add spending tier</button>
+          {rowsDirty && (
+            <button onClick={applyRows} style={{ fontSize: 12, padding: "5px 16px",
+              background: "#3C3489", color: "#fff", border: "none", borderRadius: 6,
+              cursor: "pointer", fontWeight: 600 }}>
+              Apply &amp; Sort by Age
+            </button>
+          )}
         </div>
       )}
     </GuidedShell>

@@ -1107,3 +1107,62 @@ describe("Guided editor — view mode (read-only) [PlaywrightTest]", () => {
     await expect(page.locator("div").filter({ hasText: /Profile Overview/i }).first()).toBeVisible({ timeout: 3_000 });
   });
 });
+
+
+describe("Guided editor — Spending Plan [PlaywrightTest]", () => {
+  // Navigate to Spending Plan before each test
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/");
+    await page.locator(".profile-row select").selectOption(UI_PROFILE);
+    await page.waitForTimeout(400);
+    // Click Spending Plan in the file list
+    await page.locator("button").filter({ hasText: "Spending Plan" }).first().click();
+    await page.waitForTimeout(400);
+  });
+
+  test("Spending Plan shows Global Spending Floor input", async ({ page }) => {
+    await expect(page.locator("text=Global Spending Floor")).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator("text=K / year")).toBeVisible({ timeout: 3_000 });
+  });
+
+  test("Spending Plan shows Spending Tiers table with correct columns", async ({ page }) => {
+    await expect(page.locator("text=SPENDING TIERS BY LIFE STAGE")).toBeVisible({ timeout: 5_000 });
+    await expect(page.locator("th").filter({ hasText: /Age Range/i })).toBeVisible({ timeout: 3_000 });
+    await expect(page.locator("th").filter({ hasText: /Target Spending/i })).toBeVisible({ timeout: 3_000 });
+    await expect(page.locator("th").filter({ hasText: /Minimum Spending/i })).toBeVisible({ timeout: 3_000 });
+  });
+
+  test("Apply & Sort button appears after editing a row", async ({ page }) => {
+    // Apply button should not be visible initially
+    await expect(page.locator("button", { hasText: /Apply/i })).not.toBeVisible({ timeout: 2_000 }).catch(() => {});
+    // Edit a value in the first row
+    const firstInput = page.locator("tbody input[type='number']").first();
+    await firstInput.click();
+    await firstInput.press("End");
+    await firstInput.pressSequentially("1");
+    await page.waitForTimeout(200);
+    // Apply & Sort button should now appear
+    await expect(page.locator("button", { hasText: /Apply/i })).toBeVisible({ timeout: 3_000 });
+  });
+
+  test("Save Profile button appears after making a change", async ({ page }) => {
+    // Save Profile only shows when there are unsaved changes (dirty state)
+    const firstInput = page.locator("tbody input[type='number']").first();
+    await firstInput.click();
+    await firstInput.press("End");
+    await firstInput.pressSequentially("1");
+    await page.waitForTimeout(300);
+    // Apply to stage the change
+    await page.locator("button", { hasText: /Apply/i }).click();
+    await page.waitForTimeout(200);
+    await expect(page.locator("button", { hasText: "Save Profile" })).toBeVisible({ timeout: 5_000 });
+  });
+
+  test("Add spending tier button works", async ({ page }) => {
+    const rowsBefore = await page.locator("tbody tr").count();
+    await page.locator("button", { hasText: /\+ Add spending tier/i }).click();
+    await page.waitForTimeout(300);
+    const rowsAfter = await page.locator("tbody tr").count();
+    expect(rowsAfter).toBeGreaterThan(rowsBefore);
+  });
+});

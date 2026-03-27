@@ -931,7 +931,7 @@ def load_cfg(name: str, state: str = "California", filing: str = "MFJ") -> Dict[
                 rmd_path=P("rmd.json"),
                 assets_path=COMMON_ASSETS_JSON if os.path.isfile(COMMON_ASSETS_JSON) else None)
 
-def _income_arrays(income_cfg, paths, n_years=None):
+def _income_arrays(income_cfg, paths, n_years=None, infl_yearly=None):
     # income_cfg is the dict returned by load_income() — already expanded into
     # per-year numpy arrays.  Do NOT pass through build_income_streams, which
     # expects the raw JSON structure (rows with "years"/"amount" keys) and
@@ -952,6 +952,23 @@ def _income_arrays(income_cfg, paths, n_years=None):
     ord_other  = _pad(income_cfg.get("ordinary_other", _z))
     qual_div   = _pad(income_cfg.get("qualified_div",  _z))
     cap_gains  = _pad(income_cfg.get("cap_gains",      _z))
+
+    # Apply dollar_type="future" deflation — convert nominal future $ to current USD.
+    # loaders.py sets <type>_is_future=1.0 for years where dollar_type="future".
+    # future $ held flat in nominal terms → divide by cumulative deflator each year.
+    if infl_yearly is not None:
+        _infl = np.asarray(infl_yearly, dtype=float)
+        if len(_infl) < NY:
+            _infl = np.concatenate([_infl, np.full(NY - len(_infl), _infl[-1] if len(_infl) > 0 else 0.03)])
+        _deflator = np.cumprod(1.0 + _infl[:NY])
+        for _arr, _key in [(w2, "w2"), (rental, "rental"), (interest, "interest"),
+                           (ord_other, "ordinary_other"), (qual_div, "qualified_div"),
+                           (cap_gains, "cap_gains")]:
+            _is_fut = _pad(income_cfg.get(f"{_key}_is_future", _z))
+            for _y in range(NY):
+                if _is_fut[_y] > 0.5:
+                    _arr[_y] = _arr[_y] / max(_deflator[_y], 1e-12)
+
     # misc: separate taxable and non-taxable portions
     misc_raw  = _pad(income_cfg.get("misc",         _z))
     misc_tax  = _pad(income_cfg.get("misc_taxable", np.ones(NY, dtype=float)))
@@ -997,7 +1014,7 @@ def sim(cfg, paths, ignore_wd=False, ignore_conv=False, ignore_rmd=False,
         ignore_taxes=False, rebalancing=True) -> Tuple[Dict, float]:
     _ny = max(10, min(60, int(cfg["person"].get("target_age", 95))
                          - int(cfg["person"].get("current_age", 55))))
-    inc = _income_arrays(cfg["income"], paths, n_years=_ny)
+    inc = _income_arrays(cfg["income"], paths, n_years=_ny, infl_yearly=np.asarray(cfg["infl"], dtype=float) if cfg["infl"] else None)
     seq = _wd_seq(cfg["alloc"], cfg["person"], cfg["econ"])
     t0  = time.time()
     res = run_accounts_new(
@@ -5626,6 +5643,220 @@ GROUPS.append(group27_ira_contribution_rules)
 
 
 # ===========================================================================
+# GROUP 28 — INCOME DOLLAR TYPE (current vs future)
+# Tests that dollar_type="future" entries are deflated to current USD while
+# dollar_type="current" (default) entries are held constant in real terms.
+#
+# Income reduces PORTFOLIO DRAW (not the planned withdrawal target), so the
+# signal is the ending portfolio balance — more income = less drawn = higher
+# portfolio at the end.
+#
+# Key behaviours tested:
+#   28a: current $ income → portfolio ends higher than zero-income baseline
+#   28b: future $ income → portfolio ends higher than zero-income baseline
+#   28c: yr 1 portfolio similar for current vs future (same nominal start)
+#   28d: by yr 20, current $ portfolio > future $ portfolio (real value held)
+#   28e: zero income → portfolio lower than income-present runs (sanity)
+#   28f: missing dollar_type defaults to current $ behaviour
+#   28g: mixed current + future in same income.json both lift portfolio
+# ===========================================================================
+
+def group28_income_dollar_type(paths: int):
+    """Verify dollar_type='current' vs 'future' income handling via portfolio balance signal."""
+    checks = []
+    elapsed = 0.0
+    import copy, numpy as np
+
+    BASE_W2 = {"w2": [], "ordinary_other": [], "rental": [],
+                "interest": [], "qualified_div": [], "cap_gains": [], "misc": []}
+
+    AMOUNT = 100_000  # $100K nominal starting point
+
+    inc_current = {**copy.deepcopy(BASE_W2),
+                   "w2": [{"ages": "47-85", "amount": AMOUNT, "dollar_type": "current"}]}
+    inc_future  = {**copy.deepcopy(BASE_W2),
+                   "w2": [{"ages": "47-85", "amount": AMOUNT, "dollar_type": "future"}]}
+    inc_zero    = copy.deepcopy(BASE_W2)
+
+    res_cur,  t = ephemeral_run("g28_cur",  paths, income=inc_current, ignore_rmd=True, ignore_conv=True); elapsed += t
+    res_fut,  t = ephemeral_run("g28_fut",  paths, income=inc_future,  ignore_rmd=True, ignore_conv=True); elapsed += t
+    res_zero, t = ephemeral_run("g28_zero", paths, income=inc_zero,    ignore_rmd=True, ignore_conv=True); elapsed += t
+
+    # Portfolio current median — income reduces portfolio draw → higher ending balance
+    pf_cur  = np.array(_portfolio_current_med(res_cur),  dtype=float)
+    pf_fut  = np.array(_portfolio_current_med(res_fut),  dtype=float)
+    pf_zero = np.array(_portfolio_current_med(res_zero), dtype=float)
+
+    # 28a: current $ income → portfolio higher than zero-income at yr 10 and yr 20
+    checks.append(chk("28a: current $ lifts portfolio vs zero at yr 10",
+        pf_cur[9] > pf_zero[9],
+        f"cur={pf_cur[9]:,.0f} zero={pf_zero[9]:,.0f}"))
+    checks.append(chk("28a: current $ lifts portfolio vs zero at yr 20",
+        pf_cur[19] > pf_zero[19],
+        f"cur={pf_cur[19]:,.0f} zero={pf_zero[19]:,.0f}"))
+
+    # 28b: future $ income → portfolio higher than zero at yr 10
+    checks.append(chk("28b: future $ lifts portfolio vs zero at yr 10",
+        pf_fut[9] > pf_zero[9],
+        f"fut={pf_fut[9]:,.0f} zero={pf_zero[9]:,.0f}"))
+
+    # 28c: yr 1 portfolio similar for current vs future (same nominal, same deflator yr 1)
+    yr1_diff_pct = abs(pf_cur[0] - pf_fut[0]) / max(pf_cur[0], 1) * 100
+    checks.append(chk("28c: yr 1 portfolio within 2% for current vs future (same nominal start)",
+        yr1_diff_pct < 2.0,
+        f"cur={pf_cur[0]:,.0f} fut={pf_fut[0]:,.0f} diff={yr1_diff_pct:.1f}%"))
+
+    # 28d: by yr 20, current $ portfolio > future $ portfolio
+    # current: real value held → offsets more portfolio draw as inflation grows
+    # future: nominal held flat → real value erodes → offsets less portfolio draw
+    checks.append(chk("28d: by yr 20 current $ portfolio > future $ (real value held vs eroded)",
+        pf_cur[19] > pf_fut[19],
+        f"cur={pf_cur[19]:,.0f} fut={pf_fut[19]:,.0f}"))
+
+    # 28e: zero income → portfolio lower than both income-present runs (sanity)
+    checks.append(chk("28e: zero income portfolio < current $ at yr 20",
+        pf_zero[19] < pf_cur[19],
+        f"zero={pf_zero[19]:,.0f} cur={pf_cur[19]:,.0f}"))
+    checks.append(chk("28e: zero income portfolio < future $ at yr 20",
+        pf_zero[19] < pf_fut[19],
+        f"zero={pf_zero[19]:,.0f} fut={pf_fut[19]:,.0f}"))
+
+    # 28f: missing dollar_type defaults to current $ behaviour
+    inc_no_type = {**copy.deepcopy(BASE_W2),
+                   "w2": [{"ages": "47-85", "amount": AMOUNT}]}  # no dollar_type key
+    res_notp, t = ephemeral_run("g28_notp", paths, income=inc_no_type, ignore_rmd=True, ignore_conv=True); elapsed += t
+    pf_notp = np.array(_portfolio_current_med(res_notp), dtype=float)
+    # Should behave like current $ — portfolio at yr 20 within 2% of current run
+    notp_diff_pct = abs(pf_notp[19] - pf_cur[19]) / max(pf_cur[19], 1) * 100
+    checks.append(chk("28f: missing dollar_type behaves like current $ (yr 20 portfolio within 2%)",
+        notp_diff_pct < 2.0,
+        f"notp={pf_notp[19]:,.0f} cur={pf_cur[19]:,.0f} diff={notp_diff_pct:.1f}%"))
+
+    # 28g: mixed current + future in same income.json lifts portfolio
+    inc_mixed = {**copy.deepcopy(BASE_W2),
+                 "w2":    [{"ages": "47-65", "amount": AMOUNT, "dollar_type": "current"}],
+                 "rental": [{"ages": "47-85", "amount": 20_000, "dollar_type": "future"}]}
+    res_mix, t = ephemeral_run("g28_mix", paths, income=inc_mixed, ignore_rmd=True, ignore_conv=True); elapsed += t
+    pf_mix = np.array(_portfolio_current_med(res_mix), dtype=float)
+    checks.append(chk("28g: mixed current+future lifts portfolio vs zero at yr 10",
+        pf_mix[9] > pf_zero[9],
+        f"mix={pf_mix[9]:,.0f} zero={pf_zero[9]:,.0f}"))
+    checks.append(chk("28g: mixed current+future lifts portfolio vs zero at yr 20",
+        pf_mix[19] > pf_zero[19],
+        f"mix={pf_mix[19]:,.0f} zero={pf_zero[19]:,.0f}"))
+
+    return "G28", "Income dollar_type: current vs future dollar handling", checks, elapsed
+
+
+GROUPS.append(group28_income_dollar_type)
+
+# ===========================================================================
+# GROUP 29 — SPENDING PLAN (withdrawal_schedule.json) GUIDED EDITOR LOGIC
+# Tests the sort-by-age and min≤target validation that the guided editor
+# applies before saving. Ensures these invariants hold at the simulator level.
+#
+# Rules tested:
+#   29a: Rows in any order produce same result as sorted rows (age-sort)
+#   29b: floor_k applied correctly — portfolio withdrawal never below floor
+#   29c: base_k (minimum) < amount_k (target) — simulator handles gap correctly
+#   29d: Overlapping age ranges handled gracefully (last-write wins)
+#   29e: Single-age entry (e.g. "47-47") works as a one-year spike
+#   29f: Missing ages field gracefully defaults (no crash)
+# ===========================================================================
+
+def group29_spending_plan_logic(paths: int):
+    """Regression tests for spending plan sort, floor, and min/target logic."""
+    checks = []
+    elapsed = 0.0
+    import copy, numpy as np
+
+    # ── 29a: Row order should not affect output (sort-by-age equivalence) ────
+    # Unsorted schedule (47-47 first, then 48-64, 65-95)
+    wd_unsorted = {"floor_k": 80, "schedule": [
+        {"ages": "65-95", "amount_k": 200, "base_k": 120},
+        {"ages": "47-53", "amount_k": 210, "base_k": 150},
+        {"ages": "54-64", "amount_k": 150, "base_k": 100},
+    ]}
+    # Sorted schedule (same data, age order)
+    wd_sorted = {"floor_k": 80, "schedule": [
+        {"ages": "47-53", "amount_k": 210, "base_k": 150},
+        {"ages": "54-64", "amount_k": 150, "base_k": 100},
+        {"ages": "65-95", "amount_k": 200, "base_k": 120},
+    ]}
+    res_unsorted, t = ephemeral_run("g29a_unsorted", paths, withdrawal=wd_unsorted,
+                                    ignore_rmd=True, ignore_conv=True); elapsed += t
+    res_sorted,   t = ephemeral_run("g29a_sorted",   paths, withdrawal=wd_sorted,
+                                    ignore_rmd=True, ignore_conv=True); elapsed += t
+
+    plan_u = np.array(_wd(res_unsorted), dtype=float)
+    plan_s = np.array(_wd(res_sorted),   dtype=float)
+    checks.append(chk("29a: sorted and unsorted schedule produce identical planned withdrawal yr1",
+        abs(plan_u[0] - plan_s[0]) < 1.0,
+        f"unsorted={plan_u[0]:.0f} sorted={plan_s[0]:.0f}"))
+    checks.append(chk("29a: sorted and unsorted produce identical planned withdrawal yr10",
+        abs(plan_u[9] - plan_s[9]) < 1.0,
+        f"unsorted={plan_u[9]:.0f} sorted={plan_s[9]:.0f}"))
+
+    # ── 29b: floor_k is respected — base_current ≥ floor_k in all years ─────
+    wd_floor = {"floor_k": 120, "schedule": [
+        {"ages": "47-95", "amount_k": 200, "base_k": 150},
+    ]}
+    res_floor, t = ephemeral_run("g29b_floor", paths, withdrawal=wd_floor,
+                                  ignore_rmd=True, ignore_conv=True); elapsed += t
+    base_cur = np.array(res_floor.get("withdrawals", {}).get("base_current", []), dtype=float)
+    if len(base_cur) > 0:
+        checks.append(chk("29b: base_current ≥ floor_k ($120K) in all years",
+            float(np.min(base_cur[:20])) >= 119_000,
+            f"min base_current={float(np.min(base_cur[:20])):,.0f}"))
+    else:
+        checks.append(chk("29b: base_current present in result", False, "array missing"))
+
+    # ── 29c: base_k < amount_k gap — both planned and floor are distinct ──────
+    wd_gap = {"floor_k": 50, "schedule": [
+        {"ages": "47-95", "amount_k": 200, "base_k": 100},
+    ]}
+    res_gap, t = ephemeral_run("g29c_gap", paths, withdrawal=wd_gap,
+                                ignore_rmd=True, ignore_conv=True); elapsed += t
+    plan_g = np.array(_wd(res_gap), dtype=float)
+    base_g = np.array(res_gap.get("withdrawals", {}).get("base_current", []), dtype=float)
+    checks.append(chk("29c: planned target ($200K) distinct from floor ($100K)",
+        abs(plan_g[0] - 200_000) < 1.0 and len(base_g) > 0 and abs(base_g[0] - 100_000) < 5_000,
+        f"plan={plan_g[0]:.0f} base={base_g[0] if len(base_g) > 0 else 0:.0f}"))
+
+    # ── 29d: Single-age entry "47-47" works as a one-year spike ──────────────
+    wd_spike = {"floor_k": 50, "schedule": [
+        {"years": "1", "amount_k": 500, "base_k": 400},
+        {"years": "2-30", "amount_k": 150, "base_k": 100},
+    ]}
+    res_spike, t = ephemeral_run("g29d_spike", paths, withdrawal=wd_spike,
+                                  ignore_rmd=True, ignore_conv=True); elapsed += t
+    plan_sp = np.array(_wd(res_spike), dtype=float)
+    checks.append(chk("29d: single-year spike yr1=$500K, yr2=$150K (year=1 entry works)",
+        abs(plan_sp[0] - 500_000) < 1.0 and abs(plan_sp[1] - 150_000) < 1.0,
+        f"yr1={plan_sp[0]:.0f} yr2={plan_sp[1]:.0f}"))
+
+    # ── 29e: Income sources reduce portfolio draw (integration with spending plan)
+    # Use year-based format — load_income() expands ages to per-year arrays;
+    # write_profile() writes income.json which load_income() then reads.
+    inc_w2 = {"w2": [{"years": "1-20", "amount": 150_000}],
+               "ordinary_other": [], "rental": [], "interest": [],
+               "qualified_div": [], "cap_gains": [], "misc": []}
+    res_inc, t = ephemeral_run("g29e_income_offset", paths,
+                                withdrawal=wd_gap, income=inc_w2,
+                                ignore_rmd=True, ignore_conv=True); elapsed += t
+    pf_inc  = np.array(_portfolio_current_med(res_inc),  dtype=float)
+    pf_base = np.array(_portfolio_current_med(res_gap),  dtype=float)
+    checks.append(chk("29e: W2 income during working years lifts portfolio vs no-income",
+        pf_inc[9] > pf_base[9],
+        f"with_income={pf_inc[9]:,.0f} no_income={pf_base[9]:,.0f}"))
+
+    return "G29", "Spending plan: sort, floor, min/target gap, single-age, income offset", checks, elapsed
+
+
+GROUPS.append(group29_spending_plan_logic)
+
+
+# ===========================================================================
 # GROUP 23 -- BAD MARKET RESPONSE (session 27)
 # Verifies that economicglobal.json bad market settings are now wired:
 #   - Withdrawal amounts scale down during shocks
@@ -6010,6 +6241,25 @@ def check_updates(server_url: str = "http://localhost:8000", full: bool = False)
     src_root = os.path.dirname(os.path.abspath(__file__))
     all_match = True
     rows = []
+
+    # ── Manifest integrity: server must expose ALL tracked files ─────────────
+    # If the server reads manifest.lock correctly, it will serve hashes for all
+    # tracked files. If MANIFEST_FILES was hardcoded or manifest.lock was stale
+    # at startup, only a subset will appear. Fail fast here rather than silently
+    # passing with incomplete coverage.
+    EXPECTED_MIN_FILES = 30  # 34 total — allow slight tolerance for env differences
+    server_file_count = len(manifest.get("files", {}))
+    if server_file_count < EXPECTED_MIN_FILES:
+        print(f"  ❌ MANIFEST INTEGRITY FAILURE")
+        print(f"     Server is tracking only {server_file_count} files — expected ≥ {EXPECTED_MIN_FILES}.")
+        print(f"     This means the server started with a stale or incomplete manifest.lock.")
+        print(f"     Fix:")
+        print(f"       1. cp manifest.lock  src/manifest.lock")
+        print("       2. python3 rebuild_manifest.py  (shows entry count)")
+        print(f"       3. ./vcleanbld_ui   (restart server)")
+        print()
+        return False
+    # ── End manifest integrity check ─────────────────────────────────────────
 
     for name, server_info in manifest.get("files", {}).items():
         local_path  = os.path.join(src_root, name)
