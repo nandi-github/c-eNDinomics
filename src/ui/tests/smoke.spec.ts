@@ -35,7 +35,7 @@ const COLS = {
   accountBalances:   5,
   portfolio:        12,
   withdrawals:      14,
-  taxes:             9,
+  taxes:            10,  // +1 IRMAA column added v6.3
 };
 
 // ─── Scenario definitions ─────────────────────────────────────────────────────
@@ -444,7 +444,7 @@ test.describe("UI structure tests [PlaywrightTest]", () => {
     }
   });
 
-  test("Taxes: 9 cols, n_years rows, eff rate ≤ 100%", async ({ page }) => {
+  test("Taxes: 10 cols, n_years rows, eff rate ≤ 100%", async ({ page }) => {
     await loadResults(page, UI_PROFILE, uiRunId);
     const table = page.locator("section.results-section", { hasText: "Taxes by Type" }).locator("table.table");
     expect(await colCount(table), "Taxes cols").toBe(COLS.taxes);
@@ -452,7 +452,7 @@ test.describe("UI structure tests [PlaywrightTest]", () => {
     expect(cells.length, `Taxes rows = ${uiN}`).toBe(uiN);
     assertNoBad(cells, "Taxes");
     for (let i = 0; i < cells.length; i++) {
-      const r = parsePct(cells[i][8]);
+      const r = parsePct(cells[i][9]);  // eff rate now at col 9 (IRMAA inserted at col 6)
       if (r !== null) {
         expect(r, `eff_rate[${i}] ≤ 100%`).toBeLessThanOrEqual(100);
         expect(r, `eff_rate[${i}] ≥ 0%`).toBeGreaterThanOrEqual(0);

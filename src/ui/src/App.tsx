@@ -1041,48 +1041,155 @@ const AllocationGuidedEditor: React.FC<PersonJsonEditorProps> = ({ parsed, reado
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState("");
   const [success, setSuccess] = React.useState("");
-  const [activeAcct, setActiveAcct] = React.useState<string | null>(null);
   React.useEffect(() => { setDraft(JSON.parse(JSON.stringify(parsed))); }, [JSON.stringify(parsed)]);
 
+  const ASSET_CLASSES = ["US_STOCKS","INTL_STOCKS","GOLD","COMMOD","LONG_TREAS","INT_TREAS","TIPS","CASH"];
   const ACCT_TYPES = ["taxable","traditional_ira","roth_ira"];
   const ACCT_TYPE_LABELS: Record<string,string> = { taxable: "Taxable Brokerage", traditional_ira: "Traditional IRA (pre-tax)", roth_ira: "Roth IRA (post-tax)" };
   const ACCT_TYPE_COLORS: Record<string,string> = { taxable: "#1d4ed8", traditional_ira: "#b45309", roth_ira: "#15803d" };
+  const ACCT_TYPE_BG: Record<string,string> = { taxable: "#eff6ff", traditional_ira: "#fffbeb", roth_ira: "#f0fdf4" };
+  const CLASS_SHORT: Record<string,string> = { US_STOCKS:"US Stocks", INTL_STOCKS:"Intl Stocks", GOLD:"Gold", COMMOD:"Commodities", LONG_TREAS:"Long Treas", INT_TREAS:"Interm Treas", TIPS:"TIPS", CASH:"Cash" };
+
+  // ── State helpers ─────────────────────────────────────────────────────────
+  const upd = (fn: (n: any) => void) => setDraft((p: any) => { const n = JSON.parse(JSON.stringify(p)); fn(n); return n; });
+
+  // ── Account CRUD ──────────────────────────────────────────────────────────
+  const addAccount = () => {
+    const name = `NEW_ACCOUNT_${Date.now()}`;
+    upd(n => {
+      n.accounts = [...(n.accounts || []), { name, type: "taxable" }];
+      n.starting = { ...(n.starting || {}), [name]: 0 };
+      n.global_allocation = n.global_allocation || {};
+      n.global_allocation[name] = { portfolios: { GROWTH: { weight_pct: 100, classes_pct: { US_STOCKS: 100 }, holdings_pct: {} } } };
+    });
+  };
+  const deleteAccount = (name: string) => {
+    if (!window.confirm(`Delete account "${name}" and its allocation?`)) return;
+    upd(n => {
+      n.accounts = (n.accounts || []).filter((a: any) => a.name !== name);
+      delete n.starting?.[name];
+      delete n.global_allocation?.[name];
+      (n.deposits_yearly || []).forEach((row: any) => delete row[name]);
+    });
+  };
+  const updateAcctType = (name: string, type: string) => upd(n => {
+    const a = (n.accounts || []).find((x: any) => x.name === name);
+    if (a) a.type = type;
+  });
+
+  // ── Portfolio bucket CRUD ─────────────────────────────────────────────────
+  const addBucket = (acct: string) => {
+    const pname = `BUCKET_${Date.now()}`;
+    upd(n => {
+      n.global_allocation = n.global_allocation || {};
+      n.global_allocation[acct] = n.global_allocation[acct] || { portfolios: {} };
+      n.global_allocation[acct].portfolios[pname] = { weight_pct: 0, classes_pct: { US_STOCKS: 100 }, holdings_pct: {} };
+    });
+  };
+  const deleteBucket = (acct: string, pname: string) => upd(n => { delete n.global_allocation?.[acct]?.portfolios?.[pname]; });
+  const updateBucketWeight = (acct: string, pname: string, val: number) => upd(n => {
+    if (n.global_allocation?.[acct]?.portfolios?.[pname]) n.global_allocation[acct].portfolios[pname].weight_pct = val;
+  });
+
+  // ── Class CRUD ────────────────────────────────────────────────────────────
+  const addClass = (acct: string, pname: string) => upd(n => {
+    const pf = n.global_allocation?.[acct]?.portfolios?.[pname]; if (!pf) return;
+    const used = new Set(Object.keys(pf.classes_pct || {}));
+    const next = ASSET_CLASSES.find(c => !used.has(c));
+    if (next) { pf.classes_pct = { ...(pf.classes_pct || {}), [next]: 0 }; pf.holdings_pct = pf.holdings_pct || {}; pf.holdings_pct[next] = []; }
+  });
+  const deleteClass = (acct: string, pname: string, cls: string) => upd(n => {
+    const pf = n.global_allocation?.[acct]?.portfolios?.[pname]; if (!pf) return;
+    delete pf.classes_pct?.[cls]; delete pf.holdings_pct?.[cls];
+  });
+  const updateClassPct = (acct: string, pname: string, cls: string, val: number) => upd(n => {
+    const pf = n.global_allocation?.[acct]?.portfolios?.[pname];
+    if (pf?.classes_pct) pf.classes_pct[cls] = val;
+  });
+  const changeClass = (acct: string, pname: string, oldCls: string, newCls: string) => {
+    if (!newCls || newCls === oldCls) return;
+    upd(n => {
+      const pf = n.global_allocation?.[acct]?.portfolios?.[pname]; if (!pf) return;
+      const pct = pf.classes_pct?.[oldCls] ?? 0;
+      delete pf.classes_pct?.[oldCls];
+      pf.classes_pct = pf.classes_pct || {}; pf.classes_pct[newCls] = pct;
+      if (pf.holdings_pct?.[oldCls]) { pf.holdings_pct[newCls] = pf.holdings_pct[oldCls]; delete pf.holdings_pct[oldCls]; }
+    });
+  };
+
+  // ── Ticker CRUD ───────────────────────────────────────────────────────────
+  const addTicker = (acct: string, pname: string, cls: string) => upd(n => {
+    const pf = n.global_allocation?.[acct]?.portfolios?.[pname]; if (!pf) return;
+    pf.holdings_pct = pf.holdings_pct || {}; pf.holdings_pct[cls] = [...(pf.holdings_pct[cls] || []), { ticker: "", pct: 0 }];
+  });
+  const deleteTicker = (acct: string, pname: string, cls: string, idx: number) => upd(n => {
+    const pf = n.global_allocation?.[acct]?.portfolios?.[pname];
+    if (pf?.holdings_pct?.[cls]) pf.holdings_pct[cls] = pf.holdings_pct[cls].filter((_: any, i: number) => i !== idx);
+  });
+  const updateTicker = (acct: string, pname: string, cls: string, idx: number, field: string, val: any) => upd(n => {
+    const pf = n.global_allocation?.[acct]?.portfolios?.[pname];
+    if (pf?.holdings_pct?.[cls]?.[idx] !== undefined) pf.holdings_pct[cls][idx][field] = val;
+  });
+
+  // ── Validation ────────────────────────────────────────────────────────────
+  const bucketWeightSum = (acct: string) => {
+    const ports = draft.global_allocation?.[acct]?.portfolios || {};
+    return Object.values(ports).reduce((s: number, p: any) => s + Number(p.weight_pct || 0), 0);
+  };
+  const classPctSum = (acct: string, pname: string) => {
+    const cls = draft.global_allocation?.[acct]?.portfolios?.[pname]?.classes_pct || {};
+    return Object.values(cls).reduce((s: number, v: any) => s + Number(v || 0), 0);
+  };
+  const validate = (): string => {
+    for (const acct of (draft.accounts || [])) {
+      const wSum = bucketWeightSum(acct.name);
+      if (Math.abs(wSum - 100) > 0.5) return `${acct.name}: bucket weights sum to ${wSum.toFixed(1)}% — must be 100%`;
+      const ports = draft.global_allocation?.[acct.name]?.portfolios || {};
+      for (const [pname, pdata] of Object.entries(ports as Record<string, any>)) {
+        const cSum = classPctSum(acct.name, pname);
+        if (cSum > 0 && Math.abs(cSum - 100) > 0.5) return `${acct.name}/${pname}: class % sums to ${cSum.toFixed(1)}% — must be 100%`;
+      }
+    }
+    return "";
+  };
+
+  const save = async () => {
+    const err = validate(); if (err) { setError(err); return; }
+    setSaving(true); setError("");
+    try { await onSave(draft, "guided: allocation saved"); setSuccess("Saved ✓"); setTimeout(() => setSuccess(""), 2500); }
+    catch (e: any) { setError(String(e?.message || e)); }
+    finally { setSaving(false); }
+  };
+
+  // ── Inline components ─────────────────────────────────────────────────────
+  const SumBadge = ({ sum, target = 100 }: { sum: number; target?: number }) => {
+    const ok = Math.abs(sum - target) <= 0.5;
+    return <span style={{ fontSize: 11, padding: "2px 7px", borderRadius: 10, background: ok ? "#f0fdf4" : "#fef2f2", color: ok ? "#15803d" : "#b91c1c", fontWeight: 600, marginLeft: 6 }}>
+      {sum.toFixed(1)}% {ok ? "✓" : `(need ${(target - sum).toFixed(1)}% more)`}
+    </span>;
+  };
 
   const accounts: any[] = draft.accounts || [];
   const starting: any = draft.starting || {};
   const deposits: any[] = draft.deposits_yearly || [];
-
-  const setStarting = (name: string, val: number) => {
-    setDraft((p: any) => { const n = JSON.parse(JSON.stringify(p)); n.starting = { ...n.starting, [name]: val }; return n; });
-  };
-  const setDeposit = (rowIdx: number, acct: string, val: number) => {
-    setDraft((p: any) => { const n = JSON.parse(JSON.stringify(p)); n.deposits_yearly[rowIdx][acct] = val; return n; });
-  };
-
-  const save = async () => {
-    setSaving(true); setError("");
-    try {
-      await onSave(draft, "guided: allocation saved");
-      setSuccess("Saved ✓"); setTimeout(() => setSuccess(""), 2500);
-    } catch (e: any) { setError(String(e?.message || e)); }
-    finally { setSaving(false); }
-  };
-
   const totalBalance = Object.values(starting).reduce((s: number, v: any) => s + Number(v || 0), 0);
 
   return (
     <GuidedShell draft={draft} parsed={parsed} saving={saving} error={error} success={success} readonly={readonly} onSave={save} onDiscard={() => setDraft(JSON.parse(JSON.stringify(parsed)))}>
 
-      {/* ── Section 1: Account balances ── */}
-      <div style={sectionHdr}>Accounts & Starting Balances</div>
-      <div style={descBox}>Current balances as of today. Traditional IRA is fully pre-tax — the government has a claim on every dollar. Roth is post-tax — withdrawals are tax-free. Brokerage gains may have embedded capital gains (cost basis not modeled).</div>
+      {/* ══ SECTION 1: Accounts & Starting Balances ══════════════════════════ */}
+      <div style={sectionHdr}>Accounts &amp; Starting Balances</div>
+      <div style={descBox}>
+        Current balances as of today. <strong>Traditional IRA</strong> = pre-tax (government has a claim on every dollar). <strong>Roth IRA</strong> = post-tax (qualified withdrawals tax-free). <strong>Taxable</strong> = brokerage with embedded capital gains.
+      </div>
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>
           <tr>
-            <th style={{ ...tblHeader, width: "28%" }}>Account</th>
-            <th style={{ ...tblHeader, width: "25%" }}>Type</th>
-            <th style={{ ...tblHeader, width: "35%" }}>Starting Balance ($)</th>
-            <th style={{ ...tblHeader, width: "12%" }}>% of Total</th>
+            <th style={{ ...tblHeader, width: "26%" }}>Account Name</th>
+            <th style={{ ...tblHeader, width: "27%" }}>Account Type</th>
+            <th style={{ ...tblHeader, width: "30%" }}>Starting Balance ($)</th>
+            <th style={{ ...tblHeader, width: "9%" }}>% of Total</th>
+            <th style={{ ...tblHeader, width: "8%" }}>{!readonly && <span style={{ color: "#e5e7eb" }}>Delete</span>}</th>
           </tr>
         </thead>
         <tbody>
@@ -1090,38 +1197,241 @@ const AllocationGuidedEditor: React.FC<PersonJsonEditorProps> = ({ parsed, reado
             const bal = Number(starting[acct.name] || 0);
             const pct = totalBalance > 0 ? ((bal / totalBalance) * 100).toFixed(1) : "0";
             return (
-              <tr key={acct.name} style={{ background: activeAcct === acct.name ? "#f8faff" : "transparent" }}
-                onClick={() => setActiveAcct(activeAcct === acct.name ? null : acct.name)}>
-                <td style={{ ...tblCell, fontWeight: 500, color: ACCT_TYPE_COLORS[acct.type] }}>{acct.name}</td>
-                <td style={{ ...tblCell, fontSize: 12, color: "#6b7280" }}>{ACCT_TYPE_LABELS[acct.type] || acct.type}</td>
+              <tr key={acct.name}>
+                <td style={{ ...tblCell, fontWeight: 600, color: ACCT_TYPE_COLORS[acct.type] }}>{acct.name}</td>
+                <td style={tblCell}>
+                  {!readonly
+                    ? <select value={acct.type} onChange={e => updateAcctType(acct.name, e.target.value)}
+                        style={{ ...tblInput, fontSize: 12, color: ACCT_TYPE_COLORS[acct.type] }}>
+                        {ACCT_TYPES.map(t => <option key={t} value={t}>{ACCT_TYPE_LABELS[t]}</option>)}
+                      </select>
+                    : <span style={{ fontSize: 12, color: "#6b7280" }}>{ACCT_TYPE_LABELS[acct.type] || acct.type}</span>}
+                </td>
                 <td style={tblCell}>
                   <input type="number" value={bal} readOnly={readonly}
-                    onClick={e => e.stopPropagation()}
-                    onChange={e => setStarting(acct.name, Number(e.target.value))}
+                    onChange={e => upd(n => { n.starting = { ...(n.starting || {}), [acct.name]: Number(e.target.value) }; })}
                     style={{ ...tblInput, width: 160 }} />
                 </td>
                 <td style={{ ...tblCell, fontSize: 12, color: "#9ca3af" }}>{pct}%</td>
+                <td style={tblCell}>
+                  {!readonly && (
+                    <button onClick={() => deleteAccount(acct.name)}
+                      style={{ padding: "3px 9px", fontSize: 12, background: "#fef2f2", color: "#b91c1c", border: "1px solid #fca5a5", borderRadius: 5, cursor: "pointer" }}
+                      title={`Delete ${acct.name}`}>✕ Delete</button>
+                  )}
+                </td>
               </tr>
             );
           })}
           <tr style={{ background: "#f3f4f6" }}>
             <td colSpan={2} style={{ ...tblCell, fontWeight: 700 }}>Total Portfolio</td>
             <td style={{ ...tblCell, fontWeight: 700 }}>${totalBalance.toLocaleString()}</td>
-            <td style={{ ...tblCell, fontWeight: 700 }}>100%</td>
+            <td colSpan={2} style={{ ...tblCell, fontWeight: 700 }}>100%</td>
           </tr>
         </tbody>
       </table>
+      {!readonly && (
+        <div style={{ padding: "10px 16px", display: "flex", gap: 8 }}>
+          {ACCT_TYPES.map(atype => (
+            <button key={atype} onClick={() => {
+              const name = atype.toUpperCase().replace("_", "-") + `-${Date.now().toString().slice(-3)}`;
+              upd(n => {
+                n.accounts = [...(n.accounts || []), { name, type: atype }];
+                n.starting = { ...(n.starting || {}), [name]: 0 };
+                n.global_allocation = n.global_allocation || {};
+                n.global_allocation[name] = { portfolios: { GROWTH: { weight_pct: 100, classes_pct: { US_STOCKS: 100 }, holdings_pct: { US_STOCKS: [] } } } };
+              });
+            }} style={{ padding: "5px 12px", fontSize: 12, background: ACCT_TYPE_BG[atype], color: ACCT_TYPE_COLORS[atype], border: `1px solid ${ACCT_TYPE_COLORS[atype]}44`, borderRadius: 6, cursor: "pointer", fontWeight: 500 }}>
+              + Add {ACCT_TYPE_LABELS[atype]}
+            </button>
+          ))}
+        </div>
+      )}
 
-      {/* ── Section 2: Annual deposits ── */}
+      {/* ══ SECTION 2: Default Asset Allocation ══════════════════════════════ */}
+      <div style={sectionHdr}>Default Asset Allocation</div>
+      <div style={descBox}>
+        Per-account allocation applied to all simulation years not covered by an override. Each account has one or more <strong>portfolio buckets</strong> — bucket weights must sum to 100%. Within each bucket, <strong>asset class percentages</strong> must also sum to 100%. <strong>Tickers</strong> are optional look-through labels for portfolio analysis (display only — not used by the Monte Carlo engine).
+      </div>
+
+      {accounts.map((acct: any) => {
+        const color = ACCT_TYPE_COLORS[acct.type] || "#374151";
+        const bg    = ACCT_TYPE_BG[acct.type]    || "#f8faff";
+        const ports = draft.global_allocation?.[acct.name]?.portfolios || {};
+        const portEntries = Object.entries(ports as Record<string, any>);
+        const wSum = bucketWeightSum(acct.name);
+
+        return (
+          <div key={acct.name} style={{ margin: "0 16px 14px", border: `2px solid ${color}33`, borderRadius: 8, overflow: "hidden" }}>
+            {/* Account header */}
+            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", background: bg, borderBottom: `1px solid ${color}22` }}>
+              <span style={{ fontSize: 14, fontWeight: 700, color, flex: 1 }}>{acct.name}</span>
+              <span style={{ fontSize: 11, color: "#9ca3af" }}>{ACCT_TYPE_LABELS[acct.type]}</span>
+              <span style={{ fontSize: 11, color: "#9ca3af" }}>·</span>
+              <span style={{ fontSize: 11, color: "#9ca3af" }}>{portEntries.length} bucket{portEntries.length !== 1 ? "s" : ""}</span>
+              <SumBadge sum={wSum} />
+            </div>
+
+            {/* Portfolio buckets */}
+            <div style={{ background: "#fff" }}>
+              {portEntries.map(([pname, pdata]: [string, any]) => {
+                const cSum = classPctSum(acct.name, pname);
+                const clsEntries = Object.entries(pdata.classes_pct || {} as Record<string, any>);
+                const usedClasses = new Set(Object.keys(pdata.classes_pct || {}));
+
+                return (
+                  <div key={pname} style={{ margin: "10px 12px", border: "1px solid #e5e7eb", borderRadius: 7, overflow: "hidden" }}>
+                    {/* Bucket header */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "#f8fafc", borderBottom: "1px solid #e5e7eb" }}>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: "#374151", flex: 1 }}>{pname}</span>
+                      <span style={{ fontSize: 12, color: "#6b7280" }}>Bucket weight:</span>
+                      {!readonly
+                        ? <input type="number" value={pdata.weight_pct ?? 0} min={0} max={100}
+                            onChange={e => updateBucketWeight(acct.name, pname, Number(e.target.value))}
+                            style={{ ...tblInput, width: 56, fontSize: 13, fontWeight: 600, textAlign: "right" as const }} />
+                        : <span style={{ fontSize: 13, fontWeight: 700 }}>{pdata.weight_pct}%</span>}
+                      <span style={{ fontSize: 12, color: "#9ca3af" }}>%</span>
+                      {cSum > 0 && <SumBadge sum={cSum} />}
+                      {!readonly && (
+                        <button onClick={() => { if (window.confirm(`Delete bucket "${pname}"?`)) deleteBucket(acct.name, pname); }}
+                          style={{ padding: "2px 7px", fontSize: 11, background: "#fef2f2", color: "#b91c1c", border: "1px solid #fca5a5", borderRadius: 4, cursor: "pointer", marginLeft: 4 }}>
+                          ✕
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Classes + Tickers table */}
+                    <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                      <thead>
+                        <tr>
+                          <th style={{ ...tblHeader, width: "22%", fontSize: 10 }}>Asset Class</th>
+                          <th style={{ ...tblHeader, width: "12%", fontSize: 10 }}>% of Bucket</th>
+                          <th style={{ ...tblHeader, fontSize: 10 }}>
+                            Tickers <span style={{ fontWeight: 400, color: "#9ca3af" }}>(optional — for look-through analysis)</span>
+                          </th>
+                          <th style={{ ...tblHeader, width: "5%", fontSize: 10 }}></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {clsEntries.map(([cls, pct]: [string, any]) => {
+                          const holdings: any[] = pdata.holdings_pct?.[cls] || [];
+                          const tSum = holdings.reduce((s: number, h: any) => s + Number(h.pct || 0), 0);
+                          return (
+                            <tr key={cls} style={{ borderBottom: "1px solid #f0f0f0", verticalAlign: "top" }}>
+                              {/* Class selector */}
+                              <td style={{ ...tblCell, paddingTop: 8 }}>
+                                {!readonly
+                                  ? <select value={cls} onChange={e => changeClass(acct.name, pname, cls, e.target.value)}
+                                      style={{ ...tblInput, fontSize: 12 }}>
+                                      {ASSET_CLASSES.map(c => (
+                                        <option key={c} value={c} disabled={usedClasses.has(c) && c !== cls}>{CLASS_SHORT[c] || c}</option>
+                                      ))}
+                                    </select>
+                                  : <span style={{ fontSize: 12, fontWeight: 500 }}>{CLASS_SHORT[cls] || cls}</span>}
+                              </td>
+                              {/* Class % */}
+                              <td style={{ ...tblCell, paddingTop: 8 }}>
+                                {!readonly
+                                  ? <input type="number" value={Number(pct)} min={0} max={100}
+                                      onChange={e => updateClassPct(acct.name, pname, cls, Number(e.target.value))}
+                                      style={{ ...tblInput, width: 58, fontWeight: 600, textAlign: "right" as const }} />
+                                  : <span style={{ fontSize: 12, fontWeight: 600 }}>{Number(pct)}%</span>}
+                              </td>
+                              {/* Tickers */}
+                              <td style={{ ...tblCell, paddingTop: 6 }}>
+                                <div style={{ display: "flex", flexWrap: "wrap" as const, gap: 5, alignItems: "center" }}>
+                                  {holdings.length === 0 && (
+                                    <span style={{ fontSize: 11, color: "#d1d5db", fontStyle: "italic" }}>no tickers</span>
+                                  )}
+                                  {holdings.map((h: any, hidx: number) => (
+                                    <div key={hidx} style={{ display: "flex", alignItems: "center", gap: 3, background: "#f0f4ff", border: "1px solid #c7d2fe", borderRadius: 5, padding: "3px 7px" }}>
+                                      {!readonly ? (
+                                        <>
+                                          <input value={h.ticker ?? ""} placeholder="VTI"
+                                            onChange={e => updateTicker(acct.name, pname, cls, hidx, "ticker", e.target.value.toUpperCase().trim())}
+                                            style={{ ...tblInput, width: 52, fontSize: 12, fontWeight: 600, color: "#1d4ed8", padding: "1px 4px", textTransform: "uppercase" as const }} />
+                                          <input type="number" value={h.pct ?? 0} min={0} max={100} title="% within this class"
+                                            onChange={e => updateTicker(acct.name, pname, cls, hidx, "pct", Number(e.target.value))}
+                                            style={{ ...tblInput, width: 40, fontSize: 12, padding: "1px 4px" }} />
+                                          <span style={{ fontSize: 10, color: "#6b7280" }}>%</span>
+                                          <button onClick={() => deleteTicker(acct.name, pname, cls, hidx)}
+                                            style={{ fontSize: 10, color: "#9ca3af", background: "none", border: "none", cursor: "pointer", padding: "0 2px", lineHeight: 1 }}>✕</button>
+                                        </>
+                                      ) : (
+                                        <span style={{ fontSize: 12, fontWeight: 600, color: "#1d4ed8" }}>{h.ticker} <span style={{ fontWeight: 400, color: "#6b7280" }}>{h.pct}%</span></span>
+                                      )}
+                                    </div>
+                                  ))}
+                                  {!readonly && (
+                                    <button onClick={() => addTicker(acct.name, pname, cls)}
+                                      style={{ fontSize: 11, padding: "3px 8px", background: "none", border: "1px dashed #93c5fd", borderRadius: 5, cursor: "pointer", color: "#3b82f6", whiteSpace: "nowrap" as const }}>
+                                      + ticker
+                                    </button>
+                                  )}
+                                </div>
+                                {tSum > 0 && Math.abs(tSum - 100) > 0.5 && (
+                                  <div style={{ fontSize: 10, color: "#f59e0b", marginTop: 2 }}>⚠ ticker % sum {tSum.toFixed(0)}% ≠ 100 (display only)</div>
+                                )}
+                              </td>
+                              {/* Delete class */}
+                              <td style={{ ...tblCell, paddingTop: 8, textAlign: "center" as const }}>
+                                {!readonly && (
+                                  <button onClick={() => deleteClass(acct.name, pname, cls)}
+                                    style={{ padding: "2px 6px", fontSize: 11, background: "none", border: "1px solid #e5e7eb", borderRadius: 4, cursor: "pointer", color: "#9ca3af" }}
+                                    title="Remove this class">✕</button>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+
+                    {/* Add class */}
+                    {!readonly && usedClasses.size < ASSET_CLASSES.length && (
+                      <div style={{ padding: "8px 12px", borderTop: "1px solid #f0f0f0" }}>
+                        <button onClick={() => addClass(acct.name, pname)} style={{ ...tblAddBtn, fontSize: 11 }}>+ Add asset class</button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+
+              {/* Weight sum error */}
+              {Math.abs(wSum - 100) > 0.5 && (
+                <div style={{ margin: "4px 12px 10px", padding: "7px 10px", background: "#fef2f2", borderRadius: 6, fontSize: 12, color: "#b91c1c", borderLeft: "3px solid #b91c1c" }}>
+                  ⚠ Bucket weights for {acct.name} sum to {wSum.toFixed(1)}% — must equal exactly 100% before saving
+                </div>
+              )}
+
+              {/* Add bucket */}
+              {!readonly && (
+                <div style={{ padding: "8px 12px 12px" }}>
+                  <button onClick={() => addBucket(acct.name)} style={tblAddBtn}>+ Add portfolio bucket</button>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })}
+
+      {/* ══ SECTION 3: Annual Contributions ══════════════════════════════════ */}
       <div style={sectionHdr}>Annual Contributions by Period</div>
-      <div style={descBox}>Additional contributions per year range in nominal dollars. Set to 0 if not contributing. IRA contribution limits are not enforced here — set amounts you plan to contribute.</div>
+      <div style={descBox}>
+        Annual deposits in nominal dollars. Use for IRA/Roth accounts you are still contributing to. Brokerage surplus from W2/rental/SS income is auto-routed via excess_income_policy — do <strong>not</strong> enter brokerage deposits here.
+      </div>
       {deposits.length > 0 && (
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
             <thead>
               <tr>
                 <th style={{ ...tblHeader, width: 120 }}>Year Range</th>
-                {accounts.map((a: any) => <th key={a.name} style={{ ...tblHeader, color: ACCT_TYPE_COLORS[a.type] }}>{a.name}</th>)}
+                {accounts.map((a: any) => (
+                  <th key={a.name} style={{ ...tblHeader, color: ACCT_TYPE_COLORS[a.type] }}>
+                    {a.name}<div style={{ fontSize: 9, fontWeight: 400, color: "#9ca3af", textTransform: "none" as const }}>{ACCT_TYPE_LABELS[a.type]}</div>
+                  </th>
+                ))}
+                <th style={{ ...tblHeader, width: 36 }}></th>
               </tr>
             </thead>
             <tbody>
@@ -1129,16 +1439,19 @@ const AllocationGuidedEditor: React.FC<PersonJsonEditorProps> = ({ parsed, reado
                 <tr key={ridx} style={{ background: ridx % 2 === 0 ? "#fafafa" : "#fff" }}>
                   <td style={tblCell}>
                     <input value={row.years ?? ""} readOnly={readonly}
-                      onChange={e => setDraft((p: any) => { const n = JSON.parse(JSON.stringify(p)); n.deposits_yearly[ridx].years = e.target.value; return n; })}
+                      onChange={e => upd(n => { n.deposits_yearly[ridx].years = e.target.value; })}
                       style={{ ...tblInput, width: 100 }} placeholder="e.g. 1-5" />
                   </td>
                   {accounts.map((a: any) => (
                     <td key={a.name} style={tblCell}>
                       <input type="number" value={row[a.name] ?? 0} readOnly={readonly}
-                        onChange={e => setDeposit(ridx, a.name, Number(e.target.value))}
+                        onChange={e => upd(n => { n.deposits_yearly[ridx][a.name] = Number(e.target.value); })}
                         style={{ ...tblInput, width: 90 }} />
                     </td>
                   ))}
+                  <td style={tblCell}>
+                    {!readonly && <button onClick={() => upd(n => { n.deposits_yearly = n.deposits_yearly.filter((_: any, i: number) => i !== ridx); })} style={tblDelBtn}>✕</button>}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -1147,43 +1460,28 @@ const AllocationGuidedEditor: React.FC<PersonJsonEditorProps> = ({ parsed, reado
       )}
       {!readonly && (
         <div style={{ padding: "10px 16px" }}>
-          <button onClick={() => {
-            const blank: any = { years: "" };
-            accounts.forEach((a: any) => { blank[a.name] = 0; });
-            setDraft((p: any) => { const n = JSON.parse(JSON.stringify(p)); n.deposits_yearly = [...(n.deposits_yearly || []), blank]; return n; });
-          }} style={tblAddBtn}>+ Add contribution period</button>
+          <button onClick={() => { const b: any = { years: "" }; accounts.forEach((a: any) => { b[a.name] = 0; }); upd(n => { n.deposits_yearly = [...(n.deposits_yearly || []), b]; }); }} style={tblAddBtn}>
+            + Add contribution period
+          </button>
         </div>
       )}
 
-      {/* ── Section 3: Allocation summary (read-only display) ── */}
-      <div style={sectionHdr}>Asset Allocation — Default (Global)</div>
-      <div style={descBox}>Default allocation for all simulation years. Overrides apply to specific year ranges only. To change allocations, use the EDIT tab for precise JSON control — the allocation structure is complex and best edited directly.</div>
-      <div style={{ padding: "8px 16px 16px" }}>
-        {accounts.map((acct: any) => {
-          const alloc = draft.global_allocation?.[acct.name];
-          if (!alloc?.portfolios) return null;
-          const portfolios = Object.entries(alloc.portfolios as Record<string, any>);
-          return (
-            <div key={acct.name} style={{ marginBottom: 12, padding: "10px 12px", border: "1px solid #e5e7eb", borderRadius: 6 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: ACCT_TYPE_COLORS[acct.type], marginBottom: 8 }}>{acct.name}</div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" as const }}>
-                {portfolios.map(([pname, pdata]: [string, any]) => (
-                  <div key={pname} style={{ fontSize: 12, padding: "4px 10px", background: "#f3f4f6", borderRadius: 4 }}>
-                    <span style={{ fontWeight: 600, color: "#374151" }}>{pname}</span>
-                    <span style={{ color: "#9ca3af", marginLeft: 4 }}>{pdata.weight_pct}%</span>
-                    <span style={{ color: "#6b7280", marginLeft: 6, fontSize: 11 }}>
-                      [{Object.entries(pdata.classes_pct || {}).map(([c, w]) => `${c} ${w}%`).join(", ")}]
-                    </span>
-                  </div>
-                ))}
+      {/* ══ SECTION 4: Override periods summary (read-only, edit in EDIT tab) ══ */}
+      {(draft.overrides || []).length > 0 && (
+        <>
+          <div style={sectionHdr}>Allocation Overrides ({(draft.overrides || []).length} defined)</div>
+          <div style={descBox}>Overrides replace the default allocation above for specific year ranges. Use the <strong>EDIT</strong> tab to add or modify override periods — the nested structure is easier to manage in raw JSON.</div>
+          <div style={{ padding: "6px 16px 16px" }}>
+            {(draft.overrides || []).map((ov: any, idx: number) => (
+              <div key={idx} style={{ marginBottom: 5, padding: "7px 10px", background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: 5, fontSize: 12 }}>
+                <strong>Years {ov.years}</strong>
+                <span style={{ color: "#9ca3af", marginLeft: 8 }}>mode: {ov.mode}</span>
+                <span style={{ color: "#6b7280", marginLeft: 8 }}>accounts: {Object.keys(ov).filter(k => !["years","mode","_comment"].includes(k)).join(", ") || "—"}</span>
               </div>
-            </div>
-          );
-        })}
-        <div style={{ fontSize: 12, color: "#9ca3af", marginTop: 4 }}>
-          Allocation overrides ({(draft.overrides || []).length} defined) are shown in the raw JSON — switch to EDIT tab to modify override periods.
-        </div>
-      </div>
+            ))}
+          </div>
+        </>
+      )}
     </GuidedShell>
   );
 };
@@ -6494,89 +6792,161 @@ Re-run simulation to see impact.`)) return;
 
 
 
-              {/* ── Taxes by Type ──────────────────────────────────────────────── */}
+
+              {/* ── Taxes by Type — Full Picture ───────────────────────────────── */}
               <section className="results-section">
-                <h3>Taxes by Type</h3>
-                <p style={{ marginBottom: 8, fontSize: 13, color: "#555" }}>
-                  All values in Current USD (median path — the simulation path closest to the typical portfolio outcome).
-                  Federal&nbsp;=&nbsp;ordinary income&nbsp;+&nbsp;conversion income brackets.
-                  State&nbsp;=&nbsp;state ordinary&nbsp;+&nbsp;capital gains.
-                  NIIT&nbsp;=&nbsp;3.8% on net investment income above threshold.
-                  Excise&nbsp;=&nbsp;state capital gains surcharge where applicable.
-                  Total&nbsp;=&nbsp;sum of all four.
-                  Effective rate&nbsp;=&nbsp;total taxes&nbsp;÷&nbsp;taxable income (gross income minus standard deduction for your filing status).
+                <h3>Taxes by Type — Full Picture</h3>
+
+                {/* Tax composition summary cards */}
+                {(() => {
+                  const W = snapshot.withdrawals;
+                  const C = snapshot.conversions;
+                  const S = snapshot.summary;
+                  const fedTotal30   = S?.taxes_fed_total_current   ?? 0;
+                  const stateTotal30 = S?.taxes_state_total_current ?? 0;
+                  const niitTotal30  = S?.taxes_niit_total_current  ?? 0;
+                  const excTotal30   = S?.taxes_excise_total_current ?? 0;
+                  const grandTotal30 = fedTotal30 + stateTotal30 + niitTotal30 + excTotal30;
+                  const filingStatus = snapshot.meta?.run_params?.filing_status ?? snapshot.run_info?.filing ?? "MFJ";
+                  const isMFJ = filingStatus === "MFJ";
+                  const startAge = snapshot.person?.current_age ?? snapshot.person?.age;
+                  const IRMAA_MFJ    = [{ above:206_000,surcharge:734.40 },{ above:258_000,surcharge:1_835.80 },{ above:322_000,surcharge:2_937.80 },{ above:386_000,surcharge:4_039.60 },{ above:750_000,surcharge:4_340.60 }];
+                  const IRMAA_SINGLE = [{ above:103_000,surcharge:734.40 },{ above:129_000,surcharge:1_835.80 },{ above:161_000,surcharge:2_937.80 },{ above:193_000,surcharge:4_039.60 },{ above:500_000,surcharge:4_340.60 }];
+                  const irmBr = isMFJ ? IRMAA_MFJ : IRMAA_SINGLE;
+                  const nMed = isMFJ ? 2 : 1;
+                  const totalIRMAA30 = snapshot.years.reduce((sum, _, i) => {
+                    const ageN = startAge !== undefined ? Math.floor(startAge + i) : 0;
+                    if (ageN < 65) return sum;
+                    const income = W?.total_ordinary_income_median_path?.[i] ?? 0;
+                    if (income <= 0) return sum;
+                    let s = 0;
+                    for (let b = irmBr.length - 1; b >= 0; b--) { if (income > irmBr[b].above) { s = irmBr[b].surcharge * nMed; break; } }
+                    return sum + s;
+                  }, 0);
+                  if (grandTotal30 === 0) return null;
+                  const fmtM = (v: number) => v >= 1_000_000 ? `$${(v/1_000_000).toFixed(1)}M` : `$${Math.round(v/1000)}k`;
+                  const items = [
+                    { label:"Federal Income Tax", color:"#4f7ef7", pct: grandTotal30>0?fedTotal30/grandTotal30*100:0, total:fedTotal30, note:"Ordinary income + LTCG brackets + Add. Medicare Tax 0.9% on W2 > $250K MFJ" },
+                    { label:"State Tax",           color:"#22c55e", pct: grandTotal30>0?stateTotal30/grandTotal30*100:0, total:stateTotal30, note:"State income + capital gains" },
+                    { label:"NIIT (3.8%)",         color:"#f59e0b", pct: grandTotal30>0?niitTotal30/grandTotal30*100:0, total:niitTotal30, note:"Net Investment Income Tax above $250K MFJ / $200K single" },
+                    { label:"Excise Tax",          color:"#e879f9", pct: grandTotal30>0?excTotal30/grandTotal30*100:0, total:excTotal30, note:"State CG surcharge (e.g. WA 7% above $262K)" },
+                    { label:"IRMAA (est.)",        color:"#f97316", pct:0, total:totalIRMAA30, note:`Medicare premium surcharge age 65+ — ${isMFJ?"2 enrollees (MFJ)":"1 enrollee (single)"}. Separate from income tax.` },
+                  ].filter(x => x.total > 100);
+                  return (
+                    <div style={{ display:"flex", gap:8, flexWrap:"wrap" as const, marginBottom:12 }}>
+                      {items.map(it => (
+                        <div key={it.label} style={{ padding:"8px 12px", background:"#f8fafc", border:`1px solid ${it.color}44`, borderRadius:7, minWidth:130 }}>
+                          <div style={{ fontSize:10, color:"#9ca3af", marginBottom:2 }}>{it.label}</div>
+                          <div style={{ fontSize:15, fontWeight:700, color:it.color }}>{fmtM(it.total)}</div>
+                          {it.pct > 0 && <div style={{ fontSize:10, color:"#6b7280", marginTop:1 }}>{it.pct.toFixed(1)}% of total tax</div>}
+                          <div style={{ fontSize:10, color:"#9ca3af", marginTop:2, lineHeight:1.35 }}>{it.note}</div>
+                          <div style={{ marginTop:5, height:4, background:"#e5e7eb", borderRadius:2, overflow:"hidden" }}>
+                            <div style={{ width:`${Math.min(it.pct,100)}%`, height:"100%", background:it.color, borderRadius:2 }} />
+                          </div>
+                        </div>
+                      ))}
+                      <div style={{ padding:"8px 12px", background:"#1e2330", borderRadius:7, minWidth:130 }}>
+                        <div style={{ fontSize:10, color:"#9ca3af", marginBottom:2 }}>Total (incl. IRMAA est.)</div>
+                        <div style={{ fontSize:15, fontWeight:700, color:"#e8ecf4" }}>{fmtM(grandTotal30 + totalIRMAA30)}</div>
+                        <div style={{ fontSize:10, color:"#6b7280", marginTop:1 }}>over {snapshot.years.length}-year plan</div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                <p style={{ marginBottom: 8, fontSize: 12, color: "#555" }}>
+                  All values in Current USD (median path).
+                  <strong> Federal</strong> = ordinary income brackets + conversion tax + Additional Medicare Tax (0.9% on W2 &gt; $250K MFJ).
+                  <strong> State</strong> = state ordinary + capital gains.
+                  <strong> NIIT</strong> = 3.8% on net investment income above $250K MFJ.
+                  <strong> Excise</strong> = state CG surcharge.
+                  <strong> IRMAA</strong> = Medicare Part B+D premium surcharge age 65+ (estimated from income tier — a real cash cost separate from income tax).
+                  Eff. rate = total income taxes ÷ taxable income.
                 </p>
                 <div style={{ overflowX: "auto" }}>
-                <table className="table" style={{ fontSize: 12, width: "100%", minWidth: 900 }}>
+                <table className="table" style={{ fontSize: 11, width: "100%", minWidth: 1020 }}>
                   <thead>
                     <tr>
                       <th>Year</th>
                       <th>Age</th>
-                      <th><Tip label="Federal tax" tip="Federal income tax on ordinary income (wages, IRA withdrawals, conversions) plus capital gains tax." /></th>
-                      <th><Tip label="State tax" tip="State income and capital gains tax based on your selected state." /></th>
-                      <th><Tip label="NIIT" tip="3.8% Net Investment Income Tax on investment income above the $250K threshold (MFJ)." /></th>
-                      <th><Tip label="Excise" tip="State-specific capital gains surcharge (e.g. California 1% mental health surcharge)." /></th>
-                      <th><Tip label="Total taxes" tip="Sum of federal, state, NIIT, and excise." /></th>
-                      <th><Tip label="Portfolio WD (after-tax)" tip="After-tax cash withdrawn from investment accounts — your configured withdrawal_schedule target. Taxes are paid separately from brokerage on top of this." /></th>
-                      <th><Tip label="Eff. rate" tip="Total taxes ÷ taxable income. Your true all-in tax rate on everything the IRS can see." /></th>
+                      <th><Tip label="Federal Income Tax" tip="Federal income tax on ordinary income (wages, IRA withdrawals, conversions), LTCG, plus Additional Medicare Tax (0.9%) on W2 wages above $250K MFJ / $200K single." /></th>
+                      <th><Tip label="State Tax" tip="State income and capital gains tax based on your selected state." /></th>
+                      <th><Tip label="NIIT 3.8%" tip="Net Investment Income Tax on investment income (dividends, capital gains) above $250K MFJ / $200K single. Separate from the 0.9% AMT on wages." /></th>
+                      <th><Tip label="Excise" tip="State-specific capital gains surcharge (e.g. Washington State 7% on LTCG above $262K)." /></th>
+                      <th><Tip label="IRMAA (est.)" tip="Medicare Part B+D premium surcharge — a real out-of-pocket cash cost separate from income tax. Applies age 65+. Estimated from median-path income vs 2025 IRMAA tiers. MFJ = 2 enrollees." /></th>
+                      <th><Tip label="Total Income Taxes" tip="Sum of federal + state + NIIT + excise. Does NOT include IRMAA — shown separately above." /></th>
+                      <th><Tip label="Portfolio WD (after-tax)" tip="After-tax cash withdrawn from investment accounts — your configured withdrawal_schedule target." /></th>
+                      <th><Tip label="Eff. rate" tip="Total income taxes ÷ taxable income. Your true all-in income tax rate. Excludes IRMAA (Medicare premium, not income tax)." /></th>
                     </tr>
                   </thead>
                   <tbody>
-                    {snapshot.years.map((yr, i) => {
-                      const W = snapshot.withdrawals;
-                      const C = snapshot.conversions;
-                      // Federal = ordinary income taxes + conversion income taxes
-                      // Conversion taxes are federal income taxes (bracket-fill on converted amount)
-                      const ordFed    = W?.taxes_fed_current_median_path?.[i]   ?? W?.taxes_fed_current_mean?.[i]   ?? 0;
-                      const convTax   = C?.conversion_tax_cur_median_path_by_year?.[i] ?? C?.conversion_tax_cur_mean_by_year?.[i] ?? 0;
-                      const fedTotal  = ordFed + convTax;
-                      const state     = W?.taxes_state_current_median_path?.[i]  ?? W?.taxes_state_current_mean?.[i]  ?? 0;
-                      const niit      = W?.taxes_niit_current_median_path?.[i]   ?? W?.taxes_niit_current_mean?.[i]   ?? 0;
-                      const excise    = W?.taxes_excise_current_median_path?.[i] ?? W?.taxes_excise_current_mean?.[i] ?? 0;
-                      const total     = fedTotal + state + niit + excise;
-                      const planned   = W?.planned_current?.[i] ?? 0;
-                      const rmdE = W?.rmd_current_median_path?.[i] ?? W?.rmd_current_mean?.[i] ?? 0;
-                      const wdE  = W?.realized_current_median_path?.[i] ?? W?.realized_current_mean?.[i] ?? 0;
-                      const twE  = W?.total_withdraw_current_median_path?.[i] ?? W?.total_withdraw_current_mean?.[i] ?? (wdE + rmdE);
-                      const cvE  = C?.conversion_cur_median_path_by_year?.[i] ?? C?.conversion_cur_mean_by_year?.[i] ?? 0;
-                      // Effective rate — pre-computed in backend (simulator_new.py)
-                      // using the correct denominator: W2 + SS + RMDs + conversions + cap gains
-                      // Do NOT recompute here — keeps API consumers and App.tsx in sync.
-                      const effRateBackend = W?.effective_tax_rate_median_path?.[i] ?? null;
-                      // Legacy fallback for old snapshots that predate this field
-                      const totalOrdIncome = W?.total_ordinary_income_median_path?.[i] ?? 0;
-                      const denom = totalOrdIncome > 0
-                        ? totalOrdIncome
-                        : (twE + cvE > 0 ? twE + cvE : null);
-                      const effRateRaw = (denom !== null && denom > 0) ? total / denom : null;
-                      const effRateLegacy = (effRateRaw !== null && effRateRaw <= 1.0) ? effRateRaw : null;
-                      const effRate = effRateBackend !== null ? effRateBackend : effRateLegacy;
-
+                    {(() => {
                       const startAge = snapshot.person?.current_age ?? snapshot.person?.age ?? undefined;
-                      const ageDisplay = startAge !== undefined ? Math.floor(startAge + i) : "";
-
-                      const dash = <span style={{ color: "#aaa" }}>—</span>;
-                      return (
-                        <tr key={yr} style={{ fontSize: 11 }}>
-                          <td style={{ textAlign: "center" }}>{yr}</td>
-                          <td style={{ textAlign: "center" }}>{ageDisplay}</td>
-                          <td style={{ textAlign: "right" }}>{fedTotal > 0 ? formatUSD(fedTotal) : dash}</td>
-                          <td style={{ textAlign: "right" }}>{state    > 0 ? formatUSD(state)    : dash}</td>
-                          <td style={{ textAlign: "right" }}>{niit     > 0 ? formatUSD(niit)     : dash}</td>
-                          <td style={{ textAlign: "right" }}>{excise   > 0 ? formatUSD(excise)   : dash}</td>
-                          <td style={{ textAlign: "right", fontWeight: 600 }}>{total    > 0 ? formatUSD(total)    : dash}</td>
-
-                          <td style={{ textAlign: "right" }}>{planned  > 0 ? formatUSD(planned)  : dash}</td>
-                          <td style={{ textAlign: "right", fontWeight: 600 }}>{effRate  !== null && total > 0
-                               ? (effRate * 100).toFixed(1) + "%"
-                               : dash}</td>
-                        </tr>
-                      );
-                    })}
+                      const filingStatus = snapshot.meta?.run_params?.filing_status ?? snapshot.run_info?.filing ?? "MFJ";
+                      const isMFJ2 = filingStatus === "MFJ";
+                      const IRMAA_MFJ2    = [{ above:206_000,surcharge:734.40 },{ above:258_000,surcharge:1_835.80 },{ above:322_000,surcharge:2_937.80 },{ above:386_000,surcharge:4_039.60 },{ above:750_000,surcharge:4_340.60 }];
+                      const IRMAA_SINGLE2 = [{ above:103_000,surcharge:734.40 },{ above:129_000,surcharge:1_835.80 },{ above:161_000,surcharge:2_937.80 },{ above:193_000,surcharge:4_039.60 },{ above:500_000,surcharge:4_340.60 }];
+                      const irmBr2 = isMFJ2 ? IRMAA_MFJ2 : IRMAA_SINGLE2;
+                      const nMed2 = isMFJ2 ? 2 : 1;
+                      return snapshot.years.map((yr, i) => {
+                        const W = snapshot.withdrawals;
+                        const C = snapshot.conversions;
+                        const ordFed   = W?.taxes_fed_current_median_path?.[i]   ?? W?.taxes_fed_current_mean?.[i]   ?? 0;
+                        const convTax  = C?.conversion_tax_cur_median_path_by_year?.[i] ?? C?.conversion_tax_cur_mean_by_year?.[i] ?? 0;
+                        const fedTotal = ordFed + convTax;
+                        const state    = W?.taxes_state_current_median_path?.[i]  ?? W?.taxes_state_current_mean?.[i]  ?? 0;
+                        const niit     = W?.taxes_niit_current_median_path?.[i]   ?? W?.taxes_niit_current_mean?.[i]   ?? 0;
+                        const excise   = W?.taxes_excise_current_median_path?.[i] ?? W?.taxes_excise_current_mean?.[i] ?? 0;
+                        const total    = fedTotal + state + niit + excise;
+                        const planned  = W?.planned_current?.[i] ?? 0;
+                        const rmdE = W?.rmd_current_median_path?.[i] ?? W?.rmd_current_mean?.[i] ?? 0;
+                        const wdE  = W?.realized_current_median_path?.[i] ?? W?.realized_current_mean?.[i] ?? 0;
+                        const twE  = W?.total_withdraw_current_median_path?.[i] ?? W?.total_withdraw_current_mean?.[i] ?? (wdE + rmdE);
+                        const cvE  = C?.conversion_cur_median_path_by_year?.[i] ?? C?.conversion_cur_mean_by_year?.[i] ?? 0;
+                        const effRateBackend = W?.effective_tax_rate_median_path?.[i] ?? null;
+                        const totalOrdIncome = W?.total_ordinary_income_median_path?.[i] ?? 0;
+                        const denom = totalOrdIncome > 0 ? totalOrdIncome : (twE + cvE > 0 ? twE + cvE : null);
+                        const effRateRaw = (denom !== null && denom > 0) ? total / denom : null;
+                        const effRateLegacy = (effRateRaw !== null && effRateRaw <= 1.0) ? effRateRaw : null;
+                        const effRate = effRateBackend !== null ? effRateBackend : effRateLegacy;
+                        const ageN = startAge !== undefined ? Math.floor(startAge + i) : 0;
+                        const ageDisplay = startAge !== undefined ? ageN : "";
+                        let irmaa = 0;
+                        if (ageN >= 65 && totalOrdIncome > 0) {
+                          for (let b = irmBr2.length - 1; b >= 0; b--) { if (totalOrdIncome > irmBr2[b].above) { irmaa = irmBr2[b].surcharge * nMed2; break; } }
+                        }
+                        const dash = <span style={{ color: "#aaa" }}>—</span>;
+                        const irmaaCell = irmaa > 0
+                          ? <span style={{ color:"#f97316", fontWeight:500 }}>{formatUSD(irmaa)}</span>
+                          : (ageN >= 65 ? <span style={{ color:"#d1d5db" }}>std</span> : dash);
+                        return (
+                          <tr key={yr} style={{ fontSize: 11 }}>
+                            <td style={{ textAlign: "center" }}>{yr}</td>
+                            <td style={{ textAlign: "center" }}>{ageDisplay}</td>
+                            <td style={{ textAlign: "right" }}>{fedTotal > 0 ? formatUSD(fedTotal) : dash}</td>
+                            <td style={{ textAlign: "right" }}>{state    > 0 ? formatUSD(state)    : dash}</td>
+                            <td style={{ textAlign: "right" }}>{niit     > 0 ? formatUSD(niit)     : dash}</td>
+                            <td style={{ textAlign: "right" }}>{excise   > 0 ? formatUSD(excise)   : dash}</td>
+                            <td style={{ textAlign: "right" }}>{irmaaCell}</td>
+                            <td style={{ textAlign: "right", fontWeight: 600 }}>{total > 0 ? formatUSD(total) : dash}</td>
+                            <td style={{ textAlign: "right" }}>{planned  > 0 ? formatUSD(planned)  : dash}</td>
+                            <td style={{ textAlign: "right", fontWeight: 600 }}>{effRate !== null && total > 0
+                                 ? (effRate * 100).toFixed(1) + "%"
+                                 : dash}</td>
+                          </tr>
+                        );
+                      });
+                    })()}
                   </tbody>
                 </table>
                 </div>
+                <div style={{ marginTop:8, fontSize:11, color:"#9ca3af", lineHeight:1.6 }}>
+                  ★ <strong>Additional Medicare Tax (0.9%):</strong> Included in Federal column. Applies to W2 wages above $250K MFJ / $200K single (IRC §3101(b)(2)).
+                  &nbsp;&nbsp;★ <strong>IRMAA</strong> uses 2025 brackets and 2-year look-back approximation — actual charges depend on your prior-year MAGI.
+                  &nbsp;&nbsp;★ Standard Medicare Part B base premium (~$185/mo) is not shown — IRMAA column shows only the <em>surcharge</em> above standard.
+                </div>
               </section>
+
 
               {/* Accounts — Investment YoY (Future USD) */}
               <section className="results-section">

@@ -580,11 +580,17 @@ def run_accounts_new(
         and ytd_income_nom_paths is not None
     ):
         for y in range(n_years):
+            # compute_annual_taxes_paths returns 5 arrays since v6.3:
+            #   fed (income brackets only), state, niit, excise, medicare (0.9% AMT on W2)
+            # Medicare (IRC §3101(b)(2)) is folded into taxes_fed_cur_paths so all
+            # downstream code (summary totals, snapshot, UI) sees the correct federal total.
+            # The split is computed in taxes_core.py — add here once, never split again.
             (
-                taxes_fed_cur_paths[:, y],
+                _fed_brackets_y,
                 taxes_state_cur_paths[:, y],
                 taxes_niit_cur_paths[:, y],
                 taxes_excise_cur_paths[:, y],
+                _medicare_y,
             ) = compute_annual_taxes_paths(
                 ordinary_income_cur_paths[:, y],
                 qual_div_cur_paths[:, y],
@@ -593,6 +599,8 @@ def run_accounts_new(
                 ytd_income_nom_paths[:, y],
                 w2_income_cur_paths[:, y] if w2_income_cur_paths is not None else None,
             )
+            # Total federal = income bracket tax + Additional Medicare Tax (0.9%)
+            taxes_fed_cur_paths[:, y] = _fed_brackets_y + _medicare_y
 
     # Snapshot ordinary_income_cur_paths immediately after tax computation.
     # This is the exact income base the tax engine used — W2 + SS + RMDs + conversions.

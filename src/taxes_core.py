@@ -20,7 +20,7 @@ def compute_annual_taxes(
     tax_cfg: Dict[str, any],
     ytd_income_nom: float,
     w2_income_cur: float = 0.0,
-) -> Tuple[float, float, float, float]:
+) -> Tuple[float, float, float, float, float]:
     """
     Compute annual taxes in CURRENT USD given:
       - ordinary income (wages, interest, rental, other + RMD + conversions),
@@ -30,14 +30,19 @@ def compute_annual_taxes(
     and a given year-to-date income figure (ytd_income_nom) for bracket calculations.
 
     Returns:
-        taxes_fed_cur:     federal income + CG taxes + Additional Medicare Tax (if applicable)
-        taxes_state_cur:   state income + CG taxes
-        taxes_niit_cur:    net investment income tax (3.8% on NII above NIIT threshold)
-        taxes_excise_cur:  state CG excise tax (if configured)
+        taxes_fed_cur:         federal income + CG taxes (does NOT include AMT — kept separate)
+        taxes_state_cur:       state income + CG taxes
+        taxes_niit_cur:        net investment income tax (3.8% on NII above NIIT threshold)
+        taxes_excise_cur:      state CG excise tax (if configured)
+        taxes_medicare_cur:    Additional Medicare Tax 0.9% on W2 > threshold (IRC §3101(b)(2))
+                               Distinct from NIIT — applies to earned wages, not investment income.
+                               Kept separate so the UI can display it independently.
+
+    IMPORTANT: The caller (simulator_new.py) sums taxes_fed_cur + taxes_medicare_cur for the
+    total federal obligation. The split is preserved so the UI can show Medicare separately.
 
     Additional Medicare Tax (IRC §3101(b)(2)):
         0.9% on W2 wages above $200K (single) / $250K (MFJ).
-        Distinct from NIIT — applies to earned wages, not investment income.
         Only computed when w2_income_cur > 0.
     """
 
@@ -54,9 +59,6 @@ def compute_annual_taxes(
     excise_rate_nom = float(excise_cfg.get("rate", 0.0))
 
     # Apply standard deductions before hitting the bracket tables.
-    # FED_ORD (and STATE_ORD) brackets are expressed as taxable-income thresholds,
-    # so gross income must be reduced by the relevant standard deduction first.
-    # Deductions cannot create negative taxable income.
     fed_std_ded   = float(tax_cfg.get("FED_STD_DED",   0.0))
     state_std_ded = float(tax_cfg.get("STATE_STD_DED", 0.0))
 
@@ -64,9 +66,6 @@ def compute_annual_taxes(
     ordinary_taxable_state = max(0.0, float(ordinary_income_cur) - state_std_ded)
 
     # --- Dividends: compute fed/state/NIIT on ordinary + qualified income ---
-    # compute_dividend_taxes_components returns keys: "fed_ord", "fed_qual", "state", "niit"
-    # We pass the post-deduction taxable amounts for ordinary income,
-    # but keep the full gross amounts for NIIT threshold comparison (NIIT uses AGI not taxable).
     comp_div = compute_dividend_taxes_components(
         ordinary_div_nom=ordinary_taxable_fed,
         qualified_div_nom=float(qual_div_cur),
@@ -79,15 +78,9 @@ def compute_annual_taxes(
         ytd_income_nom=float(ytd_income_nom),
     )
 
-    # Bug fix: returned keys are "fed_ord" and "fed_qual", NOT "fed".
-    # Total federal tax on ordinary + qualified income = fed_ord + fed_qual.
     taxes_fed_div_cur = float(comp_div.get("fed_ord", 0.0)) + float(comp_div.get("fed_qual", 0.0))
-    # State uses its own deduction (passed via ordinary_taxable_state above).
-    # compute_dividend_taxes_components uses ordinary_div_nom for state too, so
-    # re-call with state-adjusted amount when deductions differ, otherwise use as-is.
     taxes_state_div_cur = float(comp_div.get("state", 0.0))
     if state_std_ded != fed_std_ded:
-        # Recompute state portion with state-specific deduction
         _comp_state = compute_dividend_taxes_components(
             ordinary_div_nom=ordinary_taxable_state,
             qualified_div_nom=float(qual_div_cur),
@@ -125,14 +118,15 @@ def compute_annual_taxes(
     # ── Additional Medicare Tax (0.9% on wages above threshold) ──────────────
     # IRC §3101(b)(2). Applies to W2 wages above $200K (single) / $250K (MFJ).
     # Distinct from NIIT (3.8%) which applies to net investment income.
-    # Uses ADDL_MEDICARE_THRESH from tax_cfg; falls back to MFJ default $250K.
+    # Returned SEPARATELY so the UI can display it in its own column.
+    # Callers MUST add taxes_medicare_cur to taxes_fed_cur for total federal tax.
+    taxes_medicare_cur = 0.0
     if w2_income_cur > 0.0:
         _addl_med_thresh = float(tax_cfg.get("ADDL_MEDICARE_THRESH", 250_000.0))
         _addl_med_rate   = float(tax_cfg.get("ADDL_MEDICARE_RATE",   0.009))
-        _addl_med_tax    = max(0.0, float(w2_income_cur) - _addl_med_thresh) * _addl_med_rate
-        taxes_fed_cur   += _addl_med_tax
+        taxes_medicare_cur = max(0.0, float(w2_income_cur) - _addl_med_thresh) * _addl_med_rate
 
-    return taxes_fed_cur, taxes_state_cur, taxes_niit_cur, taxes_excise_cur
+    return taxes_fed_cur, taxes_state_cur, taxes_niit_cur, taxes_excise_cur, taxes_medicare_cur
 
 
 
@@ -142,36 +136,53 @@ def compute_annual_taxes_paths(
     cap_gains_cur_paths: np.ndarray,        # shape (paths,)
     tax_cfg: Dict[str, any],
     ytd_income_nom_paths: np.ndarray,       # shape (paths,)
-    w2_income_cur_paths: np.ndarray = None, # shape (paths,) — for Additional Medicare Tax
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    w2_income_cur_paths: np.ndarray = None, # shape (paths,) — for Additional Medicare Tax (0.9%)
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Vectorized wrapper around compute_annual_taxes for one year.
     Takes per-path arrays of current USD incomes and returns per-path arrays
-    of fed, state, NIIT, excise taxes (current USD).
+    of fed, state, NIIT, excise, and Additional Medicare Tax (current USD).
+
+    Returns (5-tuple):
+        taxes_fed_cur_paths      — federal income tax (WITHOUT AMT — add medicare separately)
+        taxes_state_cur_paths    — state income + CG tax
+        taxes_niit_cur_paths     — NIIT 3.8%
+        taxes_excise_cur_paths   — state CG excise
+        taxes_medicare_cur_paths — Additional Medicare Tax 0.9% on W2 > threshold (§3101(b)(2))
+
+    BACKWARD COMPATIBILITY: Callers that previously unpacked 4 values (fed, state, niit, excise)
+    must now unpack 5. Add `taxes_medicare_cur_paths` to `taxes_fed_cur_paths` for total federal.
+
+    The split is preserved so the UI can display Additional Medicare Tax in its own column
+    (separate from the general federal income tax column) in the Results → Taxes by Type table.
 
     w2_income_cur_paths: optional W2 wages per path for Additional Medicare Tax (0.9%).
-    When None or all-zero, AMT is not computed (backward compatible).
+    When None or all-zero, AMT column = zeros (backward compatible).
     """
     ordinary_income_cur_paths = np.asarray(ordinary_income_cur_paths, dtype=float)
-    qual_div_cur_paths = np.asarray(qual_div_cur_paths, dtype=float)
-    cap_gains_cur_paths = np.asarray(cap_gains_cur_paths, dtype=float)
-    ytd_income_nom_paths = np.asarray(ytd_income_nom_paths, dtype=float)
+    qual_div_cur_paths        = np.asarray(qual_div_cur_paths,        dtype=float)
+    cap_gains_cur_paths       = np.asarray(cap_gains_cur_paths,       dtype=float)
+    ytd_income_nom_paths      = np.asarray(ytd_income_nom_paths,      dtype=float)
 
     paths = ordinary_income_cur_paths.shape[0]
 
-    # Handle optional w2 array — default to zeros (no AMT) for backward compatibility
     if w2_income_cur_paths is None:
         w2_income_cur_paths = np.zeros(paths, dtype=float)
     else:
         w2_income_cur_paths = np.asarray(w2_income_cur_paths, dtype=float)
 
-    taxes_fed_cur_paths = np.zeros(paths, dtype=float)
-    taxes_state_cur_paths = np.zeros(paths, dtype=float)
-    taxes_niit_cur_paths = np.zeros(paths, dtype=float)
-    taxes_excise_cur_paths = np.zeros(paths, dtype=float)
+    taxes_fed_cur_paths      = np.zeros(paths, dtype=float)
+    taxes_state_cur_paths    = np.zeros(paths, dtype=float)
+    taxes_niit_cur_paths     = np.zeros(paths, dtype=float)
+    taxes_excise_cur_paths   = np.zeros(paths, dtype=float)
+    taxes_medicare_cur_paths = np.zeros(paths, dtype=float)
 
     for p in range(paths):
-        taxes_fed_cur_paths[p], taxes_state_cur_paths[p], taxes_niit_cur_paths[p], taxes_excise_cur_paths[p] = compute_annual_taxes(
+        (taxes_fed_cur_paths[p],
+         taxes_state_cur_paths[p],
+         taxes_niit_cur_paths[p],
+         taxes_excise_cur_paths[p],
+         taxes_medicare_cur_paths[p]) = compute_annual_taxes(
             ordinary_income_cur=float(ordinary_income_cur_paths[p]),
             qual_div_cur=float(qual_div_cur_paths[p]),
             cap_gains_cur=float(cap_gains_cur_paths[p]),
@@ -180,5 +191,7 @@ def compute_annual_taxes_paths(
             w2_income_cur=float(w2_income_cur_paths[p]),
         )
 
-    return taxes_fed_cur_paths, taxes_state_cur_paths, taxes_niit_cur_paths, taxes_excise_cur_paths
+    return (taxes_fed_cur_paths, taxes_state_cur_paths,
+            taxes_niit_cur_paths, taxes_excise_cur_paths,
+            taxes_medicare_cur_paths)
 

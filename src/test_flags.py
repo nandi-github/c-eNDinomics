@@ -2709,14 +2709,18 @@ def group11_tax_wiring(paths: int):
     _tax_cfg_amt = load_tax_unified(TAX_GLOBAL_PATH, state="California", filing="MFJ")
 
     # $350K W2 MFJ → AMT = 0.9% × ($350K - $250K) = $900
-    fed_350k_with_amt,  _, _, _ = compute_annual_taxes(
+    # compute_annual_taxes returns 5-tuple: (fed_brackets, state, niit, excise, medicare)
+    # Fed total = fed_brackets + medicare — fold them to see the AMT delta.
+    _fb1, _, _, _, _m1 = compute_annual_taxes(
         ordinary_income_cur=350_000.0, qual_div_cur=0.0, cap_gains_cur=0.0,
         tax_cfg=_tax_cfg_amt, ytd_income_nom=350_000.0, w2_income_cur=350_000.0,
     )
-    fed_350k_no_amt, _, _, _ = compute_annual_taxes(
+    fed_350k_with_amt = _fb1 + _m1
+    _fb2, _, _, _, _m2 = compute_annual_taxes(
         ordinary_income_cur=350_000.0, qual_div_cur=0.0, cap_gains_cur=0.0,
         tax_cfg=_tax_cfg_amt, ytd_income_nom=350_000.0, w2_income_cur=0.0,
     )
+    fed_350k_no_amt = _fb2 + _m2
     amt_delta = fed_350k_with_amt - fed_350k_no_amt
     checks.append(chk("11r: AMT fires on $350K W2 MFJ (w2 > $250K threshold)",
         amt_delta > 0, f"delta={amt_delta:.2f} (expected ~$900)"))
@@ -2724,23 +2728,26 @@ def group11_tax_wiring(paths: int):
         _within(amt_delta, 900.0, tol=0.05), f"delta={amt_delta:.2f} expected=900"))
 
     # $200K W2 MFJ → AMT does NOT apply (below $250K threshold)
-    fed_200k_with_w2, _, _, _ = compute_annual_taxes(
+    _fb3, _, _, _, _m3 = compute_annual_taxes(
         ordinary_income_cur=200_000.0, qual_div_cur=0.0, cap_gains_cur=0.0,
         tax_cfg=_tax_cfg_amt, ytd_income_nom=200_000.0, w2_income_cur=200_000.0,
     )
-    fed_200k_no_w2, _, _, _ = compute_annual_taxes(
+    fed_200k_with_w2 = _fb3 + _m3
+    _fb4, _, _, _, _m4 = compute_annual_taxes(
         ordinary_income_cur=200_000.0, qual_div_cur=0.0, cap_gains_cur=0.0,
         tax_cfg=_tax_cfg_amt, ytd_income_nom=200_000.0, w2_income_cur=0.0,
     )
+    fed_200k_no_w2 = _fb4 + _m4
     checks.append(chk("11r: AMT = $0 when W2 = $200K MFJ (below $250K threshold)",
         abs(fed_200k_with_w2 - fed_200k_no_w2) < 1.0,
         f"delta={fed_200k_with_w2 - fed_200k_no_w2:.2f} expected=0"))
 
     # Backward compatibility: w2_income_cur defaults to 0 → no AMT
-    fed_default, _, _, _ = compute_annual_taxes(
+    _fb5, _, _, _, _m5 = compute_annual_taxes(
         ordinary_income_cur=350_000.0, qual_div_cur=0.0, cap_gains_cur=0.0,
         tax_cfg=_tax_cfg_amt, ytd_income_nom=350_000.0,
     )
+    fed_default = _fb5 + _m5
     checks.append(chk("11r: AMT backward compat — no w2_income_cur kwarg → same as w2=0",
         abs(fed_default - fed_350k_no_amt) < 1.0,
         f"default={fed_default:.2f} no_amt={fed_350k_no_amt:.2f}"))
@@ -2769,8 +2776,12 @@ def group11_tax_wiring(paths: int):
     _ord_350k = np.full(_n_paths, 350_000.0)  # Same ordinary income both cases
     _zero     = np.zeros(_n_paths)
 
-    fed_w2_paths,    _, _, _ = _cat_paths(_ord_350k, _zero, _zero, _tax_cfg_e2e, _ord_350k, _w2_350k)
-    fed_no_w2_paths, _, _, _ = _cat_paths(_ord_350k, _zero, _zero, _tax_cfg_e2e, _ord_350k, _no_w2)
+    # compute_annual_taxes_paths returns 5-tuple: (fed_brackets, state, niit, excise, medicare)
+    # Fed total = fed_brackets + medicare — must fold them to see the AMT delta.
+    _fb_w2,    _, _, _, _med_w2 = _cat_paths(_ord_350k, _zero, _zero, _tax_cfg_e2e, _ord_350k, _w2_350k)
+    _fb_nw,    _, _, _, _med_nw = _cat_paths(_ord_350k, _zero, _zero, _tax_cfg_e2e, _ord_350k, _no_w2)
+    fed_w2_paths    = _fb_w2 + _med_w2
+    fed_no_w2_paths = _fb_nw + _med_nw
 
     amt_paths_delta = float(np.mean(fed_w2_paths - fed_no_w2_paths))
     checks.append(chk("11s: compute_annual_taxes_paths: W2 $350K adds AMT delta > 0",
@@ -2788,8 +2799,10 @@ def group11_tax_wiring(paths: int):
     _tax_cfg_single = load_tax_unified(TAX_GLOBAL_PATH, state="California", filing="Single")
     _tax_cfg_single["ADDL_MEDICARE_THRESH"] = 200_000.0
     _tax_cfg_single["ADDL_MEDICARE_RATE"]   = 0.009
-    fed_single_w2, _, _, _ = _cat_paths(_ord_350k, _zero, _zero, _tax_cfg_single, _ord_350k, _w2_350k)
-    fed_single_nw, _, _, _ = _cat_paths(_ord_350k, _zero, _zero, _tax_cfg_single, _ord_350k, _no_w2)
+    _fb_sw2, _, _, _, _med_sw2 = _cat_paths(_ord_350k, _zero, _zero, _tax_cfg_single, _ord_350k, _w2_350k)
+    _fb_snw, _, _, _, _med_snw = _cat_paths(_ord_350k, _zero, _zero, _tax_cfg_single, _ord_350k, _no_w2)
+    fed_single_w2 = _fb_sw2 + _med_sw2
+    fed_single_nw = _fb_snw + _med_snw
     amt_single_delta = float(np.mean(fed_single_w2 - fed_single_nw))
     # Single threshold $200K → AMT on $150K → $1,350
     checks.append(chk("11s: Single filer: AMT delta ≈ $1,350 (0.9% × $150K above $200K threshold)",
