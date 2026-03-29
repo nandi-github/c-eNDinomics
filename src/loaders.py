@@ -331,12 +331,15 @@ def load_inflation_yearly(path: Optional[str], years_count: int = YEARS) -> Opti
 # -----------------------------
 def load_shocks(path: Optional[str]) -> Tuple[List[Dict[str, Any]], str, List[str]]:
     """Load shock events from JSON. Mode is ignored from file — UI run parameter always wins.
-    Returns (events, "", class_list) — mode field intentionally empty so api.py uses UI choice."""
+    Returns (events, "", class_list) — mode field intentionally empty so api.py uses UI choice.
+    Events with enabled=false are excluded from the returned list."""
     if not path:
         return [], "", []
     data = _load_json(path)
     # Intentionally do NOT read "mode" from JSON — mode comes from the UI run parameter only
-    events = data.get("events", []) or []
+    all_events = data.get("events", []) or []
+    # Filter out explicitly disabled events (enabled=false); default is enabled
+    events = [e for e in all_events if e.get("enabled", True) is not False]
     class_list = sorted({str(e.get("class", "")).strip() for e in events if str(e.get("class", "")).strip()})
     return events, "", class_list
 

@@ -21,7 +21,217 @@ logger = logging.getLogger(__name__)
 
 
 # ── Simulation Mode Transformer ───────────────────────────────────────────────
+def _compute_waterfall_deposits(
+    surplus_by_year: np.ndarray,         # (n_years,) net surplus in current USD
+    waterfall_order: list,               # e.g. ["401k_limit","roth_direct","brokerage"]
+    account_types:   dict,               # acct_name → type string
+    w2_by_year:      np.ndarray,         # (n_years,) gross W2 in current USD
+    current_age:     float,
+    n_years:         int,
+    filing:          str = "MFJ",
+) -> dict:
+    """
+    Route per-year surplus income through a priority waterfall into deposit buckets.
+
+    Waterfall steps (in order, each fills to its IRS limit before passing remainder):
+      401k_match         — employer match only (modelled as 0 — user deposits captured elsewhere)
+      401k_limit         — employee pre-tax 401K up to IRS limit ($23,000 2024, $30,500 age 50+)
+      roth_direct        — direct Roth IRA (MAGI phase-out enforced; $7K/$8K limit)
+      backdoor_roth      — traditional IRA then immediate conversion (bypasses MAGI limit)
+      mega_backdoor_roth — after-tax 401K in-plan rollover (residual 401K space up to $69K total)
+      brokerage          — remainder to first brokerage account
+      spend              — remainder is consumed (no deposit)
+
+    Returns dict: acct_name → np.ndarray of additional deposits by year (current USD).
+    Only returns accounts that appear in account_types.
+    """
+    # IRS limits (2024 figures)
+    K401_BASE    = 23_000.0
+    K401_CATCHUP =  7_500.0  # age 50+ additional
+    K401_TOTAL   = 69_000.0  # total including employer + after-tax
+    IRA_BASE     =  7_000.0
+    IRA_CATCHUP  =  1_000.0  # age 50+
+
+    # Roth phase-out by filing
+    _roth_phase = {
+        "MFJ":    (236_000.0, 246_000.0),
+        "Single": (150_000.0, 165_000.0),
+        "HOH":    (150_000.0, 165_000.0),
+        "MFS":    (0.0,       10_000.0),
+    }
+    ph_floor, ph_ceil = _roth_phase.get(filing, _roth_phase["MFJ"])
+
+    # Identify accounts by type
+    trad401k_accts   = [a for a, t in account_types.items() if t in ("traditional_401k", "401k")]
+    roth_accts       = [a for a, t in account_types.items() if t == "roth_ira"]
+    trad_ira_accts   = [a for a, t in account_types.items() if t == "traditional_ira"]
+    brokerage_accts  = [a for a, t in account_types.items()
+                        if t in ("taxable", "brokerage") or "BROKERAGE" in a.upper()]
+    after_tax_401k   = [a for a, t in account_types.items() if t == "after_tax_401k"]
+
+    # Build output: acct_name → deposit array
+    deposits_out: dict = {}
+
+    for yr in range(n_years):
+        remaining = float(surplus_by_year[yr])
+        if remaining <= 0.0:
+            continue
+
+        age_yr   = current_age + yr + 1
+        w2_yr    = float(w2_by_year[yr]) if yr < len(w2_by_year) else 0.0
+        catch50  = age_yr >= 50
+
+        k401_emp_limit = K401_BASE + (K401_CATCHUP if catch50 else 0.0)
+        ira_limit      = IRA_BASE  + (IRA_CATCHUP  if catch50 else 0.0)
+
+        # Roth phase-out factor
+        if ph_ceil <= ph_floor:
+            roth_f = 0.0 if w2_yr > ph_floor else 1.0
+        elif w2_yr >= ph_ceil:
+            roth_f = 0.0
+        elif w2_yr <= ph_floor:
+            roth_f = 1.0
+        else:
+            roth_f = 1.0 - (w2_yr - ph_floor) / (ph_ceil - ph_floor)
+
+        for step in waterfall_order:
+            if remaining <= 0.0:
+                break
+
+            if step == "401k_match":
+                # employer match — modelled as zero incremental cost to user
+                pass
+
+            elif step == "401k_limit":
+                if trad401k_accts and w2_yr > 0:
+                    fill = min(remaining, k401_emp_limit)
+                    acct = trad401k_accts[0]
+                    deposits_out.setdefault(acct, np.zeros(n_years, dtype=float))
+                    deposits_out[acct][yr] += fill
+                    remaining -= fill
+
+            elif step == "roth_direct":
+                if roth_accts and w2_yr > 0 and roth_f > 0:
+                    fill = min(remaining, ira_limit * roth_f)
+                    acct = roth_accts[0]
+                    deposits_out.setdefault(acct, np.zeros(n_years, dtype=float))
+                    deposits_out[acct][yr] += fill
+                    remaining -= fill
+
+            elif step == "backdoor_roth":
+                # TRAD IRA → immediate Roth conversion: deposit to TRAD IRA
+                # (conversion will be handled by roth_conversion_core separately;
+                #  here we model the deposit side only)
+                if trad_ira_accts and w2_yr > 0:
+                    fill = min(remaining, ira_limit)
+                    acct = trad_ira_accts[0]
+                    deposits_out.setdefault(acct, np.zeros(n_years, dtype=float))
+                    deposits_out[acct][yr] += fill
+                    remaining -= fill
+
+            elif step == "mega_backdoor_roth":
+                # After-tax 401K → in-plan Roth rollover
+                # Space = K401_TOTAL - employee_contributions - employer_match (simplified: residual)
+                if (after_tax_401k or roth_accts) and w2_yr > 0:
+                    mega_space = max(0.0, K401_TOTAL - k401_emp_limit)
+                    fill = min(remaining, mega_space)
+                    # Deposit to after_tax_401k if exists, else Roth IRA directly
+                    target = after_tax_401k[0] if after_tax_401k else (roth_accts[0] if roth_accts else None)
+                    if target:
+                        deposits_out.setdefault(target, np.zeros(n_years, dtype=float))
+                        deposits_out[target][yr] += fill
+                        remaining -= fill
+
+            elif step == "brokerage":
+                if brokerage_accts:
+                    acct = brokerage_accts[0]
+                    deposits_out.setdefault(acct, np.zeros(n_years, dtype=float))
+                    deposits_out[acct][yr] += remaining
+                    remaining = 0.0
+
+            elif step == "spend":
+                # Surplus is consumed — no deposit
+                remaining = 0.0
+
+    return deposits_out
+
+
+def infer_lifecycle_phases(
+    w2_by_year:       list,          # gross W2 per year, current USD
+    sched_by_year:    list,          # withdrawal target per year, current USD
+    current_age:      float,
+    n_years:          int,
+    rmd_start_age:    int   = 75,
+    retirement_age_override: Optional[float] = None,  # optional manual override
+) -> list:
+    """
+    Derive lifecycle phase per simulation year from actual income and spending data.
+    Returns a list of n_years phase strings:
+      'accumulation'  — W2 > withdrawal target (surplus, no portfolio draw needed)
+      'transition'    — W2 > 0 but W2 <= target (partial coverage, may still draw)
+      'distribution'  — W2 == 0, portfolio draws required
+      'rmd'           — age >= rmd_start_age (RMDs mandatory, may overlap distribution)
+
+    retirement_age_override: if provided, forces distribution phase at this age
+    regardless of income — used when the user explicitly sets retirement_age and
+    income.json hasn't been updated to match.
+    """
+    phases = []
+    for y in range(n_years):
+        age_y = current_age + y + 1
+        w2_y  = float(w2_by_year[y]) if y < len(w2_by_year) else 0.0
+        tgt_y = float(sched_by_year[y]) if y < len(sched_by_year) else 0.0
+
+        # RMD era overrides everything else (may co-exist with distribution)
+        if age_y >= rmd_start_age:
+            phases.append("rmd")
+            continue
+
+        # Manual retirement age override: force distribution from that age
+        if retirement_age_override is not None and age_y >= retirement_age_override:
+            phases.append("distribution")
+            continue
+
+        if w2_y > tgt_y * 1.05:          # W2 meaningfully exceeds target
+            phases.append("accumulation")
+        elif w2_y > 50:                   # W2 non-zero but <= target
+            phases.append("transition")
+        else:                             # W2 zero or negligible
+            phases.append("distribution")
+
+    return phases
+
+
+def compute_mode_weights_for_year(
+    phase:           str,
+    simulation_mode: str,
+    years_to_phase_end: float = 0.0,    # years until next phase transition
+) -> tuple:
+    """
+    Return (investment_weight, retirement_weight) for a single year given its phase.
+    In automatic mode, weights are phase-driven rather than retirement-age-countdown.
+    """
+    mode = str(simulation_mode or "automatic").lower().strip()
+    if mode == "investment":  return 1.0, 0.0
+    if mode == "retirement":  return 0.0, 1.0
+    if mode == "balanced":    return 0.5, 0.5
+
+    # Automatic — phase-driven weights
+    if phase == "accumulation":
+        return 0.85, 0.15     # strong growth bias, small survival check
+    elif phase == "transition":
+        return 0.50, 0.50     # balanced — approaching distribution
+    elif phase == "distribution":
+        return 0.20, 0.80     # income protection dominant
+    else:  # rmd
+        return 0.10, 0.90     # survival-first in RMD era
+
+    return 0.0, 1.0
+
+
 def compute_mode_weights(current_age: float, retirement_age: float, simulation_mode: str):
+    """Legacy single-weight function — kept for backward compatibility with tests.
+    New code uses compute_mode_weights_for_year() with infer_lifecycle_phases()."""
     mode = str(simulation_mode or "automatic").lower().strip()
     if mode == "investment":  return 1.0, 0.0
     if mode == "retirement":  return 0.0, 1.0
@@ -174,12 +384,54 @@ def run_accounts_new(
     }
 
     _simulation_mode  = str(_pcfg.get("simulation_mode", "automatic")).lower()
-    _retirement_age   = float(_pcfg.get("retirement_age", 65))
     _current_age_now  = float(_pcfg.get("current_age", 60))
-    _investment_w, _retirement_w = compute_mode_weights(
-        current_age=_current_age_now, retirement_age=_retirement_age,
-        simulation_mode=_simulation_mode,
+
+    # ── Phase inference — derive lifecycle phase from actual income + spending ──
+    # Use w2_income_cur_paths (W2 wages only) for accurate phase classification.
+    # Falls back to total ordinary income if W2-only array not provided.
+    _w2_mean_by_year = np.zeros(n_years, dtype=float)
+    if w2_income_cur_paths is not None:
+        _w2_arr = np.asarray(w2_income_cur_paths, dtype=float)
+        if _w2_arr.ndim == 2 and _w2_arr.shape[1] >= n_years:
+            _w2_mean_by_year = _w2_arr[:, :n_years].mean(axis=0)
+        elif _w2_arr.ndim == 1 and len(_w2_arr) >= n_years:
+            _w2_mean_by_year = _w2_arr[:n_years]
+    elif income_sources_cur_paths is not None:
+        _ic_arr = np.asarray(income_sources_cur_paths, dtype=float)
+        if _ic_arr.ndim == 2 and _ic_arr.shape[1] >= n_years:
+            _w2_mean_by_year = _ic_arr[:, :n_years].mean(axis=0)
+
+    _tgt_for_phase = [float(sched[y]) if sched is not None and y < len(sched) else 0.0
+                      for y in range(n_years)]
+
+    _rmd_start_age = int(_pcfg.get("rmd_start_age", 75))
+    # Only use retirement_age as a phase override when it's explicitly set above current_age.
+    # load_person() defaults retirement_age=current_age when the key is absent — that
+    # sentinel value must not trigger the override (it would force distribution from yr1).
+    _ret_age_raw = float(_pcfg.get("retirement_age", _current_age_now + n_years + 1))
+    _ret_override = (
+        _ret_age_raw
+        if _ret_age_raw > _current_age_now and _ret_age_raw < _current_age_now + n_years
+        else None
     )
+
+    _phase_by_year = infer_lifecycle_phases(
+        w2_by_year=_w2_mean_by_year.tolist(),
+        sched_by_year=_tgt_for_phase,
+        current_age=_current_age_now,
+        n_years=n_years,
+        rmd_start_age=_rmd_start_age,
+        retirement_age_override=_ret_override,
+    )
+
+    # Per-year mode weights from inferred phases
+    _weights_by_year = [
+        compute_mode_weights_for_year(_phase_by_year[y], _simulation_mode)
+        for y in range(n_years)
+    ]
+    # Summary weights: mean across all years (legacy score/label logic)
+    _investment_w = float(sum(w[0] for w in _weights_by_year) / max(n_years, 1))
+    _retirement_w = float(sum(w[1] for w in _weights_by_year) / max(n_years, 1))
 
     # ── Pre-compute income surplus and inject into deposits_yearly ─────────────
     # Surplus = net income after approx tax minus withdrawal target.
@@ -196,7 +448,7 @@ def run_accounts_new(
         _eip_pre = excess_income_policy or {}
         _surplus_tax_rate_pre = float(_eip_pre.get("income_offset_tax_rate", 0.30))
         _surplus_policy_pre   = str(_eip_pre.get("surplus_policy", "reinvest_in_brokerage"))
-        if _surplus_policy_pre == "reinvest_in_brokerage":
+        if _surplus_policy_pre in ("reinvest_in_brokerage", "waterfall"):
             _sched_pre = np.asarray(sched, dtype=float)
             if _sched_pre.size < n_years:
                 _sched_pre = np.concatenate([_sched_pre,
@@ -205,11 +457,7 @@ def run_accounts_new(
             _net_pre        = _gross_mean_pre * (1.0 - _surplus_tax_rate_pre)
             _surplus_pre    = np.maximum(_net_pre - _sched_pre[:n_years], 0.0)  # current USD
 
-            # Identify first brokerage account
-            _brok_names = [a for a in (alloc_accounts.get("per_year_portfolios") or {}).keys()
-                           if "BROKERAGE" in a.upper() or "TAXABLE" in a.upper()]
-            if _brok_names and np.any(_surplus_pre > 0):
-                _brok0 = _brok_names[0]
+            if np.any(_surplus_pre > 0):
                 # Deep-copy deposits_yearly so we don't mutate caller's alloc_accounts
                 import copy as _copy
                 alloc_accounts = dict(alloc_accounts)
@@ -217,15 +465,44 @@ def run_accounts_new(
                     k: v.copy() if hasattr(v, "copy") else np.array(v, dtype=float)
                     for k, v in (alloc_accounts.get("deposits_yearly") or {}).items()
                 }
-                _dep = alloc_accounts["deposits_yearly"].get(_brok0,
-                    np.zeros(n_years, dtype=float))
-                # Convert surplus from current USD to nominal (approximate: use year index
-                # as proxy — exact deflator built after simulate_balances, but current≈nominal
-                # for early years and the deposit magnitude matters more than exact scaling)
-                for _y in range(min(n_years, len(_surplus_pre), len(_dep))):
-                    if _surplus_pre[_y] > 0.0:
-                        _dep[_y] = _dep[_y] + _surplus_pre[_y]
-                alloc_accounts["deposits_yearly"][_brok0] = _dep
+
+                if _surplus_policy_pre == "waterfall":
+                    # Priority waterfall — routes surplus through IRS-limited buckets in order
+                    _waterfall_order = _eip_pre.get("waterfall_order",
+                        ["401k_limit", "roth_direct", "backdoor_roth", "brokerage"])
+                    _w2_for_wf = np.zeros(n_years, dtype=float)
+                    if w2_income_cur_paths is not None:
+                        _w2a = np.asarray(w2_income_cur_paths, dtype=float)
+                        _w2_for_wf = _w2a.mean(axis=0)[:n_years] if _w2a.ndim == 2 else _w2a[:n_years]
+                    _acct_types = alloc_accounts.get("account_types", {})
+                    _wf_deps = _compute_waterfall_deposits(
+                        surplus_by_year=_surplus_pre,
+                        waterfall_order=_waterfall_order,
+                        account_types=_acct_types,
+                        w2_by_year=_w2_for_wf,
+                        current_age=_current_age_now,
+                        n_years=n_years,
+                        filing=str((_pcfg or {}).get("filing_status", "MFJ")),
+                    )
+                    for _wa, _wd_arr in _wf_deps.items():
+                        _dep_wf = alloc_accounts["deposits_yearly"].get(
+                            _wa, np.zeros(n_years, dtype=float))
+                        for _y in range(min(n_years, len(_wd_arr), len(_dep_wf))):
+                            if _wd_arr[_y] > 0.0:
+                                _dep_wf[_y] += _wd_arr[_y]
+                        alloc_accounts["deposits_yearly"][_wa] = _dep_wf
+                else:
+                    # reinvest_in_brokerage — all surplus → first brokerage account
+                    _brok_names = [a for a in (alloc_accounts.get("per_year_portfolios") or {}).keys()
+                                   if "BROKERAGE" in a.upper() or "TAXABLE" in a.upper()]
+                    if _brok_names:
+                        _brok0 = _brok_names[0]
+                        _dep = alloc_accounts["deposits_yearly"].get(
+                            _brok0, np.zeros(n_years, dtype=float))
+                        for _y in range(min(n_years, len(_surplus_pre), len(_dep))):
+                            if _surplus_pre[_y] > 0.0:
+                                _dep[_y] = _dep[_y] + _surplus_pre[_y]
+                        alloc_accounts["deposits_yearly"][_brok0] = _dep
 
     # Core Monte Carlo
     acct_eoy_nom, total_nom_paths, total_real_paths, acct_class_eoy_nom = simulate_balances(
@@ -287,6 +564,30 @@ def run_accounts_new(
     # Per-account pre-cashflow snapshot (before RMDs, withdrawals, reinvestments).
     # Used in STEP 6 to compute pure-investment YoY that is unaffected by cashflows.
     acct_eoy_nom_core = {acct: bal.copy() for acct, bal in acct_eoy_nom.items()}
+
+    # ── Extract per-year growth multipliers from Monte Carlo output ────────────
+    # mult[a][:, y] = 1 + portfolio_return_y for account a in year y.
+    # Percentage returns are independent of balance size for proportional
+    # allocation models (the % return is the same whether $1M or $2M in the account).
+    # These multipliers are applied year-by-year to the post-cashflow running balance
+    # in the master cashflow loop below, which correctly propagates each year's
+    # RMD / withdrawal / tax debit into the starting balance for the next year.
+    _starting_bals = alloc_accounts.get("starting", {}) or {}
+    _growth_mult: Dict[str, np.ndarray] = {}
+    for _a, _bal_mc in acct_eoy_nom.items():
+        _s0 = float(_starting_bals.get(_a, 0.0))
+        _m = np.ones_like(_bal_mc)
+        if _s0 > 1e-6:
+            _raw0 = _bal_mc[:, 0] / _s0
+            _m[:, 0] = np.where(np.isfinite(_raw0), _raw0, 1.0)
+        else:
+            _m[:, 0] = 1.0
+        for _y in range(1, n_years):
+            _prev = np.maximum(np.where(np.isfinite(_bal_mc[:, _y - 1]), _bal_mc[:, _y - 1], 0.0), 1e-12)
+            _raw_y = _bal_mc[:, _y] / _prev
+            _m[:, _y] = np.where(np.isfinite(_raw_y), _raw_y, 1.0)
+        _growth_mult[_a] = _m
+    logger.debug("[sim] growth_mult extracted for %d accounts over %d years", len(_growth_mult), n_years)
 
     # Investment-only YoY from pure core path (before withdrawals/RMDs/etc.)
     # deflator not yet built here — compute year-1 inflation factor inline
@@ -358,85 +659,52 @@ def run_accounts_new(
     roth_accounts = [a for a in acct_names if _is_roth(a)]
 
 
-    # --- RMDs: compute factors and per-account RMD schedule (nominal) ---
-    rmd_factors = None
-    rmd_total_nom_paths = None
-    rmd_nom_per_acct = None
-    rmd_future_mean = np.zeros(n_years, dtype=float)
+    # ── RMD initialization — factors only; amounts computed year-by-year in cashflow loop ──
+    # IRS rule: RMD = prior-year-end balance ÷ factor[age].
+    # In the year-by-year loop, the "prior-year-end balance" is the actual
+    # post-cashflow running balance — not the raw Monte Carlo growth balance.
+    rmd_total_nom_paths = np.zeros((paths, n_years), dtype=float)
+    rmd_nom_per_acct: Dict[str, np.ndarray] = {}
+    rmd_future_mean  = np.zeros(n_years, dtype=float)
     rmd_current_mean = np.zeros(n_years, dtype=float)
-    
     rmd_extra_current = np.zeros(n_years, dtype=float)
+    rmd_factors = None
 
-    #if trad_accounts and rmd_table_path is not None and person_cfg is not None:
     if (
         rmds_enabled
         and trad_accounts
         and rmd_table_path is not None
         and person_cfg is not None
     ):
- 
         owner_current_age = float(person_cfg.get("current_age", 60.0))
-        # birth_year determines SECURE 2.0 RMD bracket only — independent of current_age
-        owner_birth_year = int(person_cfg.get("birth_year", 0) or 0) or None
+        owner_birth_year  = int(person_cfg.get("birth_year", 0) or 0) or None
         rmd_factors = build_rmd_factors(
             rmd_table_path=rmd_table_path,
             owner_current_age=owner_current_age,
             years=n_years,
             owner_birth_year=owner_birth_year,
         )
-    
-        rmd_total_nom_paths, rmd_nom_per_acct = compute_rmd_schedule_nominal(
-            trad_ira_balances_nom={a: acct_eoy_nom[a] for a in trad_accounts},
-            rmd_factors=rmd_factors,
-        )
-    
-        # Subtract RMDs from TRAD balances
-        for y in range(n_years):
-            for a in trad_accounts:
-                bal = np.where(np.isfinite(acct_eoy_nom[a][:, y]), acct_eoy_nom[a][:, y], 0.0)
-                take = np.where(np.isfinite(rmd_nom_per_acct[a][:, y]), rmd_nom_per_acct[a][:, y], 0.0)
-                acct_eoy_nom[a][:, y] = bal - take
-    
-        # Summaries: mean RMD per year in future & current USD
-        if rmd_total_nom_paths is not None:
-            rmd_future_mean = rmd_total_nom_paths.mean(axis=0)
-            if infl_yearly is not None and np.asarray(infl_yearly).size > 0:
-                arr_rmd = np.asarray(infl_yearly, dtype=float).reshape(-1)
-                if arr_rmd.size < n_years:
-                    arr_rmd = np.concatenate(
-                        [arr_rmd, np.full(n_years - arr_rmd.size, arr_rmd[-1] if arr_rmd.size > 0 else 0.0)]
-                    )
-                elif arr_rmd.size > n_years:
-                    arr_rmd = arr_rmd[:n_years]
-                deflator_rmd = np.cumprod(1.0 + arr_rmd)
-            else:
-                deflator_rmd = np.ones(n_years, dtype=float)
-            rmd_current_mean = rmd_future_mean / np.maximum(deflator_rmd, 1e-12)
-    
-            # Add per-path RMD in current USD into ordinary income (optional)
-            if ordinary_income_cur_paths is not None:
-                for y in range(n_years):
-                    rmd_cur_paths_y = rmd_total_nom_paths[:, y] / max(deflator_rmd[y], 1e-12)
-                    ordinary_income_cur_paths[:, y] += rmd_cur_paths_y
+        rmd_nom_per_acct = {a: np.zeros((paths, n_years), dtype=float) for a in trad_accounts}
+        logger.debug("[sim] RMD factors built; start_age computed from birth_year=%s", owner_birth_year)
 
 
     # --- Roth conversions — policy-driven ---
-    conversion_nom_paths = None
+    # Policy and window parsed here. Actual conversion amounts computed year-by-year
+    # in the master cashflow loop below, using the correct post-RMD running balance.
+    conversion_nom_paths = np.zeros((paths, n_years), dtype=float)
     conversion_tax_cost_cur_paths = np.zeros((paths, n_years), dtype=float)
-    conv_out_per_trad: Dict[str, np.ndarray] = {}
-    conv_in_per_roth:  Dict[str, np.ndarray] = {}
-    conv_tax_per_brok: Dict[str, np.ndarray] = {}
+    conv_out_per_trad: Dict[str, np.ndarray] = {a: np.zeros((paths, n_years), dtype=float) for a in trad_accounts}
+    conv_in_per_roth:  Dict[str, np.ndarray] = {a: np.zeros((paths, n_years), dtype=float) for a in roth_accounts}
+    conv_tax_per_brok: Dict[str, np.ndarray] = {a: np.zeros((paths, n_years), dtype=float) for a in brokerage_accounts}
 
     _roth_policy  = parse_roth_conversion_policy(person_cfg or {})
     _conv_enabled = _roth_policy["enabled"]
 
-    # Resolve conversion amount: explicit override > policy conversion_amount_k
     _raw_policy = _roth_policy.get("raw", {}) or {}
     if conversion_per_year_nom is None and _conv_enabled:
         _amount_k = float(_raw_policy.get("conversion_amount_k", 0.0))
         conversion_per_year_nom = _amount_k * 1_000.0 if _amount_k > 0.0 else None
 
-    # Determine if bracket-fill mode is requested
     _keepit_str = str(_raw_policy.get("keepit_below_max_marginal_fed_rate", "")).strip().lower()
     _bracket_fill_mode = (
         _conv_enabled
@@ -445,7 +713,6 @@ def run_accounts_new(
         and ("fill" in _keepit_str or _keepit_str.replace("%", "").replace(".", "").isdigit())
     )
 
-    # Resolve window from policy
     _current_age    = float((person_cfg or {}).get("current_age", 65))
     _window_end_age = _roth_policy.get("window_end_age")
     if _window_end_age is not None:
@@ -457,7 +724,6 @@ def run_accounts_new(
     else:
         _window_start_y, _window_end_y = 0, n_years
 
-    # Build deflator for conversion block (STEP 1 builds it again later; this is intentional)
     _deflator_conv = np.ones(n_years, dtype=float)
     if infl_yearly is not None and np.asarray(infl_yearly).size > 0:
         _arr_conv = np.asarray(infl_yearly, dtype=float).reshape(-1)
@@ -469,148 +735,144 @@ def run_accounts_new(
             _arr_conv = _arr_conv[:n_years]
         _deflator_conv = np.cumprod(1.0 + _arr_conv)
 
-    if trad_accounts and roth_accounts and _conv_enabled and conversions_enabled:
+    # ── Proactive conversion gate — evaluated ONCE before any year runs ────────
+    # Roth conversion is a tax-optimization desire, not a survival necessity.
+    # If the plan shows foreseeable liquidity stress, defer conversion entirely
+    # until that stress period has passed. The gate uses only known-today data:
+    #   - current brokerage balance (from starting)
+    #   - confirmed net income (income.json, no growth)
+    #   - planned spending (withdrawal_schedule)
+    #   - IRS age gate (59.5)
+    # No MC returns, no inflation projections — forward information is excluded.
+    #
+    # Liquidity stress is defined as:
+    #   sum(planned_cur[y] - net_income[y] - 0) > brokerage_balance
+    # for any year y before age 59.5 (when IRA access opens).
+    # i.e. "will the brokerage run dry before 59.5 at current spending?"
+    #
+    # If yes: defer _window_start_y to the first year where age >= 59.5.
+    # The conversion can then start once liquidity pressure is resolved.
+    _conv_defer_until_y = _window_start_y  # default: no deferral
+    if _conv_enabled and _current_age < 59.5:
+        _age_595_y = max(0, int(np.ceil(59.5 - _current_age)))  # first year at/past 59.5
+        _brok_start = sum(
+            float(alloc_accounts.get("starting", {}).get(b, 0.0))
+            for b in brokerage_accounts
+        )
+        _net_inc_arr = np.zeros(n_years, dtype=float)
+        if income_sources_cur_paths is not None and income_sources_cur_paths.shape[1] >= n_years:
+            _gross_mean = income_sources_cur_paths[:, :n_years].mean(axis=0)
+            _net_inc_arr = _gross_mean * (1.0 - float(
+                (excess_income_policy or {}).get("income_offset_tax_rate", 0.30)
+            ))
+        _planned_arr = np.asarray(sched, dtype=float) if sched is not None else np.zeros(n_years)
+        if _planned_arr.size < n_years:
+            _planned_arr = np.concatenate([_planned_arr, np.full(n_years - _planned_arr.size, _planned_arr[-1] if _planned_arr.size else 0.0)])
 
-        if _bracket_fill_mode:
-            # ── Bracket-fill: compute conversion amount per-path per-year
-            # based on how much income headroom exists before next bracket.
-            # ordinary_income_cur_paths already includes RMDs at this point.
-            # apply_bracket_fill_conversions also:
-            #   - adds conversion to ordinary_income_cur_paths
-            #   - computes tax cost
-            #   - debits tax from brokerage
-            brokerage_balances_nom = {a: acct_eoy_nom[a] for a in brokerage_accounts}
-            _ytd = ytd_income_nom_paths if ytd_income_nom_paths is not None else np.zeros((paths, n_years), dtype=float)
+        # Cumulative net draw on brokerage for each year before 59.5
+        _brok_running = float(_brok_start)
+        _liquidity_stressed = False
+        for _gy in range(min(_age_595_y, n_years)):
+            _draw_y = max(float(_planned_arr[_gy]) - float(_net_inc_arr[_gy]), 0.0)
+            _brok_running -= _draw_y
+            if _brok_running < 0:
+                _liquidity_stressed = True
+                break
 
-            _conv_result = apply_bracket_fill_conversions(
-                    trad_ira_balances_nom      = {a: acct_eoy_nom[a] for a in trad_accounts},
-                    roth_ira_balances_nom      = {a: acct_eoy_nom[a] for a in roth_accounts},
-                    brokerage_balances_nom     = brokerage_balances_nom,
-                    ordinary_income_cur_paths  = ordinary_income_cur_paths,
-                    ytd_income_nom_paths       = _ytd,
-                    tax_cfg                    = tax_cfg,
-                    roth_policy                = _roth_policy,
-                    deflator                   = _deflator_conv,
-                    window_start_y             = _window_start_y,
-                    window_end_y               = _window_end_y,
-            )
-            # roth_conversion_core returns 8 values:
-            # updated_trad, updated_roth, updated_brok,
-            # conversion_nom_paths, tax_cost_cur_paths,
-            # conv_out_per_trad, conv_in_per_roth, conv_tax_per_brok
-            (updated_trad, updated_roth, updated_brok,
-             conversion_nom_paths, conversion_tax_cost_cur_paths,
-             conv_out_per_trad, conv_in_per_roth, conv_tax_per_brok) = _conv_result
-            for a in trad_accounts:
-                acct_eoy_nom[a] = updated_trad[a]
-            for a in roth_accounts:
-                acct_eoy_nom[a] = updated_roth[a]
-            for a in brokerage_accounts:
-                acct_eoy_nom[a] = updated_brok[a]
-
-            _mean_conv = float(conversion_nom_paths.mean())
-            _mean_tax  = float(conversion_tax_cost_cur_paths.mean())
+        if _liquidity_stressed:
+            # Defer conversion window start to first year at/past 59.5
+            # (when IRA access opens and liquidity pressure resolves)
+            _conv_defer_until_y = max(_window_start_y, _age_595_y)
+            _window_start_y = _conv_defer_until_y
             logger.info(
-                "[sim] Roth bracket-fill conversions | window y%d-y%d | age %.0f→%.0f"
-                " | mean_conv_nom=$%.0f | mean_tax_cur=$%.0f",
-                _window_start_y, _window_end_y,
-                _current_age, _current_age + _window_end_y,
-                _mean_conv, _mean_tax,
-            )
-            logger.info(
-                "[DIAG] conversion_nom_paths per-year mean (all 30 yrs): %s",
-                np.round(conversion_nom_paths.mean(axis=0), 0).tolist(),
-            )
-            logger.info(
-                "[DIAG] TRAD accts year 1-5 mean post-conv: %s",
-                {a: np.round(acct_eoy_nom[a][:, :5].mean(axis=0), 0).tolist()
-                 for a in trad_accounts},
-            )
-            logger.info(
-                "[DIAG] ROTH accts year 1-5 mean post-conv: %s",
-                {a: np.round(acct_eoy_nom[a][:, :5].mean(axis=0), 0).tolist()
-                 for a in roth_accounts},
+                "[sim] Proactive conversion gate: brokerage projected to deplete before age 59.5 "
+                "(starting=$%.0f, net_draw/yr≈$%.0f). Deferring conversions from yr%d → yr%d (age 59.5).",
+                _brok_start,
+                float(np.maximum(_planned_arr[:_age_595_y] - _net_inc_arr[:_age_595_y], 0).mean()),
+                _window_start_y - (_age_595_y - _window_start_y),
+                _conv_defer_until_y,
             )
 
-        elif conversion_per_year_nom is not None:
-            # ── Fixed-amount fallback (conversion_amount_k in person.json)
-            trad_balances_nom = {a: acct_eoy_nom[a] for a in trad_accounts}
-            roth_balances_nom = {a: acct_eoy_nom[a] for a in roth_accounts}
+    # ── Pre-simulation withdrawal sustainability check ────────────────────────
+    # Before ANY Monte Carlo runs, check if the plan is arithmetically viable.
+    # Uses ONLY:
+    #   - starting portfolio (all accounts, known today)
+    #   - confirmed net income from income.json (no growth assumed)
+    #   - planned withdrawal schedule
+    # Deliberately excludes: market returns, inflation, shocks — all forward info.
+    #
+    # Two thresholds:
+    #   CRITICAL: total_planned > total_resources        → plan mathematically impossible
+    #   WARNING:  total_planned > total_resources × 0.85 → plan requires every dollar + growth
+    #
+    # These flags flow into the withdrawals dict and are read by the insights engine
+    # BEFORE the MC results are available — so the UI can flag immediately.
+    _plan_viability: dict = {}
+    if sched is not None and starting_total > 0:
+        # Build confirmed resources (no growth, no inflation)
+        _net_inc_arr2 = np.zeros(n_years, dtype=float)
+        _income_offset_rate2 = float((excess_income_policy or {}).get("income_offset_tax_rate", 0.30))
+        if income_sources_cur_paths is not None and income_sources_cur_paths.shape[1] >= n_years:
+            _gross2 = income_sources_cur_paths[:, :n_years].mean(axis=0)
+            _net_inc_arr2 = _gross2 * (1.0 - _income_offset_rate2)
 
-            updated_trad, updated_roth, conversion_nom_paths = apply_simple_conversions(
-                trad_ira_balances_nom  = trad_balances_nom,
-                roth_ira_balances_nom  = roth_balances_nom,
-                conversion_per_year_nom = float(conversion_per_year_nom),
-                window_start_y         = _window_start_y,
-                window_end_y           = _window_end_y,
-            )
-            for a in trad_accounts:
-                acct_eoy_nom[a] = updated_trad[a]
-            for a in roth_accounts:
-                acct_eoy_nom[a] = updated_roth[a]
+        _planned_arr2 = np.asarray(sched, dtype=float)
+        if _planned_arr2.size < n_years:
+            _planned_arr2 = np.concatenate([_planned_arr2,
+                np.full(n_years - _planned_arr2.size,
+                        _planned_arr2[-1] if _planned_arr2.size else 0.0)])
 
-            # Note: ordinary_income_cur_paths already updated inside apply_bracket_fill_conversions
+        _total_confirmed_resources = float(starting_total) + float(_net_inc_arr2.sum())
+        _total_planned_spend       = float(_planned_arr2[:n_years].sum())
+        _net_draw_total            = max(_total_planned_spend - float(_net_inc_arr2.sum()), 0.0)
+        _coverage_ratio            = _total_confirmed_resources / max(_total_planned_spend, 1.0)
 
-            logger.info(
-                "[sim] Roth fixed conversions | amount=$%.0f/yr | window y%d-y%d | age %.0f→%.0f",
-                float(conversion_per_year_nom),
-                _window_start_y, _window_end_y,
-                _current_age, _current_age + _window_end_y,
-            )
-        else:
-            logger.info(
-                "[sim] Roth conversions ENABLED but no amount configured"
-                " — set conversion_amount_k or keepit_below_max_marginal_fed_rate"
-            )
+        # Per-year arithmetic sustainability: simulate balance with ZERO market return
+        # (worst-case: money doesn't grow at all, plain subtraction)
+        _bal_noreturn = float(starting_total)
+        _first_failure_y = None
+        _failure_gap_total = 0.0
+        for _gy2 in range(n_years):
+            _draw_y2 = max(float(_planned_arr2[_gy2]) - float(_net_inc_arr2[_gy2]), 0.0)
+            _bal_noreturn -= _draw_y2
+            if _bal_noreturn < 0 and _first_failure_y is None:
+                _first_failure_y = _gy2
+            if _bal_noreturn < 0:
+                _failure_gap_total += abs(_bal_noreturn)
+                _bal_noreturn = 0.0  # can't go below zero
 
-    # (no legacy withdrawals block here anymore)
+        _start_age_pv = float((person_cfg or {}).get("current_age", 55))
+        _plan_viability = {
+            "total_confirmed_resources": round(_total_confirmed_resources, 0),
+            "total_planned_spend":        round(_total_planned_spend, 0),
+            "total_net_portfolio_draw":   round(_net_draw_total, 0),
+            "coverage_ratio":             round(_coverage_ratio, 3),
+            "arithmetic_failure_year":    (_first_failure_y + 1) if _first_failure_y is not None else None,
+            "arithmetic_failure_age":     (int(_start_age_pv + _first_failure_y + 1)
+                                          if _first_failure_y is not None else None),
+            "arithmetic_failure_gap_total": round(_failure_gap_total, 0),
+            "viability_level": (
+                "CRITICAL" if _coverage_ratio < 1.0 else
+                "WARNING"  if _coverage_ratio < 1.15 else
+                "OK"
+            ),
+        }
+        logger.info(
+            "[sim] Plan viability (no-return arithmetic): coverage=%.2fx  "
+            "resources=$%.0f  planned=$%.0f  first_failure_yr=%s  level=%s",
+            _coverage_ratio, _total_confirmed_resources, _total_planned_spend,
+            _first_failure_y + 1 if _first_failure_y is not None else "none",
+            _plan_viability["viability_level"],
+        )
 
-    # --- Taxes over all years (current USD, per-path) — modular path only ---
-    taxes_fed_cur_paths = np.zeros((paths, n_years), dtype=float)
-    taxes_state_cur_paths = np.zeros((paths, n_years), dtype=float)
-    taxes_niit_cur_paths = np.zeros((paths, n_years), dtype=float)
+    # --- Tax arrays — populated year-by-year in the master cashflow loop below ---
+    taxes_fed_cur_paths    = np.zeros((paths, n_years), dtype=float)
+    taxes_state_cur_paths  = np.zeros((paths, n_years), dtype=float)
+    taxes_niit_cur_paths   = np.zeros((paths, n_years), dtype=float)
     taxes_excise_cur_paths = np.zeros((paths, n_years), dtype=float)
-
-    if (
-        not ignore_taxes
-        and tax_cfg is not None
-        and ordinary_income_cur_paths is not None
-        and qual_div_cur_paths is not None
-        and cap_gains_cur_paths is not None
-        and ytd_income_nom_paths is not None
-    ):
-        for y in range(n_years):
-            # compute_annual_taxes_paths returns 5 arrays since v6.3:
-            #   fed (income brackets only), state, niit, excise, medicare (0.9% AMT on W2)
-            # Medicare (IRC §3101(b)(2)) is folded into taxes_fed_cur_paths so all
-            # downstream code (summary totals, snapshot, UI) sees the correct federal total.
-            # The split is computed in taxes_core.py — add here once, never split again.
-            (
-                _fed_brackets_y,
-                taxes_state_cur_paths[:, y],
-                taxes_niit_cur_paths[:, y],
-                taxes_excise_cur_paths[:, y],
-                _medicare_y,
-            ) = compute_annual_taxes_paths(
-                ordinary_income_cur_paths[:, y],
-                qual_div_cur_paths[:, y],
-                cap_gains_cur_paths[:, y],
-                tax_cfg,
-                ytd_income_nom_paths[:, y],
-                w2_income_cur_paths[:, y] if w2_income_cur_paths is not None else None,
-            )
-            # Total federal = income bracket tax + Additional Medicare Tax (0.9%)
-            taxes_fed_cur_paths[:, y] = _fed_brackets_y + _medicare_y
-
-    # Snapshot ordinary_income_cur_paths immediately after tax computation.
-    # This is the exact income base the tax engine used — W2 + SS + RMDs + conversions.
-    # Snapshotting here (not later) ensures we capture the correct denominator for
-    # effective tax rate, before any further simulation steps modify the array.
-    _taxable_income_snapshot = (
-        ordinary_income_cur_paths.copy()
-        if ordinary_income_cur_paths is not None
-        else None
-    )
+    # _taxable_income_snapshot taken after the master loop (ordinary_income_cur_paths
+    # accumulates RMDs + conversions year-by-year, so snapshot after loop is correct).
+    _taxable_income_snapshot = None
 
 
     # =========================================================================
@@ -653,6 +915,8 @@ def run_accounts_new(
         "total_withdraw_current_mean":  zeros.tolist(),
         "total_withdraw_future_mean":   zeros.tolist(),
         "net_spendable_current_mean":   zeros.tolist(),
+        # Plan viability arithmetic (computed before any MC, no predictions)
+        "plan_viability":               _plan_viability,
     }
 
     planned_cur = np.zeros(n_years, dtype=float)
@@ -704,134 +968,74 @@ def run_accounts_new(
     _cumulative_deficit_nom = np.zeros(paths, dtype=float)
 
     # =========================================================================
-    # STEP 3: Apply discretionary withdrawals (amount above RMD) if enabled
+    # MASTER CASHFLOW LOOP — Year-by-year simulation
     #
-    # RMD was already deducted from TRAD accounts in the RMD block above.
-    # Here we only pull the portion of the spending plan that exceeds the RMD.
+    # For each year y, in correct order:
+    #   1. Apply MC portfolio growth to running balance
+    #   2. Compute and deduct RMD from TRAD accounts (based on actual balance)
+    #   3. Apply Roth conversions (bracket-fill or fixed, if enabled)
+    #   4. Compute taxes from actual income (W2 + SS + RMD + conversion + divs/CG)
+    #   5. Apply discretionary withdrawal from portfolio accounts
+    #   6. Debit taxes from brokerage (net of conversion tax already debited)
+    #   7. Reinvest surplus RMD to brokerage (if policy = reinvest_in_brokerage)
+    #   8. Store post-cashflow balance as acct_eoy_nom[:, y]
     #
-    #   plan > RMD  →  pull (plan - RMD) from brokerage/IRA accounts
-    #   plan <= RMD →  RMD already covers the plan; nothing extra to pull
+    # The running balance propagates correctly: year Y's cashflows are reflected
+    # in the starting balance for year Y+1's growth computation.
     # =========================================================================
-    # Ensure all account arrays are writable C-contiguous copies before any
-    # slice assignment.  simulate_balances (or upstream reassignments) may
-    # return read-only or Fortran-order views; in-place assignment silently
-    # fails on read-only arrays.
-    acct_eoy_nom = {
-        acct: np.array(bal, dtype=float, order='C', copy=True)
-        for acct, bal in acct_eoy_nom.items()
+
+    # ── Running balances — start at actual starting values ──────────────────
+    _running_bal: Dict[str, np.ndarray] = {
+        a: np.full(paths, float(_starting_bals.get(a, 0.0)), dtype=float)
+        for a in acct_eoy_nom
     }
 
-    # Per-account withdrawal outflow tracker (paths × n_years).
-    # Accumulated inside the STEP 3 loop; available in STEP 6 for per-account stats.
-    withdrawal_out_nom_per_acct: Dict[str, np.ndarray] = {
+    # ── Reinvestment tracker ─────────────────────────────────────────────────
+    reinvest_nom_per_acct: Dict[str, np.ndarray] = {
         acct: np.zeros((paths, n_years), dtype=float) for acct in acct_eoy_nom.keys()
     }
 
-    # Per-path shortfall tracker — populated inside withdrawal loop.
-    # Always defined here so success rate computation is unconditional.
-    _shortfall_any_path = np.zeros((paths, n_years), dtype=bool)
+    # ── Withdrawal output arrays ─────────────────────────────────────────────
+    withdrawal_out_nom_per_acct: Dict[str, np.ndarray] = {
+        acct: np.zeros((paths, n_years), dtype=float) for acct in acct_eoy_nom.keys()
+    }
+    _shortfall_any_path    = np.zeros((paths, n_years), dtype=bool)
+    realized_nom_paths     = np.zeros((paths, n_years), dtype=float)
+    shortfall_nom_paths    = np.zeros((paths, n_years), dtype=float)
+    realized_cur           = np.zeros(n_years, dtype=float)
+    shortfall_cur          = np.zeros(n_years, dtype=float)
+    _cumulative_deficit_nom = np.zeros(paths, dtype=float)
+    planned_cur            = np.zeros(n_years, dtype=float)
 
+    withdrawals["realized_current_per_acct_mean"]  = {}
+    withdrawals["shortfall_current_per_acct_mean"] = {}
+
+    # ── RMD surplus policy ───────────────────────────────────────────────────
+    extra_handling = "cash_out"
+    if person_cfg is not None:
+        extra_handling = person_cfg.get("rmd_policy", {}).get("extra_handling", "cash_out")
+
+    # ── Withdrawal setup (schedule, income offset, sequence) ─────────────────
     if apply_withdrawals and sched is not None:
         sched_vec = np.asarray(sched, dtype=float).reshape(-1)
         if sched_vec.size < n_years:
-            sched_vec = np.concatenate(
-                [sched_vec, np.full(n_years - sched_vec.size, sched_vec[-1])]
-            )
+            sched_vec = np.concatenate([sched_vec, np.full(n_years - sched_vec.size, sched_vec[-1])])
         elif sched_vec.size > n_years:
             sched_vec = sched_vec[:n_years]
 
         planned_cur = sched_vec.copy()
 
-        # ── Income offset: reduce portfolio draw by external income ──────────────
-        # External income sources (W2, rental, SS, misc) flow through the tax engine
-        # separately. The withdrawal_schedule specifies the after-tax PORTFOLIO take-home
-        # target. If external income already meets part (or all) of living expenses,
-        # the portfolio draw should be reduced accordingly.
-        #
-        # Uses approximate after-tax income = gross_income × (1 - income_offset_tax_rate)
-        # income_offset_tax_rate is configured in economic.json excess_income_policy.
-        # Default 0.30 (30% effective rate). This is an approximation — the actual tax
-        # is computed by the full tax engine above. Phase 2 will replace this with
-        # exact computed after-tax income once per-source tax tracking is added.
         _eip = excess_income_policy or {}
         _income_offset_tax_rate = float(_eip.get("income_offset_tax_rate", 0.30))
         _surplus_policy = str(_eip.get("surplus_policy", "reinvest_in_brokerage")).strip()
 
-        _net_income_offset = np.zeros(n_years, dtype=float)  # current USD, per year
-        _surplus_income_cur = np.zeros(n_years, dtype=float)  # current USD surplus per year
-
+        _net_income_offset = np.zeros(n_years, dtype=float)
+        _surplus_income_cur = np.zeros(n_years, dtype=float)
         if income_sources_cur_paths is not None and income_sources_cur_paths.shape[1] >= n_years:
-            # Mean across paths (income is deterministic, so all paths identical)
-            _gross_income_mean = income_sources_cur_paths[:, :n_years].mean(axis=0)  # (n_years,)
+            _gross_income_mean = income_sources_cur_paths[:, :n_years].mean(axis=0)
             _net_income_offset = _gross_income_mean * (1.0 - _income_offset_tax_rate)
-            # Surplus = how much net income exceeds the withdrawal target (in current USD)
-            _surplus_income_cur = np.maximum(
-                _net_income_offset - planned_cur,
-                0.0
-            )
+            _surplus_income_cur = np.maximum(_net_income_offset - planned_cur, 0.0)
 
-        # Adjusted withdrawal target = planned - income offset
-        # The RMD offset is kept separate — extra_cur already accounts for RMD
-        _income_adjusted_planned = np.maximum(planned_cur - _net_income_offset, 0.0)
-        extra_cur = np.maximum(_income_adjusted_planned - rmd_current_mean, 0.0)
-
-        realized_cur   = np.zeros(n_years, dtype=float)
-        shortfall_cur  = np.zeros(n_years, dtype=float)
-        # Full per-path realized/shortfall — needed for median-path reporting
-        realized_nom_paths   = np.zeros((paths, n_years), dtype=float)
-        shortfall_nom_paths  = np.zeros((paths, n_years), dtype=float)
-        # Per-path shortfall tracker: True if path had any shortfall in that year
-        _shortfall_any_path = np.zeros((paths, n_years), dtype=bool)
-        withdrawals["realized_current_per_acct_mean"]  = {}
-        withdrawals["shortfall_current_per_acct_mean"] = {}
-
-        # withdraw_sequence may be a flat list (same every year) or a list-of-lists (per year).
-        # Normalise to per-year so the simulator always uses seq_y for year y.
-        _fallback_seq = list(acct_eoy_nom.keys())
-        if withdraw_sequence is None:
-            _seq_per_year = [_fallback_seq] * n_years
-        elif withdraw_sequence and isinstance(withdraw_sequence[0], list):
-            # Already per-year list-of-lists
-            _seq_per_year = withdraw_sequence
-        else:
-            # Flat list — use same sequence every year
-            _seq_per_year = [withdraw_sequence] * n_years
-
-        # ---------------------------------------------------------------
-        # IRS age gate: before 59.5, TRAD IRA and ROTH withdrawals incur
-        # a 10% early-withdrawal penalty.  Hard-enforce brokerage-only
-        # regardless of what the withdrawal_sequence config says.
-        # After 59.5 the configured sequence is used as-is.
-        # ---------------------------------------------------------------
-        owner_age_y0 = float(person_cfg.get("current_age", 60.0)) if person_cfg else 60.0
-        brokerage_only_seq = [a for a in _fallback_seq if _is_brokerage(a)]
-        if not brokerage_only_seq:
-            brokerage_only_seq = [a for a in acct_eoy_nom.keys() if _is_brokerage(a)]
-
-        _seq_per_year = [
-            brokerage_only_seq if (owner_age_y0 + y) < 59.5 else
-            (_seq_per_year[y] if y < len(_seq_per_year) else _fallback_seq)
-            for y in range(n_years)
-        ]
-
-        # Bad-market sequence — parallel to _seq_per_year
-        # Falls back to good-market sequence if no bad sequence provided
-        _fallback_bad_seq = list(acct_eoy_nom.keys())
-        if withdraw_sequence_bad is None:
-            _seq_bad_per_year = _seq_per_year   # no bad sequence → same as good
-        elif withdraw_sequence_bad and isinstance(withdraw_sequence_bad[0], list):
-            _seq_bad_per_year = withdraw_sequence_bad
-        else:
-            _seq_bad_per_year = [withdraw_sequence_bad] * n_years
-
-        # Apply age gate to bad sequence too
-        _seq_bad_per_year = [
-            brokerage_only_seq if (owner_age_y0 + y) < 59.5 else
-            (_seq_bad_per_year[y] if y < len(_seq_bad_per_year) else _fallback_bad_seq)
-            for y in range(n_years)
-        ]
-
-        # Base (floor) withdrawal schedule — pad/trim to n_years
         if sched_base is not None:
             _sb = np.asarray(sched_base, dtype=float)
             if _sb.size < n_years:
@@ -842,76 +1046,197 @@ def run_accounts_new(
         else:
             _sched_base = np.zeros(n_years, dtype=float)
 
-        for y in range(n_years):
-            # ── Bad market state for this year ────────────────────────────────
-            bad_flag_y = _bad_market_paths[:, y]           # (paths,) bool
-            frac_bad   = float(bad_flag_y.mean())          # 0-1: fraction of paths in bad market
+        # Withdrawal sequence
+        _fallback_seq = list(acct_eoy_nom.keys())
+        if withdraw_sequence is None:
+            _seq_per_year = [_fallback_seq] * n_years
+        elif withdraw_sequence and isinstance(withdraw_sequence[0], list):
+            _seq_per_year = withdraw_sequence
+        else:
+            _seq_per_year = [withdraw_sequence] * n_years
 
-            # ── Withdrawal sequence: switch to bad-market order when majority bad ─
-            # Majority rule: if >50% of paths are in bad market, use bad sequence.
-            # This is a practical simplification — a per-path switch would require
-            # running withdrawals_core separately per path (expensive).
-            if frac_bad > 0.5:
-                seq = _seq_bad_per_year[y] if y < len(_seq_bad_per_year) else _fallback_seq
-            else:
-                seq = _seq_per_year[y] if y < len(_seq_per_year) else _fallback_seq
+        owner_age_y0 = float(person_cfg.get("current_age", 60.0)) if person_cfg else 60.0
+        brokerage_only_seq = [a for a in _fallback_seq if _is_brokerage(a)]
+        if not brokerage_only_seq:
+            brokerage_only_seq = [a for a in acct_eoy_nom.keys() if _is_brokerage(a)]
+        _seq_per_year = [
+            brokerage_only_seq if (owner_age_y0 + y) < 59.5 else
+            (_seq_per_year[y] if y < len(_seq_per_year) else _fallback_seq)
+            for y in range(n_years)
+        ]
+        _fallback_bad_seq = list(acct_eoy_nom.keys())
+        if withdraw_sequence_bad is None:
+            _seq_bad_per_year = _seq_per_year
+        elif withdraw_sequence_bad and isinstance(withdraw_sequence_bad[0], list):
+            _seq_bad_per_year = withdraw_sequence_bad
+        else:
+            _seq_bad_per_year = [withdraw_sequence_bad] * n_years
+        _seq_bad_per_year = [
+            brokerage_only_seq if (owner_age_y0 + y) < 59.5 else
+            (_seq_bad_per_year[y] if y < len(_seq_bad_per_year) else _fallback_bad_seq)
+            for y in range(n_years)
+        ]
+    else:
+        _sched_base = np.zeros(n_years, dtype=float)
+        _net_income_offset = np.zeros(n_years, dtype=float)
+        _fallback_seq = list(acct_eoy_nom.keys())
+        _seq_per_year = [_fallback_seq] * n_years
+        _seq_bad_per_year = [_fallback_seq] * n_years
+        _fallback_bad_seq = _fallback_seq
 
-            # ── Amount scaling ─────────────────────────────────────────────────
-            # Base nominal target for this year (above-RMD discretionary portion)
-            extra_nom_base = extra_cur[y] * deflator[y]
+    # ── n_brok for tax/reinvest debit split ─────────────────────────────────
+    n_brok = max(len(brokerage_accounts), 1)
 
+    # =========================================================================
+    # YEAR-BY-YEAR LOOP
+    # =========================================================================
+    for y in range(n_years):
+        # ── 1. Apply MC growth for year y ──────────────────────────────────
+        for a in list(_running_bal.keys()):
+            _gm = _growth_mult[a][:, y] if a in _growth_mult else np.ones(paths)
+            _running_bal[a] = np.maximum(_running_bal[a] * _gm, 0.0)
+
+        # ── 2. Compute and deduct RMD from TRAD accounts ───────────────────
+        _rmd_total_y = np.zeros(paths, dtype=float)
+        if rmd_factors is not None and y < len(rmd_factors) and rmd_factors[y] > 0.0:
+            _f = float(rmd_factors[y])
+            for a in trad_accounts:
+                _ba = _running_bal[a]
+                # RMD = balance ÷ factor, capped at actual balance (can't RMD more than you have)
+                _rmd_a = np.minimum(_ba / _f, _ba)
+                rmd_nom_per_acct[a][:, y] = _rmd_a
+                _rmd_total_y += _rmd_a
+                _running_bal[a] = np.maximum(_ba - _rmd_a, 0.0)
+            rmd_total_nom_paths[:, y] = _rmd_total_y
+            # Add RMD to ordinary income (taxable income for this year)
+            if ordinary_income_cur_paths is not None:
+                ordinary_income_cur_paths[:, y] += _rmd_total_y / max(deflator[y], 1e-12)
+
+        # ── 3. Roth conversions for year y ─────────────────────────────────
+        # Proactive liquidity gate (above) already deferred _window_start_y past
+        # age 59.5 if the plan shows brokerage depletion risk. The only in-loop
+        # guard needed is a hard stop when brokerage is actually empty (can't pay
+        # the conversion tax bill) — not a policy decision, just arithmetic.
+        _brok_bal_y = sum(np.maximum(_running_bal.get(b, np.zeros(paths)), 0.0)
+                          for b in brokerage_accounts)
+        _brok_mean_y = float(_brok_bal_y.mean()) if hasattr(_brok_bal_y, 'mean') else float(_brok_bal_y)
+        _conv_blocked = _brok_mean_y < 5_000.0
+
+        if _conv_enabled and conversions_enabled and trad_accounts and roth_accounts and _window_start_y <= y < _window_end_y and not _conv_blocked:
+            # Pass single-year (paths × 1) slices to conversion functions
+            _trad_y = {a: _running_bal[a].reshape(-1, 1) for a in trad_accounts}
+            _roth_y = {a: _running_bal[a].reshape(-1, 1) for a in roth_accounts}
+            _brok_y = {a: _running_bal[a].reshape(-1, 1) for a in brokerage_accounts}
+            _inc_y  = (ordinary_income_cur_paths[:, y:y+1].copy()
+                       if ordinary_income_cur_paths is not None else np.zeros((paths, 1)))
+            _ytd_y  = (ytd_income_nom_paths[:, y:y+1]
+                       if ytd_income_nom_paths is not None else np.zeros((paths, 1)))
+            _defl_y = _deflator_conv[y:y+1]
+
+            if _bracket_fill_mode:
+                try:
+                    _cr = apply_bracket_fill_conversions(
+                        trad_ira_balances_nom     = _trad_y,
+                        roth_ira_balances_nom     = _roth_y,
+                        brokerage_balances_nom    = _brok_y,
+                        ordinary_income_cur_paths = _inc_y,
+                        ytd_income_nom_paths      = _ytd_y,
+                        tax_cfg                   = tax_cfg,
+                        roth_policy               = _roth_policy,
+                        deflator                  = _defl_y,
+                        window_start_y            = 0,
+                        window_end_y              = 1,
+                    )
+                    (u_trad, u_roth, u_brok, _conv_p_y, _conv_tax_y,
+                     _cout_y, _cin_y, _ctax_y) = _cr
+                    for a in trad_accounts:
+                        _running_bal[a]       = u_trad[a][:, 0]
+                        conv_out_per_trad[a][:, y] = _cout_y.get(a, np.zeros((paths, 1)))[:, 0]
+                    for a in roth_accounts:
+                        _running_bal[a]       = u_roth[a][:, 0]
+                        conv_in_per_roth[a][:, y]  = _cin_y.get(a, np.zeros((paths, 1)))[:, 0]
+                    for a in brokerage_accounts:
+                        _running_bal[a]       = u_brok[a][:, 0]
+                        conv_tax_per_brok[a][:, y] = _ctax_y.get(a, np.zeros((paths, 1)))[:, 0]
+                    conversion_nom_paths[:, y] = _conv_p_y[:, 0]
+                    conversion_tax_cost_cur_paths[:, y] = _conv_tax_y[:, 0] if hasattr(_conv_tax_y, '__len__') else 0.0
+                    if ordinary_income_cur_paths is not None:
+                        ordinary_income_cur_paths[:, y] = _inc_y[:, 0]
+                except Exception as _conv_err:
+                    logger.warning("[sim yr%d] bracket-fill conversion failed: %s", y, _conv_err)
+
+            elif conversion_per_year_nom is not None:
+                try:
+                    u_trad2, u_roth2, _conv_p2 = apply_simple_conversions(
+                        trad_ira_balances_nom    = _trad_y,
+                        roth_ira_balances_nom    = _roth_y,
+                        conversion_per_year_nom  = float(conversion_per_year_nom),
+                        window_start_y           = 0,
+                        window_end_y             = 1,
+                    )
+                    for a in trad_accounts:
+                        _running_bal[a] = u_trad2[a][:, 0]
+                    for a in roth_accounts:
+                        _running_bal[a] = u_roth2[a][:, 0]
+                    _conv_nom_y = _conv_p2[:, 0]
+                    conversion_nom_paths[:, y] = _conv_nom_y
+                    if ordinary_income_cur_paths is not None:
+                        ordinary_income_cur_paths[:, y] += _conv_nom_y / max(deflator[y], 1e-12)
+                except Exception as _conv_err2:
+                    logger.warning("[sim yr%d] fixed conversion failed: %s", y, _conv_err2)
+
+        # ── 4. Compute taxes for year y ─────────────────────────────────────
+        if not ignore_taxes and tax_cfg is not None and ordinary_income_cur_paths is not None:
+            _income_y = ordinary_income_cur_paths[:, y]
+            _qdiv_y   = qual_div_cur_paths[:, y]  if qual_div_cur_paths  is not None else np.zeros(paths)
+            _cg_y     = cap_gains_cur_paths[:, y] if cap_gains_cur_paths is not None else np.zeros(paths)
+            _ytd2_y   = ytd_income_nom_paths[:, y] if ytd_income_nom_paths is not None else np.zeros(paths)
+            _w2_y     = w2_income_cur_paths[:, y]  if w2_income_cur_paths  is not None else None
+            (
+                _fed_brackets_y,
+                taxes_state_cur_paths[:, y],
+                taxes_niit_cur_paths[:, y],
+                taxes_excise_cur_paths[:, y],
+                _medicare_y,
+            ) = compute_annual_taxes_paths(
+                _income_y, _qdiv_y, _cg_y, tax_cfg, _ytd2_y, _w2_y,
+            )
+            taxes_fed_cur_paths[:, y] = _fed_brackets_y + _medicare_y
+
+        # ── 5. Discretionary withdrawal ─────────────────────────────────────
+        if apply_withdrawals and sched is not None:
+            bad_flag_y = _bad_market_paths[:, y]
+            frac_bad   = float(bad_flag_y.mean())
+            seq = (_seq_bad_per_year[y] if y < len(_seq_bad_per_year) else _fallback_seq) if frac_bad > 0.5 \
+                  else (_seq_per_year[y]  if y < len(_seq_per_year)     else _fallback_seq)
+
+            # Compute extra_cur[y] using actual RMD for this year
+            _rmd_mean_cur_y = float(_rmd_total_y.mean()) / max(deflator[y], 1e-12)
+            _income_adj_y   = max(float(planned_cur[y]) - float(_net_income_offset[y]), 0.0)
+            _extra_cur_y    = max(_income_adj_y - _rmd_mean_cur_y, 0.0)
+            extra_nom_base  = _extra_cur_y * deflator[y]
+
+            # Bad-market scaling
+            _dd_y = 1.0 - total_nom_paths_core[:, y] / np.maximum(_running_peak_core[:, y], 1e-12)
             if _shock_scaling_enabled:
-                # Drawdown fraction per path (0 = at peak, 1 = total loss)
-                _dd_y = 1.0 - total_nom_paths_core[:, y] / np.maximum(
-                    _running_peak_core[:, y], 1e-12
-                )
-                # Scale factor: linear interpolation from 1.0 at threshold to
-                # min_scaling_factor at 2× threshold (fully bad market).
-                # Good market paths get scale = 1.0.
                 if _scale_curve == "linear":
-                    _scale_y = np.where(
-                        bad_flag_y,
-                        np.clip(
-                            1.0 - (_dd_y - _drawdown_threshold) /
-                            max(_drawdown_threshold, 1e-6) * (1.0 - _min_scaling_factor),
-                            _min_scaling_factor, 1.0
-                        ),
-                        1.0
-                    )
+                    _scale_y = np.where(bad_flag_y, np.clip(
+                        1.0 - (_dd_y - _drawdown_threshold) / max(_drawdown_threshold, 1e-6)
+                        * (1.0 - _min_scaling_factor), _min_scaling_factor, 1.0), 1.0)
                 elif _scale_curve == "poly":
-                    _norm_dd = np.clip(
-                        (_dd_y - _drawdown_threshold) / max(_drawdown_threshold, 1e-6),
-                        0.0, 1.0
-                    )
-                    _scale_y = np.where(
-                        bad_flag_y,
-                        np.clip(
-                            1.0 - (1.0 - _min_scaling_factor) * (_norm_dd ** _scale_poly_alpha),
-                            _min_scaling_factor, 1.0
-                        ),
-                        1.0
-                    )
-                else:  # exp
-                    _norm_dd = np.clip(
-                        (_dd_y - _drawdown_threshold) / max(_drawdown_threshold, 1e-6),
-                        0.0, 1.0
-                    )
-                    _scale_y = np.where(
-                        bad_flag_y,
-                        np.clip(
-                            1.0 - (1.0 - _min_scaling_factor) * (
-                                1.0 - np.exp(-_scale_exp_lambda * _norm_dd)
-                            ),
-                            _min_scaling_factor, 1.0
-                        ),
-                        1.0
-                    )
+                    _norm_dd = np.clip((_dd_y - _drawdown_threshold) / max(_drawdown_threshold, 1e-6), 0.0, 1.0)
+                    _scale_y = np.where(bad_flag_y, np.clip(
+                        1.0 - (1.0 - _min_scaling_factor) * (_norm_dd ** _scale_poly_alpha),
+                        _min_scaling_factor, 1.0), 1.0)
+                else:
+                    _norm_dd = np.clip((_dd_y - _drawdown_threshold) / max(_drawdown_threshold, 1e-6), 0.0, 1.0)
+                    _scale_y = np.where(bad_flag_y, np.clip(
+                        1.0 - (1.0 - _min_scaling_factor) * (1.0 - np.exp(-_scale_exp_lambda * _norm_dd)),
+                        _min_scaling_factor, 1.0), 1.0)
             else:
                 _scale_y = np.ones(paths, dtype=float)
 
-            # ── Makeup: add recovery payment in good years ─────────────────────
-            # When not in bad market and cumulative deficit exists, recover
-            # makeup_ratio of the deficit, capped at makeup_cap_per_year × target.
+            # Makeup payment
             _makeup_y = np.zeros(paths, dtype=float)
             if _makeup_enabled:
                 _good_paths = ~bad_flag_y
@@ -921,22 +1246,77 @@ def run_accounts_new(
                 )
                 _makeup_y = np.where(_good_paths, _makeup_candidate, 0.0)
 
-            # ── Effective withdrawal amount per path ───────────────────────────
-            # Floor: base_k × deflator (never go below the hard floor)
             _floor_nom_y = float(_sched_base[y]) * deflator[y]
-            amount_nom_paths = np.maximum(
-                _floor_nom_y,
-                _scale_y * extra_nom_base + _makeup_y
+            amount_nom_paths = np.maximum(_floor_nom_y, _scale_y * extra_nom_base + _makeup_y)
+
+            # ── Survival-probability-weighted depletion cap ────────────────────
+            # Sustainable withdrawal = what the portfolio + confirmed income can
+            # pay for each remaining year WITHOUT any market return assumptions.
+            # Only uses: (a) actual current balance in drawable accounts,
+            #            (b) confirmed net income from income.json (no forward projections),
+            #            (c) per-path and cross-path survival signals.
+            # Deliberately excludes: inflation projections, MC return assumptions,
+            # shock scenarios — all of which are forward information.
+            _years_remaining = max(n_years - y, 1)
+
+            # Drawable portfolio balance (accounts in current withdrawal sequence)
+            _drawable_bal = np.zeros(paths, dtype=float)
+            for _seq_a in seq:
+                if _seq_a in _running_bal:
+                    _drawable_bal += np.maximum(_running_bal[_seq_a], 0.0)
+
+            # Confirmed income PV: net income for remaining years
+            _income_pv_y = np.zeros(paths, dtype=float)
+            if income_sources_cur_paths is not None and y < income_sources_cur_paths.shape[1]:
+                _remaining_income_cur = income_sources_cur_paths[:, y:n_years]
+                _net_income_remaining = _remaining_income_cur.mean(axis=0) * (1.0 - _income_offset_tax_rate)
+                _income_pv_y = np.full(paths, float(_net_income_remaining.sum()))
+
+            # Total resources = portfolio + confirmed income (no growth assumption)
+            _total_resources = _drawable_bal + _income_pv_y
+
+            # (a) Per-path stress flag
+            _path_stressed = (
+                _shortfall_any_path[:, :y].any(axis=1)
+                if y > 0 else np.zeros(paths, dtype=bool)
+            )
+            # (b) Cross-path survival rate
+            _surv_rate_y = (
+                1.0 - float(_shortfall_any_path[:, :y].any(axis=1).mean())
+                if y > 0 else 1.0
+            )
+            _global_tighten = max(0.0, 1.0 - _surv_rate_y) * 0.12
+
+            # Sustainable = total_resources × buffer ÷ remaining_years
+            # net of income already credited to this year by the withdrawal engine
+            _income_offset_nom_y = float(_net_income_offset[y]) * deflator[y] if y < len(_net_income_offset) else 0.0
+            _buffer_factor = np.where(
+                _path_stressed,
+                max(0.50, 0.65 - _global_tighten),
+                max(0.60, 0.85 - _global_tighten),
+            )
+            _sustainable_nom = np.maximum(
+                (_total_resources * _buffer_factor) / _years_remaining - _income_offset_nom_y,
+                0.0
             )
 
-            if y == 0:
-                logger.debug("[WDEBUG y=0] extra_cur[0]=%.2f deflator[0]=%.4f extra_nom=%.2f",
-                             extra_cur[0], deflator[0], extra_nom_base)
-                logger.debug("[WDEBUG y=0] seq[:3]=%s frac_bad=%.2f", seq[:3], frac_bad)
-                for _a in list(acct_eoy_nom.keys())[:3]:
-                    _arr = acct_eoy_nom[_a]
-                    logger.debug("[WDEBUG y=0] acct=%s flags=%s mean_y0=%.2f",
-                                 _a, _arr.flags['WRITEABLE'], _arr[:, 0].mean())
+            # ── CRITICAL: only clamp when portfolio is genuinely stressed ──────
+            # Gate: per-path stressed flag AND systemic stress AND portfolio not over-funded.
+            # Additional bypass: if drawable balance > 5x planned withdrawal for this year,
+            # the portfolio is clearly healthy enough — skip cap entirely for this path.
+            _amount_nom_y = amount_nom_paths[0] if hasattr(amount_nom_paths, '__len__') else float(amount_nom_paths)
+            _portfolio_abundant = _drawable_bal > (_amount_nom_y * deflator[y] * 5.0)
+            _systemic_stress = (1.0 - _surv_rate_y) > 0.10
+            _cap_active = _path_stressed & _systemic_stress & (_sustainable_nom < amount_nom_paths) & ~_portfolio_abundant
+            amount_nom_paths = np.where(
+                _cap_active,
+                np.maximum(_sustainable_nom, _floor_nom_y),
+                amount_nom_paths
+            )
+
+            # Set acct_eoy_nom[:, y] from running balance so withdrawal function can draw from it
+            for a in _running_bal:
+                acct_eoy_nom[a][:, y] = np.maximum(_running_bal[a], 0.0)
 
             (
                 realized_total_nom,
@@ -944,51 +1324,27 @@ def run_accounts_new(
                 realized_per_acct_nom,
                 shortfall_per_acct_nom,
                 sold_per_acct_nom,
-            ) = apply_withdrawals_nominal_per_account(
-                acct_eoy_nom, y, amount_nom_paths, seq,
-            )
+            ) = apply_withdrawals_nominal_per_account(acct_eoy_nom, y, amount_nom_paths, seq)
 
-            if y == 0:
-                for _a in list(sold_per_acct_nom.keys())[:4]:
-                    logger.debug("[WDEBUG y=0] sold_per_acct[%s] sum=%.2f",
-                                 _a, sold_per_acct_nom[_a].sum())
-
-            # Explicitly deduct sold amounts from each account's balance for year y.
-            # withdrawals_core no longer mutates the arrays itself; we own that here
-            # to guarantee the deduction persists into STEP 5 / STEP 6 statistics.
             for acct, sold_arr in sold_per_acct_nom.items():
                 if acct in acct_eoy_nom and np.any(sold_arr > 0):
-                    acct_eoy_nom[acct][:, y] = np.maximum(
-                        acct_eoy_nom[acct][:, y] - sold_arr, 0.0
-                    )
-                # Accumulate withdrawal outflow for STEP 6 per-account reporting
+                    acct_eoy_nom[acct][:, y] = np.maximum(acct_eoy_nom[acct][:, y] - sold_arr, 0.0)
                 if acct in withdrawal_out_nom_per_acct:
-                    withdrawal_out_nom_per_acct[acct][:, y] = sold_arr
+                    withdrawal_out_nom_per_acct[acct][:, y] = sold_per_acct_nom.get(acct, np.zeros(paths))
 
-            if y == 0:
-                for _a in list(acct_eoy_nom.keys())[:3]:
-                    logger.debug("[WDEBUG post-deduct y=0] acct=%s mean_y0=%.2f",
-                                 _a, acct_eoy_nom[_a][:, 0].mean())
+            # Read post-withdrawal balances back into running_bal
+            for a in _running_bal:
+                _running_bal[a] = acct_eoy_nom[a][:, y]
 
             scale = max(deflator[y], 1e-12)
-            realized_cur[y]  = (realized_total_nom / scale).mean()
-            shortfall_cur[y] = (shortfall_total_nom / scale).mean()
-            # Track which paths had shortfall this year (for success rate)
+            realized_cur[y]   = (realized_total_nom / scale).mean()
+            shortfall_cur[y]  = (shortfall_total_nom / scale).mean()
             _shortfall_any_path[:, y] = shortfall_total_nom > 1e-6
-            # Accumulate per-path realized/shortfall for median-path reporting
             realized_nom_paths[:, y]  = realized_total_nom
             shortfall_nom_paths[:, y] = shortfall_total_nom
 
-
-
-            # ── Update cumulative deficit for makeup tracking ─────────────────
-            # Deficit this year = planned - realized (per path, nominal)
-            _planned_nom_y = amount_nom_paths  # what we tried to pay
-            _deficit_y = np.maximum(_planned_nom_y - realized_total_nom, 0.0)
-            # In bad years: accumulate deficit; in good years with makeup: reduce it
-            _cumulative_deficit_nom = np.maximum(
-                _cumulative_deficit_nom + _deficit_y - _makeup_y, 0.0
-            )
+            _deficit_y = np.maximum(amount_nom_paths - realized_total_nom, 0.0)
+            _cumulative_deficit_nom = np.maximum(_cumulative_deficit_nom + _deficit_y - _makeup_y, 0.0)
 
             for acct in acct_eoy_nom.keys():
                 rn = realized_per_acct_nom.get(acct)
@@ -999,184 +1355,173 @@ def run_accounts_new(
                 if sn is not None:
                     withdrawals["shortfall_current_per_acct_mean"].setdefault(acct, [0.0] * n_years)
                     withdrawals["shortfall_current_per_acct_mean"][acct][y] = (sn / scale).mean()
+        else:
+            # No withdrawal mode — running_bal → acct_eoy_nom for this year
+            for a in _running_bal:
+                acct_eoy_nom[a][:, y] = np.maximum(_running_bal[a], 0.0)
+            realized_total_nom = np.zeros(paths, dtype=float)
+            amount_nom_paths   = np.zeros(paths, dtype=float)
+            _makeup_y          = np.zeros(paths, dtype=float)
+            scale              = max(deflator[y], 1e-12)
 
-        # realized_current_mean = total cash the person actually receives:
-        #   min(plan, RMD)  — RMD portion covering up to the plan
-        #   + realized_cur  — extra discretionary pulled from accounts (plan > RMD years)
-        rmd_covering_plan  = np.minimum(planned_cur, rmd_current_mean)
-        total_realized_cur = rmd_covering_plan + realized_cur
+        # ── 6. Debit taxes from brokerage ──────────────────────────────────
+        if brokerage_accounts and tax_cfg is not None:
+            _scl = max(deflator[y], 1e-12)
+            # Conversion taxes already debited inside apply_bracket_fill_conversions — subtract
+            _conv_already = np.zeros(paths, dtype=float)
+            for b in brokerage_accounts:
+                _conv_already += conv_tax_per_brok[b][:, y]
+            _total_tax_nom = np.maximum(
+                (taxes_fed_cur_paths[:, y] + taxes_state_cur_paths[:, y]
+                 + taxes_niit_cur_paths[:, y] + taxes_excise_cur_paths[:, y])
+                * _scl - _conv_already,
+                0.0
+            )
+            _brok_total = np.zeros(paths, dtype=float)
+            for b in brokerage_accounts:
+                _brok_total += np.maximum(_running_bal[b], 0.0)
+            for b in brokerage_accounts:
+                _frac = np.where(
+                    _brok_total > 1e-12,
+                    np.maximum(_running_bal[b], 0.0) / np.maximum(_brok_total, 1e-12),
+                    1.0 / n_brok
+                )
+                _share = _total_tax_nom * _frac
+                _running_bal[b] = np.maximum(_running_bal[b] - _share, 0.0)
+                acct_eoy_nom[b][:, y] = _running_bal[b]
 
-        withdrawals["planned_current"]        = planned_cur.tolist()
-        withdrawals["realized_current_mean"]  = total_realized_cur.tolist()
-        withdrawals["shortfall_current_mean"] = shortfall_cur.tolist()
-        withdrawals["realized_future_mean"]   = (total_realized_cur * deflator).tolist()
-        # Base (floor) schedule — useful for tax engine and UI to show desired vs minimum
+        # ── 7. Reinvest surplus RMD to brokerage ───────────────────────────
+        if extra_handling == "reinvest_in_brokerage" and brokerage_accounts and np.any(_rmd_total_y > 0):
+            _plan_nom_y   = float(planned_cur[y]) * deflator[y] if y < len(planned_cur) else 0.0
+            _surplus_rmd  = np.maximum(_rmd_total_y - _plan_nom_y, 0.0)
+            if np.any(_surplus_rmd > 0):
+                _brok_tot2 = np.zeros(paths, dtype=float)
+                for b in brokerage_accounts:
+                    _brok_tot2 += np.maximum(_running_bal[b], 0.0)
+                for b in brokerage_accounts:
+                    _frac2 = np.where(
+                        _brok_tot2 > 1e-12,
+                        np.maximum(_running_bal[b], 0.0) / np.maximum(_brok_tot2, 1e-12),
+                        1.0 / n_brok
+                    )
+                    _share2 = _surplus_rmd * _frac2
+                    _running_bal[b]     = _running_bal[b] + _share2
+                    acct_eoy_nom[b][:, y] = _running_bal[b]
+                    reinvest_nom_per_acct[b][:, y] = _share2
+
+        # ── Final: store post-cashflow balance for year y ───────────────────
+        for a in _running_bal:
+            acct_eoy_nom[a][:, y] = np.maximum(_running_bal[a], 0.0)
+
+    # ── Post-loop: write tax arrays into withdrawals dict ─────────────────────
+    # The withdrawals dict was initialized BEFORE the year loop with all-zero
+    # tax arrays. Now that the loop has populated taxes_*_cur_paths, overwrite.
+    withdrawals["taxes_fed_current_mean"]    = taxes_fed_cur_paths.mean(axis=0).tolist()
+    withdrawals["taxes_state_current_mean"]  = taxes_state_cur_paths.mean(axis=0).tolist()
+    withdrawals["taxes_niit_current_mean"]   = taxes_niit_cur_paths.mean(axis=0).tolist()
+    withdrawals["taxes_excise_current_mean"] = taxes_excise_cur_paths.mean(axis=0).tolist()
+
+    # ── Post-loop: compute RMD summary stats ─────────────────────────────────
+    rmd_future_mean  = rmd_total_nom_paths.mean(axis=0)
+    rmd_current_mean = rmd_future_mean / np.maximum(deflator, 1e-12)
+
+    # Snapshot ordinary_income_cur_paths now that all years are finalized
+    _taxable_income_snapshot = (
+        ordinary_income_cur_paths.copy() if ordinary_income_cur_paths is not None else None
+    )
+
+    # Realized totals (RMD covering plan + discretionary)
+    rmd_covering_plan  = np.minimum(planned_cur, rmd_current_mean)
+    total_realized_cur = rmd_covering_plan + realized_cur
+
+    # rmd_extra_current: mean surplus RMD beyond plan
+    rmd_extra_current = np.maximum(rmd_current_mean - planned_cur, 0.0)
+    if extra_handling != "reinvest_in_brokerage":
+        if extra_handling == "cash_out" and apply_withdrawals and sched is not None:
+            total_realized_cur = total_realized_cur + rmd_extra_current
+        rmd_extra_current = np.zeros(n_years, dtype=float)
+
+    if apply_withdrawals and sched is not None:
         _base_cur = _sched_base if '_sched_base' in dir() else np.zeros(n_years, dtype=float)
-        withdrawals["base_current"]           = _base_cur.tolist()
-        withdrawals["base_future_mean"]       = (_base_cur * deflator).tolist()
-
-        # ── Bad market summary fields ────────────────────────────────────────
-        # Fraction of paths in bad market per year (0-1)
         _bad_market_frac_by_year = _bad_market_paths.mean(axis=0).tolist()
-        withdrawals["bad_market_frac_by_year"]    = _bad_market_frac_by_year
-        withdrawals["bad_market_drawdown_threshold"] = _drawdown_threshold
-        withdrawals["shock_scaling_enabled"]      = _shock_scaling_enabled
-        withdrawals["min_scaling_factor"]         = _min_scaling_factor
-        withdrawals["upside_scaling_enabled"]     = bool(_esp.get("upside_scaling_enabled", False))
+        withdrawals["planned_current"]              = planned_cur.tolist()
+        withdrawals["realized_current_mean"]        = total_realized_cur.tolist()
+        withdrawals["shortfall_current_mean"]       = shortfall_cur.tolist()
+        withdrawals["realized_future_mean"]         = (total_realized_cur * deflator).tolist()
+        withdrawals["base_current"]                 = _base_cur.tolist()
+        withdrawals["base_future_mean"]             = (_base_cur * deflator).tolist()
+        withdrawals["bad_market_frac_by_year"]      = _bad_market_frac_by_year
+        withdrawals["bad_market_drawdown_threshold"]= _drawdown_threshold
+        withdrawals["shock_scaling_enabled"]        = _shock_scaling_enabled
+        withdrawals["min_scaling_factor"]           = _min_scaling_factor
+        withdrawals["upside_scaling_enabled"]       = bool(_esp.get("upside_scaling_enabled", False))
 
-        # Safe withdrawal rate at P10 — maximum constant annual withdrawal (current USD)
-        # that the P10 (stress) portfolio path can sustain without depleting to zero.
-        # Computed via binary search on the P10 real path.
-        #
-        # Algorithm: start with planned_cur as candidate. Scale until P10 path survives.
-        # "Survives" = P10 real balance never goes below zero over n_years.
-        # Result expressed as % of starting portfolio (annualized).
+        # Safe withdrawal rate (P10 = 90% survival, P25 = 75% survival, P50 = median)
+        # ALSO computes a conservative floor based only on current balances + confirmed income
+        # with NO market return assumptions — pure "what do I have today" calculation.
         try:
             if starting_total > 0 and total_real_paths is not None:
-                _p10_real = np.percentile(total_real_paths, 10, axis=0)  # (n_years,)
-                # The P10 path already has actual cashflows baked in (withdrawals drawn).
-                # To find SWR: use the P10 core path (pre-withdrawal) and binary search
-                # for the max constant withdrawal that doesn't deplete it.
-                _p10_core_real = np.percentile(
-                    total_nom_paths_core / np.maximum(deflator, 1e-12), 10, axis=0
-                )
                 _start_real = float(starting_total)
+                _mean_planned = float(planned_cur.mean()) if len(planned_cur) > 0 else 0.0
+                _lo_hi = max(_mean_planned * 3.0, _start_real * 0.15)
 
-                def _p10_survives(wd_cur: float) -> bool:
-                    """Check if constant annual withdrawal wd_cur sustains P10 core path."""
+                def _pN_survives(wd_cur: float, pctile: int) -> bool:
+                    """Binary-search helper: can the Nth-percentile path sustain wd_cur?"""
+                    _pN_core_real = np.percentile(
+                        total_nom_paths_core / np.maximum(deflator, 1e-12), pctile, axis=0
+                    )
                     bal = _start_real
                     for _y in range(n_years):
-                        growth_factor = (float(_p10_core_real[_y]) /
-                                         max(float(_p10_core_real[_y - 1]) if _y > 0 else _start_real, 1.0))
-                        bal = bal * growth_factor - wd_cur
+                        gf = (float(_pN_core_real[_y]) /
+                              max(float(_pN_core_real[_y - 1]) if _y > 0 else _start_real, 1.0))
+                        bal = bal * gf - wd_cur
                         if bal < 0:
                             return False
                     return True
 
-                # Binary search between 0 and 2× planned withdrawal
-                _mean_planned = float(planned_cur.mean()) if len(planned_cur) > 0 else 0.0
-                _lo, _hi = 0.0, max(_mean_planned * 3.0, _start_real * 0.15)
-                for _ in range(30):  # 30 iterations → precision < 0.01%
-                    _mid = (_lo + _hi) / 2.0
-                    if _p10_survives(_mid):
-                        _lo = _mid
-                    else:
-                        _hi = _mid
-                _swr_cur = _lo
+                for _pctile, _key in [(10, "safe_withdrawal_rate_p10_pct"),
+                                       (25, "safe_withdrawal_rate_p25_pct"),
+                                       (50, "safe_withdrawal_rate_p50_pct")]:
+                    _lo, _hi = 0.0, _lo_hi
+                    for _ in range(30):
+                        _mid = (_lo + _hi) / 2.0
+                        if _pN_survives(_mid, _pctile):
+                            _lo = _mid
+                        else:
+                            _hi = _mid
+                    withdrawals[_key] = round((_lo / _start_real) * 100.0, 2) if _start_real > 0 else 0.0
 
-                withdrawals["safe_withdrawal_rate_p10_pct"] = round(
-                    (_swr_cur / _start_real) * 100.0, 2
+                # ── Conservative floor: balance + income only, zero market assumptions ──
+                # This is what the person CAN spend with certainty today, using:
+                #   - actual starting portfolio (no growth projection)
+                #   - confirmed net income from income.json (W2, rental, SS already in payment)
+                #   - no inflation, no MC returns, no shocks
+                # Formula: (starting_balance × 0.85 + total_net_income_pv) / n_years
+                # The 0.85 factor preserves a 15% buffer for unexpected withdrawals.
+                _total_net_income_cur = float(
+                    np.sum(_net_income_offset) if hasattr(_net_income_offset, '__len__') else 0.0
+                )
+                _conservative_floor_cur = (
+                    (_start_real * 0.85 + _total_net_income_cur) / max(n_years, 1)
+                )
+                withdrawals["conservative_floor_current"] = round(_conservative_floor_cur, 0)
+                withdrawals["conservative_floor_pct"] = round(
+                    _conservative_floor_cur / _start_real * 100.0, 2
                 ) if _start_real > 0 else 0.0
+
+                # Per-year survival rate: fraction of paths that met their target each year
+                _surv_by_year = (1.0 - _shortfall_any_path.mean(axis=0)).tolist()
+                withdrawals["survival_rate_by_year"] = [round(v * 100, 1) for v in _surv_by_year]
             else:
                 withdrawals["safe_withdrawal_rate_p10_pct"] = 0.0
+                withdrawals["safe_withdrawal_rate_p25_pct"] = 0.0
+                withdrawals["safe_withdrawal_rate_p50_pct"] = 0.0
+                withdrawals["survival_rate_by_year"] = [100.0] * n_years
         except Exception:
             withdrawals["safe_withdrawal_rate_p10_pct"] = 0.0
-
-    # rmd_extra_current: mean surplus RMD beyond plan (candidate for reinvest).
-    # Computed here (not inside apply_withdrawals block) so it's always valid —
-    # when ignore_withdrawals=True, planned_cur=zeros and surplus = full RMD.
-    rmd_extra_current = np.maximum(rmd_current_mean - planned_cur, 0.0)
-
-    # =========================================================================
-    # STEP 4: Reinvest surplus RMD into primary brokerage (if policy says so)
-    #
-    # Test 3 (ignore_withdrawals=True,  ignore_rmds=False):
-    #   planned_cur = zeros → surplus = full per-path RMD → all goes to brokerage
-    #
-    # Test 4 (ignore_withdrawals=False, ignore_rmds=False):
-    #   surplus = max(per-path RMD - mean plan, 0) → excess goes to brokerage
-    #
-    # acct_eoy_nom is mutated in-place here.
-    # total_nom_paths recompute (STEP 5) MUST happen AFTER this block.
-    # =========================================================================
-    extra_handling = "cash_out"
-    if person_cfg is not None:
-        extra_handling = person_cfg.get("rmd_policy", {}).get("extra_handling", "cash_out")
-
-    # Track per-account reinvestment (paths x n_years) for pure-investment YoY
-    reinvest_nom_per_acct: Dict[str, np.ndarray] = {
-        acct: np.zeros((paths, n_years), dtype=float) for acct in acct_eoy_nom.keys()
-    }
-
-    if (
-        extra_handling == "reinvest_in_brokerage"
-        and rmd_total_nom_paths is not None
-        and brokerage_accounts
-    ):
-        for y in range(n_years):
-            # Spending plan in nominal dollars (scalar, mean-basis)
-            plan_nom_y = planned_cur[y] * deflator[y]
-            # Per-path surplus RMD above the plan
-            rmd_nom_y = rmd_total_nom_paths[:, y]
-            extra_rmd_nom_y = np.maximum(rmd_nom_y - plan_nom_y, 0.0)
-
-            # Proportional split across brokerage accounts by their current balance.
-            # Each brokerage receives: surplus * (its balance / total brokerage balance).
-            brok_bals = np.stack(
-                [np.maximum(acct_eoy_nom[b][:, y], 0.0) for b in brokerage_accounts],
-                axis=1
-            )  # shape (paths, n_brok)
-            total_brok = brok_bals.sum(axis=1, keepdims=True)  # (paths, 1)
-            # Equal split when all balances are zero (edge case)
-            n_brok = len(brokerage_accounts)
-            fracs = np.where(
-                total_brok > 1e-12,
-                brok_bals / np.maximum(total_brok, 1e-12),
-                np.full_like(brok_bals, 1.0 / n_brok)
-            )  # (paths, n_brok)
-
-            for i, b in enumerate(brokerage_accounts):
-                share = extra_rmd_nom_y * fracs[:, i]          # (paths,)
-                acct_eoy_nom[b][:, y] = acct_eoy_nom[b][:, y] + share
-                reinvest_nom_per_acct[b][:, y] = share
-
-    # If cash_out policy: nothing was reinvested — zero out the reinvested arrays.
-    # Also patch realized: surplus RMD is received as cash (not reinvested),
-    # so realized = max(plan, RMD), and diff = RMD - plan when RMD > plan.
-    if extra_handling != "reinvest_in_brokerage":
-        if extra_handling == "cash_out" and apply_withdrawals and sched is not None:
-            total_realized_cur = total_realized_cur + rmd_extra_current
-            withdrawals["realized_current_mean"] = total_realized_cur.tolist()
-            withdrawals["realized_future_mean"]  = (total_realized_cur * deflator).tolist()
-        rmd_extra_current = np.zeros(n_years, dtype=float)
-
-    # =========================================================================
-    # STEP 4b: Debit ordinary income taxes from brokerage accounts
-    #
-    # taxes_fed/state/niit/excise_cur_paths are in current $. Convert to nominal
-    # and debit proportionally across brokerage accounts by balance each year.
-    # Conversion taxes are already handled inside apply_bracket_fill_conversions
-    # (conv_tax_per_brok) — subtract that to avoid double-debiting.
-    # =========================================================================
-    if brokerage_accounts and tax_cfg is not None:
-        for y in range(n_years):
-            scale = max(float(deflator[y]), 1e-12)
-            # Total ordinary tax this year (nominal $), net of conversion tax already debited
-            conv_tax_nom_y = np.zeros(paths, dtype=float)
-            for b in brokerage_accounts:
-                conv_tax_nom_y += conv_tax_per_brok.get(b, np.zeros((paths, n_years)))[: ,y]
-            total_tax_nom_y = (
-                taxes_fed_cur_paths[:, y]
-                + taxes_state_cur_paths[:, y]
-                + taxes_niit_cur_paths[:, y]
-                + taxes_excise_cur_paths[:, y]
-            ) * scale - conv_tax_nom_y
-            total_tax_nom_y = np.maximum(total_tax_nom_y, 0.0)
-
-            # Proportional split by brokerage balance
-            brok_bals = np.stack(
-                [np.maximum(acct_eoy_nom[b][:, y], 0.0) for b in brokerage_accounts], axis=1
-            )
-            total_brok = brok_bals.sum(axis=1, keepdims=True)
-            n_brok = len(brokerage_accounts)
-            fracs = np.where(
-                total_brok > 1e-12,
-                brok_bals / np.maximum(total_brok, 1e-12),
-                np.full_like(brok_bals, 1.0 / n_brok)
-            )
-            for i, b in enumerate(brokerage_accounts):
-                share = total_tax_nom_y * fracs[:, i]
-                acct_eoy_nom[b][:, y] = np.maximum(acct_eoy_nom[b][:, y] - share, 0.0)
+            withdrawals["safe_withdrawal_rate_p25_pct"] = 0.0
+            withdrawals["safe_withdrawal_rate_p50_pct"] = 0.0
+            withdrawals["survival_rate_by_year"] = [100.0] * n_years
 
     # =========================================================================
     # STEP 5: Recompute total portfolio paths — AFTER all cashflows
@@ -1706,6 +2051,10 @@ def run_accounts_new(
             "simulation_mode":    _simulation_mode,
             "investment_weight":  _investment_w,
             "retirement_weight":  _retirement_w,
+            # Phase inference output — per-year lifecycle phase derived from income + spending
+            "phase_by_year":      _phase_by_year,
+            "weights_by_year":    [[round(w[0],3), round(w[1],3)] for w in _weights_by_year],
+            "retirement_age_override_used": _ret_override is not None,
         },
         # Flags any values that were overridden at runtime vs person.json.
         # Empty dict {} means all values came directly from person.json.
@@ -1797,6 +2146,13 @@ def run_accounts_new(
         "total_tax_cost_cur_mean":   float(_conv_tax.sum(axis=1).mean()),
         "conversion_enabled": bool(_conv_enabled),
         "bracket_fill_mode":  bool(_bracket_fill_mode),
+        "conversion_deferred_to_year": int(_conv_defer_until_y) if _conv_defer_until_y > 0 else None,
+        "conversion_deferred_reason": (
+            "Liquidity gate: brokerage projected to deplete before age 59.5. "
+            "Conversions deferred until IRA access opens to preserve spending capacity."
+            if _conv_defer_until_y > _window_start_y - (_conv_defer_until_y - _window_start_y)
+            else None
+        ),
     }
 
     # Starting balances and account types (for UI)

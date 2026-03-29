@@ -71,7 +71,7 @@
     },
     {
       "class": "US_STOCKS",
-      "start_year": 18,
+      "start_year": 20,
       "start_quarter": 4,
       "depth": 0.1,
       "dip_quarters": 1,
@@ -102,7 +102,8 @@
           "type": "poly",
           "alpha": 1.2
         }
-      }
+      },
+      "_comment": "Moved from yr18\u2192yr20 to prevent recovery stacking with INTL yr16 co-recovery"
     },
     {
       "class": "INTL_STOCKS",
@@ -153,10 +154,10 @@
   ],
   "readme": {
     "purpose": "Profile-specific deterministic market shocks layered on top of Monte Carlo returns. Use these to model known or assumed macro events at specific years.",
-    "tax_note": "Shocks affect portfolio returns only — they do NOT directly create a tax event. Taxes are computed on income (withdrawals, conversions, dividends), not on unrealized portfolio value changes. A shock may indirectly affect taxes by triggering bad-market withdrawal sequencing (switching which account is drained) if the drawdown crosses the threshold in economicglobal.json.",
+    "tax_note": "Shocks affect portfolio returns only \u2014 they do NOT directly create a tax event. Taxes are computed on income (withdrawals, conversions, dividends), not on unrealized portfolio value changes. A shock may indirectly affect taxes by triggering bad-market withdrawal sequencing (switching which account is drained) if the drawdown crosses the threshold in economicglobal.json.",
     "mode_options": {
       "augment": "Add these events on top of system_shocks.json preset events.",
-      "replace": "Ignore system_shocks.json entirely — only these profile events apply."
+      "replace": "Ignore system_shocks.json entirely \u2014 only these profile events apply."
     },
     "event_fields": {
       "class": "Asset class to shock. Options: 'US_STOCKS', 'INTL_STOCKS', 'GOLD', 'COMMOD', 'LONG_TREAS', 'INT_TREAS', 'TIPS', 'CASH'",
@@ -166,12 +167,12 @@
       "dip_quarters": "Number of quarters to reach maximum depth from shock start.",
       "recovery_quarters": "Number of quarters to recover from trough back to recovery_to target.",
       "override_mode_options": {
-        "strict": "This shock overrides any concurrent stochastic return for this class — deterministic only.",
-        "augment": "Shock is additive on top of the stochastic return — can amplify or dampen."
+        "strict": "This shock overrides any concurrent stochastic return for this class \u2014 deterministic only.",
+        "augment": "Shock is additive on top of the stochastic return \u2014 can amplify or dampen."
       },
       "recovery_to_options": {
         "baseline": "Recover to the pre-shock trend line (mean-reversion).",
-        "none": "Stop at trough level — no recovery above trough."
+        "none": "Stop at trough level \u2014 no recovery above trough."
       },
       "dip_profile_and_rise_profile": {
         "type_options": {

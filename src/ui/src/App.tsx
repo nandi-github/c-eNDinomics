@@ -1,5 +1,5 @@
 // filename: ui/src/App.tsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
 
 // ── Column tooltip helper ─────────────────────────────────────────────────
@@ -90,6 +90,21 @@ type SnapshotWithdrawals = {
   total_withdraw_current_mean?: number[];
   total_withdraw_future_mean?: number[];
   safe_withdrawal_rate_p10_pct?: number;
+  safe_withdrawal_rate_p25_pct?: number;
+  safe_withdrawal_rate_p50_pct?: number;
+  survival_rate_by_year?: number[];
+  conservative_floor_current?: number;
+  conservative_floor_pct?: number;
+  plan_viability?: {
+    total_confirmed_resources: number;
+    total_planned_spend: number;
+    total_net_portfolio_draw: number;
+    coverage_ratio: number;
+    arithmetic_failure_year: number | null;
+    arithmetic_failure_age: number | null;
+    arithmetic_failure_gap_total: number;
+    viability_level: "CRITICAL" | "WARNING" | "OK";
+  };
   base_current?: number[];
   upside_scaling_enabled?: boolean;
   bad_market_frac_by_year?: number[];
@@ -917,6 +932,60 @@ const EconomicGuidedEditor: React.FC<PersonJsonEditorProps> = ({ parsed, readonl
             ))}
           </div>
         </div>
+
+        {/* ── Surplus Income Policy ──────────────────────────────────────── */}
+        <div style={{ borderTop: "1px solid #f0f0f0", paddingTop: 16, marginTop: 16 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#374151", marginBottom: 8 }}>
+            W2 Surplus Routing
+          </div>
+          <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 12 }}>
+            When W2 income exceeds your spending target, the surplus is routed here.
+            <strong> waterfall</strong> fills tax-advantaged accounts first (401K → Roth → brokerage) respecting IRS limits.
+            <strong> reinvest_in_brokerage</strong> sends everything to the first taxable account.
+            <strong> spend</strong> treats surplus as additional cash — no deposit.
+          </div>
+          {[
+            { val: "reinvest_in_brokerage", label: "Reinvest in brokerage", desc: "All surplus → taxable brokerage. Simple, no IRS tracking." },
+            { val: "waterfall",             label: "Waterfall (IRS priority)", desc: "401K → Roth → backdoor Roth → brokerage. Maximises tax-advantaged growth." },
+            { val: "spend",                 label: "Spend",                   desc: "Surplus is cash income. No portfolio deposit." },
+          ].map(opt => {
+            const eip = draft.defaults?.excess_income_policy || {};
+            const cur = eip.surplus_policy ?? "reinvest_in_brokerage";
+            const setEip = (key: string, val: any) => {
+              setDraft((prev: any) => {
+                const n = JSON.parse(JSON.stringify(prev));
+                if (!n.defaults) n.defaults = {};
+                if (!n.defaults.excess_income_policy) n.defaults.excess_income_policy = {};
+                n.defaults.excess_income_policy[key] = val;
+                return n;
+              });
+            };
+            const active = cur === opt.val;
+            return (
+              <div key={opt.val} onClick={() => !readonly && setEip("surplus_policy", opt.val)}
+                style={{ border: `2px solid ${active ? "#1d4ed8" : "#e5e7eb"}`, borderRadius: 8,
+                  padding: "8px 12px", marginBottom: 6, cursor: readonly ? "default" : "pointer",
+                  background: active ? "#eff6ff" : "#fff" }}>
+                <div style={{ fontWeight: 600, fontSize: 13, color: active ? "#1d4ed8" : "#374151" }}>
+                  {active ? "✓ " : ""}{opt.label}
+                </div>
+                <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{opt.desc}</div>
+              </div>
+            );
+          })}
+          {/* Waterfall order — only shown when waterfall selected */}
+          {(draft.defaults?.excess_income_policy?.surplus_policy === "waterfall") && (
+            <div style={{ marginTop: 8, padding: 10, background: "#f8fafc", borderRadius: 6, fontSize: 12 }}>
+              <div style={{ fontWeight: 600, color: "#374151", marginBottom: 4 }}>Waterfall order (edit economic.json directly to customise)</div>
+              {(draft.defaults?.excess_income_policy?.waterfall_order
+                ?? ["401k_limit", "roth_direct", "backdoor_roth", "brokerage"]).map((step: string, idx: number) => (
+                <div key={idx} style={{ color: "#6b7280", padding: "2px 0" }}>
+                  {idx + 1}. {step}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </GuidedShell>
   );
@@ -937,7 +1006,7 @@ const ShocksGuidedEditor: React.FC<PersonJsonEditorProps> = ({ parsed, readonly,
     setDraft((prev: any) => { const n = JSON.parse(JSON.stringify(prev)); n.events[idx][field] = value; return n; });
   };
   const addEvent = () => {
-    const blank = { class: "US_STOCKS", start_year: 10, start_quarter: 1, depth: 0.2, dip_quarters: 4, recovery_quarters: 8, override_mode: "strict", recovery_to: "baseline", dip_profile: { type: "poly", alpha: 1.3 }, rise_profile: { type: "poly", alpha: 1.6 } };
+    const blank = { class: "US_STOCKS", start_year: 10, start_quarter: 1, depth: 0.2, dip_quarters: 4, recovery_quarters: 8, override_mode: "strict", recovery_to: "baseline", dip_profile: { type: "poly", alpha: 1.3 }, rise_profile: { type: "poly", alpha: 1.6 }, enabled: true };
     setDraft((prev: any) => { const n = JSON.parse(JSON.stringify(prev)); n.events = [...(n.events || []), blank]; return n; });
     setExpanded((draft.events || []).length);
   };
@@ -961,30 +1030,66 @@ const ShocksGuidedEditor: React.FC<PersonJsonEditorProps> = ({ parsed, readonly,
         <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 10 }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: "#111827" }}>Shock Mode</div>
           <div style={{ display: "flex", gap: 0, border: "1px solid #d1d5db", borderRadius: 6, overflow: "hidden" }}>
-            {["augment","replace"].map(opt => (
+            {["none","augment","replace"].map(opt => (
               <button key={opt} disabled={readonly} onClick={() => setDraft((p: any) => ({ ...p, mode: opt }))}
                 style={{ padding: "5px 14px", fontSize: 12, border: "none", cursor: readonly ? "default" : "pointer", background: draft.mode === opt ? "#EEEDFE" : "#fff", color: draft.mode === opt ? "#3C3489" : "#6b7280", fontWeight: draft.mode === opt ? 600 : 400 }}>
                 {opt}
               </button>
             ))}
           </div>
-          <span style={{ fontSize: 12, color: "#9ca3af" }}>
-            {draft.mode === "augment" ? "Layer on top of system shocks" : "Replace system shocks entirely"}
-          </span>
         </div>
+        {/* Per-mode explanation */}
+        {draft.mode === "none" && (
+          <div style={{ fontSize: 12, background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 6, padding: "8px 12px", marginBottom: 10 }}>
+            <strong>None</strong> — all shock events below are ignored. The simulation runs purely on stochastic market returns with no scripted drawdown events.
+            Use this to get a clean baseline or to compare results with and without stress scenarios.
+          </div>
+        )}
+        {draft.mode === "augment" && (
+          <div style={{ fontSize: 12, background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 6, padding: "8px 12px", marginBottom: 10 }}>
+            <strong>Augment</strong> — your shock events below are <em>added on top of</em> the system-wide shocks built into the asset model (e.g. the historical crash calendar). Both sets of shocks apply simultaneously.
+            Use this when you want to stress-test a specific scenario on top of normal market volatility.
+          </div>
+        )}
+        {draft.mode === "replace" && (
+          <div style={{ fontSize: 12, background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 6, padding: "8px 12px", marginBottom: 10 }}>
+            <strong>Replace</strong> — your shock events below <em>replace</em> the system shocks entirely. Only the events you define here will affect returns.
+            Use this when you want precise control over exactly which drawdowns occur, without the background system shocks interfering.
+          </div>
+        )}
         <div style={{ fontSize: 12, color: "#6b7280" }}>Shocks affect portfolio returns only — they do not create direct tax events. Taxes are triggered by withdrawals and conversions.</div>
       </div>
 
       {(draft.events || []).map((evt: any, idx: number) => {
         const isOpen = expanded === idx;
+        const isEnabled = evt.enabled !== false;  // default true if field absent
         return (
-          <div key={idx} style={{ borderBottom: "1px solid #f0f0f0" }}>
+          <div key={idx} style={{ borderBottom: "1px solid #f0f0f0", opacity: isEnabled ? 1 : 0.5 }}>
             <div onClick={() => setExpanded(isOpen ? null : idx)}
               style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 16px", cursor: "pointer", background: isOpen ? "#f8faff" : "#fff" }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: "#7F77DD", background: "#EEEDFE", padding: "2px 8px", borderRadius: 4 }}>Shock {idx + 1}</span>
-              <span style={{ fontSize: 13, fontWeight: 500, color: "#111827" }}>{evt.class}</span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: isEnabled ? "#7F77DD" : "#9ca3af", background: isEnabled ? "#EEEDFE" : "#f3f4f6", padding: "2px 8px", borderRadius: 4 }}>Shock {idx + 1}</span>
+              <span style={{ fontSize: 13, fontWeight: 500, color: isEnabled ? "#111827" : "#9ca3af", textDecoration: isEnabled ? "none" : "line-through" }}>{evt.class}</span>
               <span style={{ fontSize: 12, color: "#9ca3af" }}>Year {evt.start_year} Q{evt.start_quarter} · {(evt.depth * 100).toFixed(0)}% drawdown · {evt.dip_quarters}Q dip · {evt.recovery_quarters}Q recovery</span>
+              {!isEnabled && <span style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", background: "#f3f4f6", padding: "1px 6px", borderRadius: 999 }}>disabled</span>}
               <span style={{ marginLeft: "auto", fontSize: 12, color: "#9ca3af" }}>{isOpen ? "▼" : "▶"}</span>
+              {!readonly && (
+                <div
+                  title={isEnabled ? "Click to disable this shock" : "Click to enable this shock"}
+                  onClick={e => { e.stopPropagation(); updateEvent(idx, "enabled", !isEnabled); }}
+                  style={{
+                    position: "relative", width: 32, height: 18, flexShrink: 0,
+                    background: isEnabled ? "#16a34a" : "#d1d5db",
+                    borderRadius: 999, cursor: "pointer",
+                    transition: "background 0.2s",
+                  }}>
+                  <div style={{
+                    position: "absolute", top: 2, left: isEnabled ? 16 : 2,
+                    width: 14, height: 14, borderRadius: "50%", background: "#fff",
+                    boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
+                    transition: "left 0.2s",
+                  }} />
+                </div>
+              )}
               {!readonly && <button onClick={e => { e.stopPropagation(); delEvent(idx); }} style={{ ...tblDelBtn, color: "#fca5a5" }}>✕</button>}
             </div>
             {isOpen && (
@@ -1020,6 +1125,14 @@ const ShocksGuidedEditor: React.FC<PersonJsonEditorProps> = ({ parsed, readonly,
                       <option value="baseline">baseline — returns to pre-shock trend</option>
                       <option value="none">none — stays at trough</option>
                     </select></div>
+                  <div><label style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", display: "block", marginBottom: 4 }}>Enabled</label>
+                    <select value={String(evt.enabled !== false)} disabled={readonly}
+                      onChange={e => updateEvent(idx, "enabled", e.target.value === "true")} style={tblInput}>
+                      <option value="true">✓ Enabled — fires in simulation</option>
+                      <option value="false">○ Disabled — kept but skipped</option>
+                    </select>
+                    <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 3 }}>Disabled events are preserved in the file but ignored when running. Use the ✓/○ button in the row header for quick toggling.</div>
+                  </div>
                 </div>
               </div>
             )}
@@ -1031,6 +1144,31 @@ const ShocksGuidedEditor: React.FC<PersonJsonEditorProps> = ({ parsed, readonly,
           <button onClick={addEvent} style={tblAddBtn}>+ Add market shock event</button>
         </div>
       )}
+      {/* JSON schema reference */}
+      <div style={{ padding: "12px 16px", borderTop: "1px solid #f0f0f0", background: "#fafafa" }}>
+        <div style={{ fontSize: 11, fontWeight: 700, color: "#6b7280", marginBottom: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>JSON field reference — shocks_yearly.json</div>
+        <div style={{ display: "grid", gridTemplateColumns: "140px 1fr", gap: "3px 12px", fontSize: 11, color: "#374151" }}>
+          {[
+            ["mode",              "Top-level. augment (layer on system shocks) | replace (only user events) | none (all suppressed). Overridden by Run panel."],
+            ["class",            "Asset class hit: US_STOCKS · INTL_STOCKS · LONG_TREAS · INT_TREAS · TIPS · GOLD · COMMOD · CASH"],
+            ["start_year",       "Simulation year the drawdown begins (year 1 = current_age + 1)."],
+            ["start_quarter",    "Quarter within the start year (1–4)."],
+            ["depth",            "Peak drawdown as a decimal (0.20 = 20% drop from pre-shock baseline)."],
+            ["dip_quarters",     "How many quarters the portfolio spends falling to the trough."],
+            ["recovery_quarters","How many quarters the recovery back to baseline takes."],
+            ["override_mode",    "strict = scripted return replaces stochastic draw. augment = stacks on top."],
+            ["recovery_to",      "baseline = recovers to pre-shock trend line. none = stays at trough permanently."],
+            ["dip_profile",      "Shape of the fall: {type: linear | poly | exp, alpha?: 1.3}. alpha > 1 = slow start / sharp end."],
+            ["rise_profile",     "Shape of the recovery: same options as dip_profile."],
+            ["enabled",          "true (default) = event fires normally. false = event is kept in file but skipped entirely by the simulator."],
+          ].map(([field, desc]) => (
+            <React.Fragment key={field}>
+              <code style={{ fontFamily: "monospace", fontSize: 10, color: "#3C3489", alignSelf: "start", paddingTop: 1 }}>{field}</code>
+              <span style={{ color: "#6b7280" }}>{desc}</span>
+            </React.Fragment>
+          ))}
+        </div>
+      </div>
     </GuidedShell>
   );
 };
@@ -2094,7 +2232,7 @@ const PersonJsonGuidedEditor: React.FC<PersonJsonEditorProps> = ({ parsed, reado
       },
       retirement_age: {
         title: "Retirement Age",
-        desc: "The age you plan to stop working. Affects the simulation mode glide path and the Roth optimizer analysis window.",
+        desc: "The age the simulator treats as your transition from accumulation to distribution. Used for two things only: (1) the 'automatic' simulation mode glide path — before this age the simulator weights toward growth-first, after it weights toward income protection; (2) the Roth optimizer analysis window — it assumes W2 earned income stops at this age when computing bracket headroom for conversions.\n\nThis does NOT replace your Income Sources (income.json) or Spending Plan. If your income.json already shows W2 dropping to zero at a specific age, that overrides this field in practice. Think of Retirement Age as a coarse hint — your actual income and withdrawal schedules are the authoritative data.\n\nIf you are already retired (W2 = 0) and drawing from your portfolio, set this to your current age or the age you stopped working.",
         control: inp("retirement_age", "number", "e.g. 65"),
       },
       simulation_mode: {
@@ -2678,34 +2816,66 @@ const FILE_META: Record<string, { label: string; desc: string; icon: string; hin
   "allocation_yearly.json":   { label: "Asset Allocation",      icon: "📊", desc: "How it's invested", hint: "Portfolio weights across IRA, Roth, brokerage by year" },
   "economic.json":            { label: "Withdrawal Strategy",   icon: "⚙️",  desc: "How you draw it down", hint: "Withdrawal sequence, bad-market rules, surplus policy" },
   "inflation_yearly.json":    { label: "Inflation",             icon: "📈", desc: "Price assumptions", hint: "Year-by-year inflation applied to spending and SS" },
-  "shocks_yearly.json":       { label: "Shocks & Windfalls",    icon: "⚡", desc: "One-time events", hint: "Inheritances, large expenses, market stress scenarios" },
+  "shocks_yearly.json":       { label: "Shocks & Windfalls",    icon: "⚡", desc: "One-time events", hint: "Market drawdown events · enable/disable individual shocks without deleting them · mode: none | augment | replace" },
 };
 
 // ── Readme renderer ──────────────────────────────────────────────────────────
 // Recursively renders a readme object as a readable field-reference panel.
 // Strings → plain prose rows. Nested objects → indented sub-sections.
 const ReadmePanel: React.FC<{ data: any; depth: number }> = ({ data, depth }) => {
-  if (typeof data === "string") {
-    return <span className="readme-value">{data}</span>;
-  }
-  if (typeof data !== "object" || data === null) {
-    return <span className="readme-value">{String(data)}</span>;
-  }
+  // Flatten the entire nested structure into a simple list of rows.
+  // No sub-grids at any depth — just indented key + description.
+  const rows: { key: string; val: string; depth: number }[] = [];
+
+  const flatten = (obj: any, d: number) => {
+    if (typeof obj === "string" || typeof obj === "number" || typeof obj === "boolean") return;
+    for (const [k, v] of Object.entries(obj)) {
+      if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
+        rows.push({ key: k.replace(/_/g, " "), val: String(v), depth: d });
+      } else if (typeof v === "object" && v !== null) {
+        rows.push({ key: k.replace(/_/g, " "), val: "", depth: d });
+        flatten(v, d + 1);
+      }
+    }
+  };
+  flatten(data, depth);
+
   return (
-    <dl className={`readme-dl depth-${depth}`}>
-      {Object.entries(data).map(([key, val]) => (
-        <div className="readme-row" key={key}>
-          <dt className="readme-key">{key.replace(/_/g, " ")}</dt>
-          <dd className="readme-val">
-            {typeof val === "string" || typeof val === "number" || typeof val === "boolean" ? (
-              <span className="readme-value">{String(val)}</span>
-            ) : (
-              <ReadmePanel data={val} depth={depth + 1} />
-            )}
-          </dd>
-        </div>
-      ))}
-    </dl>
+    <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+      <colgroup>
+        <col style={{ width: "28%" }} />
+        <col style={{ width: "72%" }} />
+      </colgroup>
+      <tbody>
+        {rows.map((row, i) => (
+          <tr key={i} style={{ background: i % 2 === 0 ? "#f8fafc" : "#f1f5f9", verticalAlign: "top" }}>
+            <td style={{
+              padding: `4px 8px 4px ${8 + row.depth * 14}px`,
+              fontFamily: '"SF Mono", Menlo, Monaco, Consolas, monospace',
+              fontSize: 11,
+              fontWeight: 600,
+              color: row.depth === 0 ? "#1e3a5f" : row.depth === 1 ? "#2563eb" : "#6b7280",
+              whiteSpace: "nowrap",
+              borderRight: "1px solid #e5e7eb",
+              width: "28%",
+            }}>
+              {row.key}
+            </td>
+            <td style={{
+              padding: "4px 12px",
+              fontSize: 12,
+              color: row.val ? "#374151" : "#9ca3af",
+              lineHeight: 1.5,
+              wordBreak: "break-word",
+              overflowWrap: "break-word",
+              fontStyle: row.val ? "normal" : "italic",
+            }}>
+              {row.val || "↓"}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 };
 // ─────────────────────────────────────────────────────────────────────────────
@@ -2773,6 +2943,9 @@ const App: React.FC = () => {
 
   const [aggView, setAggView] = useState<"none" | "current" | "future">("none");
   const [showInsights, setShowInsights] = useState(false);
+  const insightsAutoExpandKey = useRef<string>("");  // tracks which run was last auto-expanded
+  const drawdownAutoExpandKey = useRef<string>("");
+  const rothInsightsAutoExpandKey = useRef<string>("");
   const [showPortfolioAnalysis, setShowPortfolioAnalysis] = useState(false);
   const [showRothSchedule, setShowRothSchedule] = useState(false);
   const [showRothInsights, setShowRothInsights] = useState(false);
@@ -2888,6 +3061,27 @@ const App: React.FC = () => {
         if (parsed.state)            setRunState(parsed.state);
         if (parsed.filing_status)    setRunFiling(parsed.filing_status);
         if (parsed.simulation_mode)  setRunSimulationMode(parsed.simulation_mode);
+      })
+      .catch(() => {});
+
+    // Also seed shocks mode from shocks_yearly.json
+    apiGet<any>(
+      `/profile-config/${encodeURIComponent(profile)}/${encodeURIComponent("shocks_yearly.json")}`,
+    )
+      .then((data) => {
+        let parsed: any = null;
+        if (data && typeof data === "object" && "content" in data) {
+          try { parsed = JSON.parse((data as any).content as string); } catch {}
+        } else {
+          const { readme, ...rest } = data as any;
+          parsed = rest;
+        }
+        if (!parsed) return;
+        // mode field in shocks_yearly.json → seed the run panel dropdown
+        const mode = parsed.mode;
+        if (mode && ["none", "augment", "replace"].includes(mode)) {
+          setRunShocksMode(mode);
+        }
       })
       .catch(() => {});
   };
@@ -3995,7 +4189,7 @@ const App: React.FC = () => {
               </div>
 
               {/* Editor on top, Readme below */}
-              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 12, minWidth: 0 }}>
 
                 {/* ── MODE: Guided ─────────────────────────────────────── */}
                 {configMode === "guided" && configContent && (() => {
@@ -4017,6 +4211,17 @@ const App: React.FC = () => {
                     setConfigContent(newContent);
                     setOriginalContent(newContent);
                     loadVersionHistory(selectedProfile);
+                    // Sync simulation panel when shocks mode changes
+                    if (configFile === "shocks_yearly.json" && updated.mode &&
+                        ["none","augment","replace"].includes(updated.mode)) {
+                      setRunShocksMode(updated.mode);
+                    }
+                    // Sync simulation panel when person.json state/filing/mode changes
+                    if (configFile === "person.json") {
+                      if (updated.state)           setRunState(updated.state);
+                      if (updated.filing_status)   setRunFiling(updated.filing_status);
+                      if (updated.simulation_mode) setRunSimulationMode(updated.simulation_mode);
+                    }
                   };
                   const editorProps = { parsed, readonly: isDefaultProfile || false, onSave: guidedOnSave };
 
@@ -4338,9 +4543,9 @@ const App: React.FC = () => {
 
                 {/* Field reference — shown in view/edit mode only */}
                 {configMode !== "guided" && (configReadme ? (
-                  <div className="config-readme" style={{ maxHeight: "40vh" }}>
+                  <div className="config-readme" style={{ maxHeight: "360px" }}>
                     <div className="config-readme-title">📖 Field Reference — {configFile}</div>
-                    <div className="config-readme-scroll" style={{ maxHeight: "calc(40vh - 30px)" }}>
+                    <div className="config-readme-scroll" style={{ maxHeight: "calc(360px - 30px)" }}>
                       <ReadmePanel data={configReadme} depth={0} />
                     </div>
                   </div>
@@ -4996,6 +5201,93 @@ const App: React.FC = () => {
                           <td>{formatPct(successRate)}</td>
                         </tr>
 
+                        {/* Pre-59.5 liquidity trap explanation — fires when 0% survival but large terminal portfolio */}
+                        {(() => {
+                          if ((successRate ?? 100) > 1) return null;  // only when near-0%
+                          const termBal = snapshot.portfolio?.future_mean?.at(-1) ?? 0;
+                          const startBal3 = Object.values(snapshot.starting ?? {}).reduce((a: number, b) => a + (b as number), 0);
+                          if (termBal < startBal3 * 0.5) return null; // only when portfolio grows despite 0% survival
+
+                          // Compute brokerage fraction of total portfolio
+                          const brokStart = Object.entries(snapshot.starting ?? {})
+                            .filter(([k]) => k.toUpperCase().includes("BROKERAGE") || k.toUpperCase().includes("TAXABLE"))
+                            .reduce((a, [,v]) => a + (v as number), 0);
+                          const tradStart = Object.entries(snapshot.starting ?? {})
+                            .filter(([k]) => k.toUpperCase().includes("TRAD") && !k.toUpperCase().includes("ROTH"))
+                            .reduce((a, [,v]) => a + (v as number), 0);
+                          const curAge4   = snapshot.person?.current_age ?? snapshot.person?.age ?? 46;
+                          const yearsTo595 = Math.max(0, Math.ceil(59.5 - curAge4));
+                          const plannedYr0 = snapshot.withdrawals?.planned_current?.[0] ?? 0;
+                          const brokYears  = plannedYr0 > 0 ? (brokStart / plannedYr0).toFixed(1) : "?";
+                          const gapYears   = Math.max(0, yearsTo595 - parseFloat(brokYears)).toFixed(0);
+                          const fmtM3 = (v: number) => v >= 1_000_000 ? `$${(v/1_000_000).toFixed(1)}M` : `$${Math.round(v/1_000)}K`;
+
+                          return (
+                            <tr>
+                              <td colSpan={2} style={{ padding: "6px 8px" }}>
+                                <div style={{
+                                  background: "#fff7ed", border: "1px solid #ea580c44",
+                                  borderLeft: "3px solid #ea580c",
+                                  borderRadius: 5, padding: "8px 12px", fontSize: 12, lineHeight: 1.6,
+                                }}>
+                                  <div style={{ fontWeight: 700, color: "#9a3412", marginBottom: 3 }}>
+                                    ⚠ Pre-59½ Liquidity Trap — 0% survival + {fmtM3(termBal)} terminal portfolio are both correct
+                                  </div>
+                                  <div style={{ color: "#374151" }}>
+                                    <strong>Why 0% survival:</strong> Your taxable brokerage ({fmtM3(brokStart)}) covers only ~{brokYears} years
+                                    at {fmtM3(plannedYr0)}/yr. IRS rules prohibit penalty-free access to TRAD IRA ({fmtM3(tradStart)})
+                                    before age 59½ — that is {yearsTo595} years away. This creates a ~{gapYears}-year gap where
+                                    the full plan cannot be funded regardless of market performance.
+                                    Every simulation path hits this gap → 0% full-plan survival.
+                                  </div>
+                                  <div style={{ color: "#374151", marginTop: 4 }}>
+                                    <strong>Why {fmtM3(termBal)} terminal:</strong> The TRAD IRA compounds untouched during the gap years —
+                                    the money is there, it is just legally inaccessible. You are simultaneously cash-poor and paper-wealthy.
+                                  </div>
+                                  <div style={{ color: "#374151", marginTop: 4 }}>
+                                    <strong>The fix:</strong> Build taxable brokerage to at least {fmtM3(plannedYr0 * yearsTo595)} before
+                                    retirement (enough to bridge to age 59½), or reduce planned spending to {fmtM3(Math.round(brokStart / yearsTo595 / 1000) * 1000)}/yr
+                                    (what the brokerage can sustain over {yearsTo595} years).
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })()}
+
+                        {/* Plan viability arithmetic — no predictions, shown prominently */}
+                        {(() => {
+                          const pv2 = snapshot.withdrawals?.plan_viability;
+                          if (!pv2 || pv2.viability_level === "OK") return null;
+                          const isCrit2 = pv2.viability_level === "CRITICAL";
+                          const covPct  = Math.round(pv2.coverage_ratio * 100);
+                          const color2  = isCrit2 ? "#b91c1c" : "#b45309";
+                          const bg2     = isCrit2 ? "#fff1f2" : "#fffbeb";
+                          const fmtM2   = (v: number) => v >= 1_000_000 ? `$${(v/1_000_000).toFixed(2)}M` : `$${Math.round(v/1_000)}K`;
+                          return (
+                            <tr>
+                              <td colSpan={2} style={{ padding: "6px 8px" }}>
+                                <div style={{
+                                  background: bg2, border: `1px solid ${color2}44`,
+                                  borderLeft: `3px solid ${color2}`,
+                                  borderRadius: 5, padding: "6px 10px", fontSize: 12,
+                                }}>
+                                  <span style={{ fontWeight: 700, color: color2 }}>
+                                    {isCrit2 ? "⛔ Plan unsustainable" : "⚠ Thin margin"} — arithmetic check (no market returns assumed)
+                                  </span>
+                                  <span style={{ marginLeft: 8, color: "#6b7280" }}>
+                                    Confirmed resources cover {covPct}% of total planned spend.
+                                    {pv2.arithmetic_failure_year != null &&
+                                      ` Zero-return balance depletes in year ${pv2.arithmetic_failure_year} (age ${pv2.arithmetic_failure_age}).`}
+                                    {" "}Total resources: {fmtM2(pv2.total_confirmed_resources)} vs planned: {fmtM2(pv2.total_planned_spend)}.
+                                    {" "}See Insights for sustainable spending range.
+                                  </span>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })()}
+
                         {/* Secondary — withdrawal strategy badge (all modes) */}
                         <tr style={{ fontSize: 11, color: "#6b7280" }}>
                           <td style={{ paddingLeft: 16 }}>
@@ -5092,7 +5384,7 @@ const App: React.FC = () => {
                             {plannedMean > 0 && (
                             <tr>
                               <td><Tip label="Planned withdrawal rate (after-tax take-home)"
-                                tip="Your planned after-tax take-home per year as % of starting portfolio. Taxes (RMDs, conversions, ordinary income) are computed separately on top. Color shows whether the run objective is achievable: GREEN = planned rate within stress floor. AMBER = full target strains stress floor but floor spending is achievable — bad markets scale you to floor, not depletion. RED = even floor spending exceeds stress sustainability — run objective not achievable." /></td>
+                                tip="Lifetime average of your withdrawal schedule ÷ starting portfolio. WARNING: if you have a pre-59½ liquidity gap (brokerage depletes before IRA access), this average is misleading — the accessible rate in early years is brokerage ÷ years-to-59½, which may be far lower. See the liquidity trap banner above." /></td>
                               <td style={{ fontWeight: 600 }}>
                                 <span style={{ display: "flex", alignItems: "center", gap: 7 }}>
                                   <span title={dotTitle} style={{
@@ -5102,23 +5394,73 @@ const App: React.FC = () => {
                                   }} />
                                   {plannedRate.toFixed(2)}% ({formatUSD(plannedMean)}/yr avg, after-tax)
                                 </span>
+                                {(() => {
+                                  // Warn if there's a liquidity trap — the rate is deceptive
+                                  const curAge5 = snapshot.person?.current_age ?? snapshot.person?.age ?? 0;
+                                  const brokStart2 = Object.entries(snapshot.starting ?? {})
+                                    .filter(([k]) => k.toUpperCase().includes("BROKERAGE") || k.toUpperCase().includes("TAXABLE"))
+                                    .reduce((a, [,v]) => a + (v as number), 0);
+                                  const yrs595 = Math.max(0, 59.5 - curAge5);
+                                  if (yrs595 <= 0 || brokStart2 <= 0) return null;
+                                  const accessibleRate = (brokStart2 / yrs595 / (Object.values(snapshot.starting ?? {}).reduce((a:number,b)=>a+(b as number),0))) * 100;
+                                  const plannedYr0 = snapshot.withdrawals?.planned_current?.[0] ?? 0;
+                                  const brokCoversYrs = plannedYr0 > 0 ? brokStart2 / plannedYr0 : yrs595;
+                                  if (brokCoversYrs >= yrs595) return null;  // no gap — no warning needed
+                                  return (
+                                    <div style={{ fontSize: 10, color: "#9a3412", marginTop: 2 }}>
+                                      ⚠ Deceptive avg — accessible rate pre-59½: {accessibleRate.toFixed(2)}%
+                                      (brokerage ÷ {yrs595.toFixed(0)}yr horizon)
+                                    </div>
+                                  );
+                                })()}
                               </td>
                             </tr>
                             )}
                             {floorMean > 0 && (
                             <tr>
                               <td><Tip label="Floor withdrawal rate (after-tax minimum)"
-                                tip="Your minimum floor spending as % of starting portfolio — the lowest take-home you have configured. In bad markets the simulator scales down to this floor rather than depleting the portfolio. Compare against the Safe withdrawal rate below to see whether your floor is stress-sustainable." /></td>
+                                tip="Lifetime average of your base_k floor ÷ starting portfolio. Same caveat as planned rate: if brokerage depletes before 59½, even the floor cannot be fully funded in the gap years. The floor rate is only meaningful for the post-59½ period when all accounts are accessible." /></td>
                               <td style={{ fontWeight: 600, color: "#374151" }}>
                                 {floorRate.toFixed(2)}% ({formatUSD(floorMean)}/yr avg, after-tax)
+                                {(() => {
+                                  const curAge6 = snapshot.person?.current_age ?? snapshot.person?.age ?? 0;
+                                  const brokStart3 = Object.entries(snapshot.starting ?? {})
+                                    .filter(([k]) => k.toUpperCase().includes("BROKERAGE") || k.toUpperCase().includes("TAXABLE"))
+                                    .reduce((a, [,v]) => a + (v as number), 0);
+                                  const yrs595b = Math.max(0, 59.5 - curAge6);
+                                  const floorYr0 = snapshot.withdrawals?.base_current?.[0] ?? 0;
+                                  const brokCoversFloor = floorYr0 > 0 ? brokStart3 / floorYr0 : yrs595b;
+                                  if (yrs595b <= 0 || brokCoversFloor >= yrs595b) return null;
+                                  return (
+                                    <div style={{ fontSize: 10, color: "#9a3412", marginTop: 2 }}>
+                                      ⚠ Floor also has a gap — brokerage covers {brokCoversFloor.toFixed(1)}yr of {yrs595b.toFixed(0)}yr horizon
+                                    </div>
+                                  );
+                                })()}
                               </td>
                             </tr>
                             )}
                             <tr>
                               <td><Tip label="Safe withdrawal rate — stress scenario (P10)"
-                                tip="The maximum constant withdrawal rate (% of starting portfolio per year) that the worst 10% of simulation paths can sustain without depletion. The younger you are, the smaller this number — a longer horizon means each dollar must stretch further. The reference point for interpreting the planned and floor rates above." /></td>
+                                tip="The maximum constant withdrawal rate that the worst 10% of Monte Carlo paths can sustain over the FULL horizon without depleting. Computed on pre-cashflow core paths. IMPORTANT: this rate assumes uniform access to all accounts — it does not account for the IRS pre-59½ age gate. For portfolios with large TRAD IRA and small brokerage, the real pre-59½ safe rate is brokerage ÷ years-to-59½, which is always lower than this number." /></td>
                               <td style={{ fontWeight: 600 }}>
                                 {swr.toFixed(2)}%
+                                {(() => {
+                                  const curAge7 = snapshot.person?.current_age ?? snapshot.person?.age ?? 0;
+                                  const brokStart4 = Object.entries(snapshot.starting ?? {})
+                                    .filter(([k]) => k.toUpperCase().includes("BROKERAGE") || k.toUpperCase().includes("TAXABLE"))
+                                    .reduce((a, [,v]) => a + (v as number), 0);
+                                  const totalBal4 = Object.values(snapshot.starting ?? {}).reduce((a:number,b)=>a+(b as number),0);
+                                  const yrs595c = Math.max(0, 59.5 - curAge7);
+                                  if (yrs595c <= 0 || brokStart4 / totalBal4 > 0.5) return null;  // only warn if brok < 50% of total
+                                  const realPreRate = (brokStart4 / yrs595c / totalBal4) * 100;
+                                  return (
+                                    <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2 }}>
+                                      Assumes full access to all accounts. Real pre-59½ rate: {realPreRate.toFixed(2)}%
+                                      (brokerage only, {yrs595c.toFixed(0)}yr window)
+                                    </div>
+                                  );
+                                })()}
                               </td>
                             </tr>
                             </>
@@ -5287,11 +5629,47 @@ const App: React.FC = () => {
                 const SEQ_RISK_YEARS = 10;
                 const seqRiskEnd = Math.min(SEQ_RISK_YEARS - 1, years.length - 1);
                 const seqStressMax = Math.max(...ddP90.slice(0, SEQ_RISK_YEARS), 0);
-                const seqSeverity = seqStressMax > 30
-                  ? { label: "HIGH", color: "#b91c1c" }
-                  : seqStressMax > 15
-                  ? { label: "MODERATE", color: "#b45309" }
-                  : { label: "LOW", color: "#15803d" };
+
+                // ── Sequence risk severity — incorporates drawdown AND funding reality ──
+                // Drawdown alone is misleading: a portfolio that never loses >5% but
+                // can't fund withdrawals for 7 years is not "LOW" risk. We combine:
+                //   (a) Market signal:   max stress drawdown in years 1-10
+                //   (b) Funding signal:  any shortfall years in the plan
+                //   (c) Survival signal: how far survival rate drops from 100%
+                const W_snap = snapshot.withdrawals;
+                const realizedSeq  = W_snap?.realized_current_median_path ?? W_snap?.realized_current_mean ?? [];
+                const plannedSeq   = W_snap?.planned_current ?? [];
+                const survSeq      = W_snap?.survival_rate_by_year ?? [];
+
+                // Count shortfall years (any year where realized < planned - $500)
+                let shortfallCount = 0;
+                for (let i = 0; i < plannedSeq.length; i++) {
+                  if ((plannedSeq[i] ?? 0) - (realizedSeq[i] ?? 0) > 500) shortfallCount++;
+                }
+
+                // Minimum survival rate across all years
+                const minSurvRate = survSeq.length > 0 ? Math.min(...survSeq) : 100;
+
+                // Composite risk signal — worst of market, funding, and survival
+                const marketRisk  = seqStressMax > 30 ? 2 : seqStressMax > 15 ? 1 : 0;
+                const fundingRisk = shortfallCount >= 5 ? 2 : shortfallCount >= 1 ? 2 : 0;  // any shortfall = at least HIGH
+                const survRisk    = minSurvRate < 70 ? 2 : minSurvRate < 90 ? 1 : 0;
+                const compositeRisk = Math.max(marketRisk, fundingRisk, survRisk);
+
+                const seqSeverity = compositeRisk >= 2
+                  ? { label: "HIGH", color: "#b91c1c",
+                      reason: shortfallCount > 0
+                        ? `${shortfallCount} year${shortfallCount !== 1 ? "s" : ""} without full funding — not a market risk, a liquidity gap`
+                        : minSurvRate < 70
+                        ? `survival rate drops to ${minSurvRate.toFixed(0)}% in worst years`
+                        : `stress drawdown ${seqStressMax.toFixed(0)}% in years 1–10` }
+                  : compositeRisk === 1
+                  ? { label: "MODERATE", color: "#b45309",
+                      reason: survRisk === 1
+                        ? `survival rate dips to ${minSurvRate.toFixed(0)}%`
+                        : `stress drawdown ${seqStressMax.toFixed(0)}% in years 1–10` }
+                  : { label: "LOW", color: "#15803d",
+                      reason: `stress drawdown ${seqStressMax.toFixed(0)}% · survival ${minSurvRate.toFixed(0)}%` };
 
                 const W = 680, H = isRetirement ? 200 : 180;
                 const PAD = { t: 14, r: 16, b: 30, l: 44 };
@@ -5312,6 +5690,13 @@ const App: React.FC = () => {
                   return acc;
                 }, []);
 
+                // Auto-expand when sequence risk is HIGH or there are shortfall years
+                const _ddAutoKey = snapshot?.run_info?.run_id ?? String(dd90sc);
+                if ((seqSeverity.label === "HIGH" || shortfallCount > 0) && drawdownAutoExpandKey.current !== _ddAutoKey) {
+                  drawdownAutoExpandKey.current = _ddAutoKey;
+                  setTimeout(() => setShowDrawdown(true), 0);
+                }
+
                 return (
                   <section className="results-section">
                     <h3
@@ -5324,13 +5709,25 @@ const App: React.FC = () => {
                         typical worst {dd50sc.toFixed(1)}% · stress worst {dd90sc.toFixed(1)}%
                       </span>
                       {isRetirement && (
-                        <span style={{
+                        <span title={seqSeverity.reason} style={{
                           fontSize: "0.68em", fontWeight: 700,
                           color: seqSeverity.color,
                           background: seqSeverity.color + "18",
-                          borderRadius: 999, padding: "1px 8px", marginLeft: "0.5rem"
+                          borderRadius: 999, padding: "1px 8px", marginLeft: "0.5rem",
+                          cursor: "help",
                         }}>
                           Sequence risk {seqSeverity.label}
+                        </span>
+                      )}
+                      {!isRetirement && shortfallCount > 0 && (
+                        <span title={seqSeverity.reason} style={{
+                          fontSize: "0.68em", fontWeight: 700,
+                          color: "#b91c1c",
+                          background: "#b91c1c18",
+                          borderRadius: 999, padding: "1px 8px", marginLeft: "0.5rem",
+                          cursor: "help",
+                        }}>
+                          Funding gap — {shortfallCount} yr{shortfallCount !== 1 ? "s" : ""}
                         </span>
                       )}
                       {!showDrawdown && (
@@ -5342,7 +5739,28 @@ const App: React.FC = () => {
 
                     {showDrawdown && (
                       <div style={{ marginTop: "0.75rem" }}>
-                        {isRetirement && (
+                        {/* Funding gap banner — highest priority, shown regardless of mode */}
+                        {shortfallCount > 0 && (
+                          <div style={{
+                            border: `1px solid #b91c1c44`,
+                            borderLeft: `4px solid #b91c1c`,
+                            borderRadius: 6,
+                            background: "#fff1f2",
+                            padding: "8px 12px", marginBottom: 10,
+                            fontSize: 12, color: "#374151",
+                          }}>
+                            <strong style={{ color: "#b91c1c" }}>
+                              ⛔ Liquidity gap — {shortfallCount} year{shortfallCount !== 1 ? "s" : ""} without full funding
+                            </strong>
+                            <span style={{ marginLeft: 8, color: "#6b7280" }}>
+                              This is not a sequence-of-returns problem — the market drawdown is only {seqStressMax.toFixed(1)}%.
+                              The issue is that the <strong>taxable brokerage runs dry</strong> before age 59½,
+                              and IRA/Roth funds are legally inaccessible without penalty before that age.
+                              The portfolio is large enough — the spending plan is not. See Insights for the sustainable spending range.
+                            </span>
+                          </div>
+                        )}
+                        {isRetirement && shortfallCount === 0 && (
                           <div style={{
                             border: `1px solid ${seqSeverity.color}44`,
                             borderLeft: `4px solid ${seqSeverity.color}`,
@@ -5483,8 +5901,393 @@ const App: React.FC = () => {
                 const convUnderutilized = meanEffPre < 3 && meanEffRmd > 35 && convTotal > 0;
                 const niitTotal = (S as any)?.taxes_niit_total_current ?? 0;
 
-                type Insight = { id: string; sev: "warn" | "tip" | "good"; title: string; body: string };
+                type Insight = { id: string; sev: "warn" | "tip" | "good" | "critical"; title: string; body: string;
+                  actions?: Array<{ label: string; description: string; apply: () => Promise<void> }>; };
                 const insights: Insight[] = [];
+
+                // ── Plan viability arithmetic — computed before MC, no predictions ──────
+                // This fires regardless of MC results. Pure math: if your plan requires
+                // more than your total confirmed resources (portfolio + income), it fails.
+                const pv = W?.plan_viability;
+                if (pv && pv.viability_level !== "OK") {
+                  const totalRes   = pv.total_confirmed_resources;
+                  const totalPlan  = pv.total_planned_spend;
+                  const covRatio   = pv.coverage_ratio;
+                  const failYr     = pv.arithmetic_failure_year;
+                  const failAge    = pv.arithmetic_failure_age;
+                  const gapTotal   = pv.arithmetic_failure_gap_total;
+                  const fmtM = (v: number) => v >= 1_000_000 ? `$${(v/1_000_000).toFixed(2)}M` : `$${Math.round(v/1_000)}K`;
+                  const isCritical = pv.viability_level === "CRITICAL";
+
+                  insights.push({
+                    id: "plan_viability",
+                    sev: isCritical ? "critical" : "warn",
+                    title: isCritical
+                      ? `⛔ Plan mathematically unsustainable — spending exceeds total confirmed resources`
+                      : `⚠ Plan requires market growth to survive — no margin without returns`,
+                    body: [
+                      `Without any market returns, your total confirmed resources are ${fmtM(totalRes)} `,
+                      `(${fmtM(Math.round(Object.values(snapshot.starting ?? {}).reduce((a: number, b) => a + (b as number), 0)))} portfolio `,
+                      `+ confirmed income). Your planned total spending is ${fmtM(totalPlan)}. `,
+                      `Coverage ratio: ${(covRatio * 100).toFixed(0)}% — `,
+                      isCritical
+                        ? `the plan is mathematically impossible without above-average market returns. `
+                        : `the plan has less than 15% buffer, meaning any underperformance creates shortfalls. `,
+                      failYr != null
+                        ? `On a zero-return arithmetic basis, the portfolio runs dry in year ${failYr} (age ${failAge}). `
+                          + `Total arithmetic gap: ${fmtM(gapTotal)}. `
+                        : "",
+                      `\n\nThis check uses no market predictions — only your starting balance and confirmed income. `,
+                      `The Monte Carlo results below show outcomes WITH market returns, but this arithmetic floor `,
+                      `is the hard constraint the plan must satisfy first. `,
+                      `Consider reducing planned spending, increasing the starting portfolio, or confirming additional income sources.`,
+                    ].join(""),
+                  });
+                }
+
+                // ── Survival-probability spend recommendation (computed first, used in multiple places) ──
+                const startingTotal2 = Object.values(snapshot.starting ?? {})
+                  .reduce((a: number, b) => a + (b as number), 0);
+                const swrP10 = W?.safe_withdrawal_rate_p10_pct ?? 0;
+                const swrP25 = W?.safe_withdrawal_rate_p25_pct ?? 0;
+                const swrP50 = W?.safe_withdrawal_rate_p50_pct ?? 0;
+                const survByYear = W?.survival_rate_by_year ?? [];
+                const conservativeFloor = W?.conservative_floor_current ?? 0;  // balance+income only, no MC
+                const conservativeSpend = swrP10 > 0 ? Math.round(startingTotal2 * swrP10 / 100) : 0;
+                const moderateSpend     = swrP25 > 0 ? Math.round(startingTotal2 * swrP25 / 100) : 0;
+                const aggressiveSpend   = swrP50 > 0 ? Math.round(startingTotal2 * swrP50 / 100) : 0;
+                const fmtSpend = (v: number) => v >= 1_000_000
+                  ? `$${(v/1_000_000).toFixed(2)}M` : `$${Math.round(v/1000)}K`;
+                const worstSurvYr = survByYear.length > 0
+                  ? survByYear.reduce((iMin, v, i, arr) => v < arr[iMin] ? i : iMin, 0) : -1;
+                const worstSurv = worstSurvYr >= 0 ? survByYear[worstSurvYr] : 100;
+
+                // ── Shortfall detection — highest priority ──────────────────────
+                const realizedYr  = W?.realized_current_median_path ?? W?.realized_current_mean ?? [];
+                const shortfallYears: number[] = [];
+                let totalShortfallAmt = 0;
+                for (let i = 0; i < YEARS_N; i++) {
+                  const planned_i  = plannedYr[i] ?? 0;
+                  const realized_i = realizedYr[i] ?? 0;
+                  const gap = planned_i - realized_i;
+                  if (gap > 500) { shortfallYears.push(i); totalShortfallAmt += gap; }
+                }
+                if (shortfallYears.length > 0) {
+                  const firstYr  = shortfallYears[0] + 1;
+                  const lastYr   = shortfallYears[shortfallYears.length - 1] + 1;
+                  const startAge2 = snapshot.person?.current_age ?? snapshot.person?.age ?? 0;
+                  const firstAge = Math.floor(startAge2 + shortfallYears[0]);
+                  const lastAge  = Math.floor(startAge2 + shortfallYears[shortfallYears.length - 1]);
+                  const totalFmt = totalShortfallAmt >= 1_000_000
+                    ? `$${(totalShortfallAmt/1_000_000).toFixed(1)}M`
+                    : `$${Math.round(totalShortfallAmt/1000)}K`;
+                  const consecutive = (lastYr - firstYr + 1) === shortfallYears.length;
+                  const rangeStr = consecutive && shortfallYears.length > 1
+                    ? `years ${firstYr}–${lastYr} (ages ${firstAge}–${lastAge})`
+                    : `${shortfallYears.length} year${shortfallYears.length > 1 ? "s" : ""} starting year ${firstYr} (age ${firstAge})`;
+                  const worstGap = Math.max(...shortfallYears.map(i => (plannedYr[i]??0) - (realizedYr[i]??0)));
+                  const worstGapFmt = `$${Math.round(worstGap/1000)}K`;
+                  const yearsToAccess = Math.max(0, Math.round(59.5 - firstAge));
+                  const plannedAtGap = Math.round(plannedYr[shortfallYears[0]] ?? 0);
+
+                  const spendRec = conservativeSpend > 0
+                    ? `\n\n💡 Sustainable spend based on your portfolio and survival probability: `
+                      + `${fmtSpend(conservativeSpend)}/yr (conservative · 90% of scenarios survive the full plan) · `
+                      + `${fmtSpend(moderateSpend)}/yr (moderate · 75% survival) · `
+                      + `${fmtSpend(aggressiveSpend)}/yr (aggressive · 50% survival — median outcome). `
+                      + `Reduce your planned spend from ${fmtSpend(plannedAtGap)}/yr to ${fmtSpend(conservativeSpend)}/yr to eliminate the shortfall gap entirely.`
+                      + (conservativeFloor > 0 && conservativeFloor < conservativeSpend
+                        ? ` Conservative floor (balance + confirmed income only, no market return assumptions): ${fmtSpend(Math.round(conservativeFloor))}/yr — this is what the plan can fund with certainty regardless of market outcomes.`
+                        : "")
+                    : `\n\n💡 Consider reducing the planned withdrawal to approximately $${Math.round(plannedAtGap * 0.65 / 1000)}K–$${Math.round(plannedAtGap * 0.80 / 1000)}K/yr to eliminate the gap.`;
+
+                  insights.push({
+                    id: "withdrawal_shortfall", sev: "critical",
+                    title: `⛔ Withdrawal shortfall — ${rangeStr}`,
+                    body: [
+                      `The portfolio cannot fund the full planned withdrawal in ${rangeStr}. `,
+                      `Worst single-year gap: ${worstGapFmt}/yr. Total cumulative shortfall: ${totalFmt}. `,
+                      `\n\nRoot cause: liquid taxable brokerage depletes before age 59½. IRS rules prohibit `,
+                      `penalty-free access to Traditional IRA or Roth funds before that age — `,
+                      `this simulator does not model early-withdrawal strategies because the 10% IRS penalty `,
+                      `makes those years even worse. The $0 shown is the correct answer: `,
+                      `those funds are legally inaccessible until age 59½`,
+                      yearsToAccess > 0 ? ` (${yearsToAccess} year${yearsToAccess !== 1 ? "s" : ""} away)` : "",
+                      `.\n\n`,
+                      `Two realistic paths forward:\n`,
+                      `• Strategy A — Optimised for ${snapshot.person?.target_age ?? 95}: `,
+                      `Reduce pre-gap spending to what the brokerage can actually sustain, `,
+                      `then maximise post-60 spending from the full portfolio. Smooth, no surprises.\n`,
+                      `• Strategy B — Bare minimum / run it out: `,
+                      `Spend the absolute minimum before 60 (even below the configured floor), `,
+                      `accept the reality of the gap, then spend freely post-60 and let money `,
+                      `run to zero by ${snapshot.person?.target_age ?? 95}. `,
+                      `Live your life — don't hoard for a number on a spreadsheet.\n\n`,
+                      spendRec,
+                    ].join(""),
+                    actions: (() => {
+                      const curAge9  = snapshot.person?.current_age ?? snapshot.person?.age ?? 46;
+                      const targetAge9 = snapshot.person?.target_age ?? 95;
+                      const brokStart9 = Object.entries(snapshot.starting ?? {})
+                        .filter(([k]) => k.toUpperCase().includes("BROKERAGE") || k.toUpperCase().includes("TAXABLE"))
+                        .reduce((a,[,v])=>a+(v as number), 0);
+                      const yrs595_9  = Math.max(1, Math.ceil(59.5 - curAge9));
+                      const yrsPost95 = Math.max(1, targetAge9 - 59.5);
+                      const tradStart9 = Object.entries(snapshot.starting ?? {})
+                        .filter(([k]) => k.toUpperCase().includes("TRAD") && !k.toUpperCase().includes("ROTH"))
+                        .reduce((a,[,v])=>a+(v as number), 0);
+                      const rothStart9 = Object.entries(snapshot.starting ?? {})
+                        .filter(([k]) => k.toUpperCase().includes("ROTH"))
+                        .reduce((a,[,v])=>a+(v as number), 0);
+
+                      // Strategy A: brokerage÷yrs_to_595 pre-gap; (trad+roth)÷yrs_post_595 post-gap (0% real, conservative)
+                      const preK_A  = Math.floor(brokStart9 / yrs595_9 / 1000);  // round down for safety
+                      const postK_A = Math.floor((tradStart9 + rothStart9) / yrsPost95 / 1000);
+
+                      // Strategy B: floor÷2 before 60 (bare minimum, accept gap); full portfolio post-60
+                      const currentFloor = snapshot.withdrawals?.base_current?.[0] ?? 100_000;
+                      const preK_B  = Math.floor(Math.min(brokStart9 / yrs595_9, currentFloor * 0.5) / 1000);
+                      // Post-60 for B: maximize — portfolio at 60 + growth (use portfolio current_median at yrs595)
+                      const portAt595 = (snapshot.portfolio?.current_median ?? [])[yrs595_9] ?? (tradStart9 + rothStart9);
+                      const postK_B = Math.floor(portAt595 / yrsPost95 / 1000);
+
+                      const actions: Array<{ label: string; description: string; apply: () => Promise<void> }> = [];
+
+                      if (preK_A > 0 && postK_A > 0) {
+                        actions.push({
+                          label: `Strategy A — Optimised for ${targetAge9}: ${preK_A}K/yr before 60, ${postK_A}K/yr after`,
+                          description: `Sets pre-gap spending to what brokerage can fund (${preK_A}K = $${brokStart9.toLocaleString()} ÷ ${yrs595_9}yr), and post-60 to what TRAD+Roth can sustain at 0% real return. Smooth, no surprise gaps.`,
+                          apply: async () => {
+                            try {
+                              const wdRaw = await apiPost<{ ok: boolean; content: string }>("/profile-config-get", { profile: selectedProfile, name: "withdrawal_schedule.json" });
+                              const wdObj = JSON.parse(wdRaw.content);
+                              wdObj.floor_k = Math.max(1, Math.floor(preK_A * 0.8));
+                              wdObj.schedule = [
+                                { ages: `${curAge9}-59`, amount_k: preK_A, base_k: Math.max(1, Math.floor(preK_A * 0.8)),
+                                  _note: `Strategy A: brokerage only, ${brokStart9.toLocaleString()} ÷ ${yrs595_9}yr` },
+                                { ages: `60-${Math.min(74, targetAge9)}`, amount_k: postK_A, base_k: Math.floor(postK_A * 0.75),
+                                  _note: "Strategy A: full portfolio accessible, 0% real return floor" },
+                                ...(targetAge9 > 74 ? [{ ages: `75-${targetAge9}`, amount_k: postK_A, base_k: Math.floor(postK_A * 0.75),
+                                  _note: "Strategy A: RMD era — RMDs supplement this amount" }] : []),
+                              ];
+                              await apiPost("/profile-config", { profile: selectedProfile, name: "withdrawal_schedule.json",
+                                content: JSON.stringify(wdObj, null, 2),
+                                version_note: `Strategy A: optimised for ${targetAge9} — ${preK_A}K pre-60, ${postK_A}K post-60` });
+                              alert(`Strategy A saved: ${preK_A}K/yr before age 60, ${postK_A}K/yr after. Re-run simulation — the gap should be eliminated and the portfolio sustainable to ${targetAge9}.`);
+                            } catch(e: any) { alert("Save failed: " + String(e?.message || e)); }
+                          },
+                        });
+                      }
+
+                      if (preK_B >= 0 && postK_B > 0) {
+                        actions.push({
+                          label: `Strategy B — Bare minimum & live freely: ${preK_B}K/yr before 60, ${postK_B}K/yr after (run to zero)`,
+                          description: `Cuts pre-gap to absolute minimum (below floor — just enough to cover essentials), accepts the gap reality, then maximises post-60 spending. Money runs to near-zero at ${targetAge9}. Live life, don't hoard.`,
+                          apply: async () => {
+                            try {
+                              const wdRaw2 = await apiPost<{ ok: boolean; content: string }>("/profile-config-get", { profile: selectedProfile, name: "withdrawal_schedule.json" });
+                              const wdObj2 = JSON.parse(wdRaw2.content);
+                              wdObj2.floor_k = Math.max(1, preK_B);
+                              wdObj2.schedule = [
+                                { ages: `${curAge9}-59`, amount_k: Math.max(preK_B, 1), base_k: Math.max(1, preK_B),
+                                  _note: `Strategy B: bare minimum — brokerage only, accepting gap at depletion` },
+                                { ages: `60-${Math.min(74, targetAge9)}`, amount_k: postK_B, base_k: Math.floor(postK_B * 0.5),
+                                  _note: "Strategy B: live freely post-60, portfolio runs to zero by target age" },
+                                ...(targetAge9 > 74 ? [{ ages: `75-${targetAge9}`, amount_k: postK_B, base_k: Math.floor(postK_B * 0.5),
+                                  _note: "Strategy B: RMD era — RMDs supplement, residual goes to zero" }] : []),
+                              ];
+                              await apiPost("/profile-config", { profile: selectedProfile, name: "withdrawal_schedule.json",
+                                content: JSON.stringify(wdObj2, null, 2),
+                                version_note: `Strategy B: bare min ${preK_B}K pre-60, live freely ${postK_B}K post-60` });
+                              alert(`Strategy B saved: ${preK_B}K/yr before 60 (bare minimum), ${postK_B}K/yr after (run to zero by ${targetAge9}). Re-run to see the full picture. Money runs out near ${targetAge9} — that is the plan.`);
+                            } catch(e: any) { alert("Save failed: " + String(e?.message || e)); }
+                          },
+                        });
+                      }
+
+                      return actions.length > 0 ? actions : undefined;
+                    })(),
+                  });
+
+                } else if (conservativeSpend > 0) {
+                  const plannedMean = plannedYr.length > 0
+                    ? plannedYr.reduce((a, b) => a + b, 0) / plannedYr.length : 0;
+                  const headroom = conservativeSpend - plannedMean;
+                  if (headroom > 5_000) {
+                    insights.push({
+                      id: "spend_headroom", sev: "good",
+                      title: `Spending is within sustainable range — ${fmtSpend(Math.round(headroom))}/yr of conservative capacity unused`,
+                      body: `Your planned ${fmtSpend(Math.round(plannedMean))}/yr is well within the survival-probability sustainable range: `
+                        + `${fmtSpend(conservativeSpend)}/yr (90% survival · conservative) · `
+                        + `${fmtSpend(moderateSpend)}/yr (75% survival · moderate) · `
+                        + `${fmtSpend(aggressiveSpend)}/yr (50% survival · aggressive). `
+                        + (worstSurv < 95 && worstSurvYr >= 0
+                          ? `Survival rate dips to ${worstSurv.toFixed(0)}% in year ${worstSurvYr + 1} due to market shock — still healthy.`
+                          : `Survival rate stays above 95% throughout.`),
+                    });
+                  }
+                }
+
+                // ── Over-conservation detector — fires regardless of early shortfalls ───
+                // Terminal portfolio >> starting = the person is massively under-spending
+                // relative to what they could sustain. Compute per-phase recommendations.
+                {
+                  const portFutureMean = snapshot.portfolio?.future_mean ?? [];
+                  const portCurrentMed = snapshot.portfolio?.current_median ?? [];
+                  const YEARS_N2 = snapshot.years.length;
+                  const termBalFut = portFutureMean.at(-1) ?? 0;
+                  const termBalCur = portCurrentMed.at(-1) ?? 0;
+                  const startBal5  = Object.values(snapshot.starting ?? {}).reduce((a:number,b)=>a+(b as number),0);
+                  const totalPlannedSpend = plannedYr.reduce((a,b)=>a+b,0);
+                  const curAge8 = snapshot.person?.current_age ?? snapshot.person?.age ?? 0;
+
+                  // Terminal ratio: if dying with > 3x starting portfolio, they're under-spending
+                  const terminalRatio = startBal5 > 0 ? termBalCur / startBal5 : 0;
+
+                  if (terminalRatio > 2.5 && termBalCur > 1_000_000) {
+                    // Compute what they could sustainably spend at key phase transitions
+                    // Phase 1: post-59.5 (when IRA access opens)
+                    const idx595 = Math.max(0, Math.ceil(59.5 - curAge8));
+                    const balAt595 = idx595 < portCurrentMed.length ? portCurrentMed[idx595] : 0;
+                    const yrsFrom595 = Math.max(1, YEARS_N2 - idx595);
+                    const sustainAt595_0pct = balAt595 > 0 ? balAt595 / yrsFrom595 : 0;
+                    const sustainAt595_2pct = balAt595 > 0
+                      ? balAt595 * 0.02 / (1 - Math.pow(1.02, -yrsFrom595))
+                      : 0;
+
+                    // Phase 2: post-75 (RMD era — largest portfolio phase)
+                    const idx75 = Math.max(0, Math.ceil(75 - curAge8));
+                    const balAt75 = idx75 < portCurrentMed.length ? portCurrentMed[idx75] : 0;
+                    const yrsFrom75 = Math.max(1, YEARS_N2 - idx75);
+                    const sustainAt75_0pct = balAt75 > 0 ? balAt75 / yrsFrom75 : 0;
+                    const sustainAt75_2pct = balAt75 > 0
+                      ? balAt75 * 0.02 / (1 - Math.pow(1.02, -yrsFrom75))
+                      : 0;
+
+                    // Current plan at each phase
+                    const planAt595 = idx595 < plannedYr.length ? plannedYr[idx595] : 0;
+                    const planAt75  = idx75  < plannedYr.length ? plannedYr[idx75]  : 0;
+
+                    const fmtK2 = (v: number) => v >= 1_000_000 ? `$${(v/1_000_000).toFixed(1)}M` : `$${Math.round(v/1_000)}K`;
+
+                    insights.push({
+                      id: "over_conservation", sev: "tip",
+                      title: `💰 Portfolio significantly over-funded — dying with ${fmtK2(termBalCur)} while living on ${fmtK2(Math.round(plannedYr.at(-1) ?? 0))}/yr`,
+                      body: [
+                        `Your terminal portfolio (${fmtK2(termBalCur)} in today's dollars) is ${terminalRatio.toFixed(1)}× your starting balance. `,
+                        `You spent ${fmtK2(totalPlannedSpend)} total over ${YEARS_N2} years and left ${fmtK2(termBalCur)} behind — `,
+                        `${(termBalCur / Math.max(totalPlannedSpend, 1)).toFixed(1)}× what you spent over your entire retirement. `,
+                        `\n\nWhat you could actually sustain at each life stage (today's dollars):`,
+                        balAt595 > 0 && sustainAt595_0pct > planAt595 * 1.2
+                          ? `\n• Age 59½ onwards (portfolio ${fmtK2(Math.round(balAt595))}): `
+                            + `${fmtK2(Math.round(sustainAt595_0pct))}/yr at 0% real return · `
+                            + `${fmtK2(Math.round(sustainAt595_2pct))}/yr at 2% real. `
+                            + `Plan shows ${fmtK2(Math.round(planAt595))}/yr — you could spend ${Math.round(sustainAt595_0pct/planAt595)}× more.`
+                          : "",
+                        balAt75 > 0 && sustainAt75_0pct > planAt75 * 1.2
+                          ? `\n• Age 75 RMD era (portfolio ${fmtK2(Math.round(balAt75))}): `
+                            + `${fmtK2(Math.round(sustainAt75_0pct))}/yr at 0% real return · `
+                            + `${fmtK2(Math.round(sustainAt75_2pct))}/yr at 2% real. `
+                            + `Plan shows ${fmtK2(Math.round(planAt75))}/yr — leaving ${fmtK2(Math.round(sustainAt75_0pct - planAt75))}/yr on the table.`
+                          : "",
+                        `\n\n💡 Configuration changes to consider:`,
+                        `\n• Increase amount_k for ages 60–74 to ${fmtK2(Math.round(sustainAt595_0pct/1000)*1000)} (sustainable from portfolio at that age).`,
+                        `\n• Increase amount_k for ages 75–95 to ${fmtK2(Math.round(sustainAt75_0pct/1000)*1000)} (sustainable in RMD era).`,
+                        `\n• Or: leave as estate and update beneficiary strategy to optimize inheritance tax treatment.`,
+                      ].filter(Boolean).join(""),
+                      actions: [
+                        ...(balAt595 > 0 && sustainAt595_0pct > planAt595 * 1.2 ? [{
+                          label: `Set age 60–74 spending to ${fmtK2(Math.round(sustainAt595_0pct/1000)*1000)}/yr`,
+                          description: `Updates withdrawal_schedule.json: increases amount_k for ages 60–74 to ${Math.round(sustainAt595_0pct/1000)}K. Re-run to verify.`,
+                          apply: async () => {
+                            try {
+                              const wdRaw2 = await apiPost<{ ok: boolean; content: string }>("/profile-config-get", { profile: selectedProfile, name: "withdrawal_schedule.json" });
+                              const wd2 = JSON.parse(wdRaw2.content);
+                              const newK = Math.round(sustainAt595_0pct / 1000) * 1000;
+                              const newKStr = Math.round(newK / 1000);
+                              wd2.schedule = (wd2.schedule ?? []).map((row: any) => {
+                                const ages = String(row.ages ?? "");
+                                if (ages.includes("60") || ages.includes("61") || ages.includes("64") || ages.includes("65") || ages.includes("74")) {
+                                  return { ...row, amount_k: newKStr, base_k: Math.round(newKStr * 0.75) };
+                                }
+                                return row;
+                              });
+                              await apiPost("/profile-config", { profile: selectedProfile, name: "withdrawal_schedule.json", content: JSON.stringify(wd2, null, 2), version_note: `over-conservation fix — ages 60-74 raised to ${newKStr}K/yr` });
+                              alert(`Saved: ages 60–74 raised to ${newKStr}K/yr. Re-run simulation to confirm.`);
+                            } catch(e: any) { alert("Save failed: " + String(e?.message || e)); }
+                          },
+                        }] : []),
+                        ...(balAt75 > 0 && sustainAt75_0pct > planAt75 * 1.2 ? [{
+                          label: `Set age 75–95 spending to ${fmtK2(Math.round(sustainAt75_0pct/1000)*1000)}/yr`,
+                          description: `Updates withdrawal_schedule.json: increases amount_k for ages 75–95 to ${Math.round(sustainAt75_0pct/1000)}K (0% real floor). Re-run to verify.`,
+                          apply: async () => {
+                            try {
+                              const wdRaw3 = await apiPost<{ ok: boolean; content: string }>("/profile-config-get", { profile: selectedProfile, name: "withdrawal_schedule.json" });
+                              const wd3 = JSON.parse(wdRaw3.content);
+                              const newK2 = Math.round(sustainAt75_0pct / 1000) * 1000;
+                              const newK2Str = Math.round(newK2 / 1000);
+                              wd3.schedule = (wd3.schedule ?? []).map((row: any) => {
+                                const ages = String(row.ages ?? "");
+                                if (ages.includes("75") || ages.includes("80") || ages.includes("85") || ages.includes("90") || ages.includes("95")) {
+                                  return { ...row, amount_k: newK2Str, base_k: Math.round(newK2Str * 0.75) };
+                                }
+                                return row;
+                              });
+                              await apiPost("/profile-config", { profile: selectedProfile, name: "withdrawal_schedule.json", content: JSON.stringify(wd3, null, 2), version_note: `over-conservation fix — ages 75-95 raised to ${newK2Str}K/yr` });
+                              alert(`Saved: ages 75–95 raised to ${newK2Str}K/yr. Re-run simulation to confirm.`);
+                            } catch(e: any) { alert("Save failed: " + String(e?.message || e)); }
+                          },
+                        }] : []),
+                      ],
+                    });
+                  }
+                }
+
+                // Conversion deferral notification
+                const convDeferredToYear = (snapshot.conversions as any)?.conversion_deferred_to_year;
+                if (convDeferredToYear != null && convDeferredToYear > 0) {
+                  const startAge3   = snapshot.person?.current_age ?? snapshot.person?.age ?? 0;
+                  const deferAge    = Math.floor(startAge3 + convDeferredToYear);
+                  // Compute IRMAA exposure from withdrawals tax data
+                  const irmaaYr     = W?.taxes_excise_current_mean ?? [];  // excise proxy; IRMAA is in summary
+                  const irmaaTotal  = (snapshot.summary as any)?.irmaa_total_current ?? 0;
+                  const irmaaAnnual = irmaaYr.length > 0 ? Math.max(...irmaaYr) : 0;
+
+                  // Missed conversion window: pre-RMD years where conversion was $0
+                  const missedConvYrs = convCurYr.filter((v, i) => {
+                    const age = startAge3 + i;
+                    return age >= deferAge && age < 75 && v < 100;
+                  }).length;
+
+                  // Structural fix: how much brokerage buffer needed to pay conversion taxes
+                  // Assume 22% bracket, $50K/yr conversion → $11K tax/yr × (75 - deferAge) yrs
+                  const convYrsAvail  = Math.max(0, 75 - deferAge);
+                  const estTaxBuffer  = 11_000 * Math.min(convYrsAvail, 15);
+                  const fmtK = (v: number) => `$${Math.round(v/1000)}K`;
+
+                  insights.push({
+                    id: "conv_deferred_irmaa_chain", sev: "warn",
+                    title: `Roth conversion window missed ages ${deferAge}–74 — IRMAA consequence downstream`,
+                    body: [
+                      `Conversions were deferred to age ${deferAge} because the brokerage depleted before age 59½. `,
+                      `When conversions resumed, the brokerage was near-empty — no buffer to pay the conversion tax bill. `,
+                      `Result: ${missedConvYrs} conversion-eligible pre-RMD years were left unfilled. `,
+                      `\n\nThe downstream consequence is visible in the tax table: `,
+                      `TRAD IRA grows untouched from ages ${deferAge}–74, producing large RMDs at 75 that push `,
+                      `MAGI above the Medicare IRMAA threshold ($212K MFJ, 2025). `,
+                      irmaaAnnual > 0
+                        ? `IRMAA surcharges of ~${fmtK(irmaaAnnual)}/yr start firing at age 75+. `
+                        : `IRMAA surcharges likely start at age 75 once RMDs begin. `,
+                      `This is a direct consequence of the brokerage depletion chain. `,
+                      `\n\n💡 The simple math the plan needed: `,
+                      `To do ${fmtK(50_000)}/yr conversions at ages ${deferAge}–74 (~${convYrsAvail} years), `,
+                      `you need ~${fmtK(estTaxBuffer)} of brokerage buffer for tax payments on top of spending. `,
+                      `The fix is structural — build at least ${fmtK(estTaxBuffer)} more in taxable brokerage `,
+                      `BEFORE retirement. With that buffer, the simulator would have done bracket-fill conversions `,
+                      `at 22% marginal rate and avoided the IRMAA surcharges entirely.`,
+                    ].join(""),
+                  });
+                }
 
                 if (convUnderutilized) {
                   insights.push({
@@ -5547,9 +6350,21 @@ const App: React.FC = () => {
                   });
                 }
 
-                const sevIcon  = { warn: "⚠️", tip: "💡", good: "✅" };
-                const sevColor = { warn: "var(--color-warn,#b45309)", tip: "var(--color-accent,#1d6fa4)", good: "var(--color-success,#166534)" };
-                const sevBg    = { warn: "var(--color-warn-bg,#fffbeb)", tip: "var(--color-tip-bg,#eff6ff)", good: "var(--color-success-bg,#f0fdf4)" };
+                const sevIcon  = { warn: "⚠️", tip: "💡", good: "✅", critical: "⛔" };
+                const sevColor = { warn: "var(--color-warn,#b45309)", tip: "var(--color-accent,#1d6fa4)", good: "var(--color-success,#166534)", critical: "#991b1b" };
+                const sevBg    = { warn: "var(--color-warn-bg,#fffbeb)", tip: "var(--color-tip-bg,#eff6ff)", good: "var(--color-success-bg,#f0fdf4)", critical: "#fff1f2" };
+
+                // Auto-expand when there are actionable findings (critical or warn).
+                // Uses a component-level ref (insightsAutoExpandKey) so no hooks are
+                // called inside this IIFE — Rules of Hooks compliant.
+                const hasCritical = insights.some(i => i.sev === "critical");
+                const hasWarn     = insights.some(i => i.sev === "warn");
+                const _autoKey = snapshot?.run_info?.run_id ?? String(snapshot?.summary?.success_rate ?? "");
+                if ((hasCritical || hasWarn) && insightsAutoExpandKey.current !== _autoKey) {
+                  insightsAutoExpandKey.current = _autoKey;
+                  // Schedule expand after render — avoids setState-during-render warning
+                  setTimeout(() => setShowInsights(true), 0);
+                }
 
                 return (
                   <section className="results-section">
@@ -5559,6 +6374,18 @@ const App: React.FC = () => {
                     >
                       <span style={{ fontSize: "0.8em", opacity: 0.6 }}>{showInsights ? "▼" : "▶"}</span>
                       Insights
+                      {hasCritical && (
+                        <span style={{ fontSize: "0.7em", fontWeight: 700, color: "#991b1b",
+                          background: "#fee2e2", borderRadius: 999, padding: "1px 8px", marginLeft: 2 }}>
+                          ⛔ Critical
+                        </span>
+                      )}
+                      {!hasCritical && hasWarn && (
+                        <span style={{ fontSize: "0.7em", fontWeight: 700, color: "#92400e",
+                          background: "#fef3c7", borderRadius: 999, padding: "1px 8px", marginLeft: 2 }}>
+                          ⚠ Attention
+                        </span>
+                      )}
                       <span style={{ fontSize: "0.75em", fontWeight: 400, opacity: 0.55, marginLeft: "0.3rem" }}>
                         ({insights.length} {insights.length === 1 ? "finding" : "findings"})
                       </span>
@@ -5581,9 +6408,34 @@ const App: React.FC = () => {
                             <div style={{ fontWeight: 600, color: sevColor[ins.sev], marginBottom: "0.3rem" }}>
                               {sevIcon[ins.sev]} {ins.title}
                             </div>
-                            <div style={{ fontSize: "0.9em", lineHeight: 1.55, color: "var(--color-text,#222)" }}>
+                            <div style={{ fontSize: "0.9em", lineHeight: 1.55, color: "var(--color-text,#222)", whiteSpace: "pre-line" }}>
                               {ins.body}
                             </div>
+                            {ins.actions && ins.actions.length > 0 && (
+                              <div style={{ marginTop: "0.75rem", display: "flex", flexDirection: "column", gap: 8 }}>
+                                <div style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                                  Apply mitigation
+                                </div>
+                                {ins.actions.map((action, ai) => (
+                                  <div key={ai} style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                                    <button
+                                      onClick={action.apply}
+                                      style={{
+                                        background: sevColor[ins.sev], color: "#fff",
+                                        border: "none", borderRadius: 5,
+                                        padding: "5px 12px", cursor: "pointer",
+                                        fontWeight: 600, fontSize: 12, whiteSpace: "nowrap", flexShrink: 0,
+                                      }}
+                                    >
+                                      {action.label}
+                                    </button>
+                                    <span style={{ fontSize: 11, color: "#6b7280", lineHeight: 1.5, marginTop: 2 }}>
+                                      {action.description}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -5802,6 +6654,22 @@ const App: React.FC = () => {
                   </section>
                 );
 
+                // ── Survival-critical deferral: when the plan can't fund basic spending,
+                // Roth optimization is premature. Surface a clear redirect instead of
+                // showing detailed conversion math that will be invalidated once the
+                // underlying problem is fixed.
+                const survivalCritical = (() => {
+                  const pv3 = snapshot.withdrawals?.plan_viability;
+                  const shortfallYrs3 = (() => {
+                    const realArr = snapshot.withdrawals?.realized_current_median_path
+                      ?? snapshot.withdrawals?.realized_current_mean ?? [];
+                    const planArr = snapshot.withdrawals?.planned_current ?? [];
+                    return planArr.filter((p, i) => (p - (realArr[i] ?? 0)) > 500).length;
+                  })();
+                  // Critical if: plan coverage < 80% OR 5+ shortfall years
+                  return (pv3 && pv3.coverage_ratio < 0.80) || shortfallYrs3 >= 5;
+                })();
+
                 const sevColor = R.timebomb_severity === "CRITICAL" ? "#b91c1c"
                   : R.timebomb_severity === "SEVERE"   ? "#b45309"
                   : R.timebomb_severity === "MODERATE" ? "#1d4ed8"
@@ -5819,6 +6687,14 @@ const App: React.FC = () => {
                 const rec = R.recommended_strategy as typeof strategies[number];
 
                 const fmtM = (v: number) => v >= 1e6 ? `$${(v/1e6).toFixed(1)}M` : v >= 1000 ? `$${(v/1000).toFixed(0)}K` : `$${v.toFixed(0)}`;
+
+                // Auto-expand when timebomb is CRITICAL/SEVERE or survival is critical
+                const _rothAutoKey = snapshot?.run_info?.run_id ?? String(R.timebomb_severity);
+                if ((R.timebomb_severity === "CRITICAL" || R.timebomb_severity === "SEVERE" || survivalCritical)
+                    && rothInsightsAutoExpandKey.current !== _rothAutoKey) {
+                  rothInsightsAutoExpandKey.current = _rothAutoKey;
+                  setTimeout(() => setShowRothInsights(true), 0);
+                }
 
                 return (
                   <section className="results-section">
@@ -5844,6 +6720,38 @@ const App: React.FC = () => {
                         </span>
                       )}
                     </h3>
+
+                    {/* ── Survival-critical deferral banner ─────────────────────────── */}
+                    {survivalCritical && (
+                      <div style={{
+                        background: "#fff1f2", border: "1px solid #f43f5e44",
+                        borderLeft: "4px solid #dc2626", borderRadius: 6,
+                        padding: "10px 14px", marginBottom: 12, fontSize: 13,
+                      }}>
+                        <div style={{ fontWeight: 700, color: "#991b1b", marginBottom: 4 }}>
+                          ⛔ Fix the survival gap before optimizing conversions
+                        </div>
+                        <div style={{ color: "#374151", lineHeight: 1.6 }}>
+                          Roth conversion is a tax-optimization strategy — it only matters when the plan can
+                          fund basic spending first. This portfolio currently has a <strong>critical funding
+                          gap</strong>: the plan cannot cover planned withdrawals for multiple years.
+                          Converting TRAD → Roth now would pay tax from an already-depleted brokerage,
+                          making the cash gap worse.
+                          <br /><br />
+                          <strong>Priority order:</strong>
+                          <ol style={{ margin: "6px 0 0 18px", padding: 0, lineHeight: 1.8 }}>
+                            <li>Fix the liquidity gap — see <strong>Insights</strong> above for the arithmetic floor and sustainable spend range.</li>
+                            <li>Build adequate taxable brokerage buffer (enough to bridge to age 59½ + conversion tax buffer).</li>
+                            <li>Once the plan is arithmetically viable, the Roth optimizer recommendations below become actionable.</li>
+                          </ol>
+                          <div style={{ marginTop: 8, fontSize: 12, color: "#6b7280" }}>
+                            The IRA Timebomb analysis and conversion recommendations below are shown for
+                            informational purposes — they represent what optimal conversion would look like
+                            once the plan is viable.
+                          </div>
+                        </div>
+                      </div>
+                    )}
 
                     {showRothInsights && (<>
                     {/* ── Current Situation ─────────────────────────────── */}
@@ -6600,7 +7508,9 @@ Re-run simulation to see impact.`)) return;
                       {/* Fixed identifier columns */}
                       <th rowSpan={2} style={{ verticalAlign: "bottom", minWidth: 44, position: "sticky", left: 0, background: "#f8fafc", zIndex: 2 }}>Year</th>
                       <th rowSpan={2} style={{ verticalAlign: "bottom", minWidth: 40, position: "sticky", left: 44, background: "#f8fafc", zIndex: 2 }}>Age</th>
-                      {/* Balance columns — no median/mean pairing needed, already have separate cols */}
+                      <th rowSpan={2} style={{ verticalAlign: "bottom", minWidth: 90 }}>
+                        <Tip label="Phase" tip="Lifecycle phase inferred from your income and spending data each year. Accumulation: W2 income exceeds spending target — surplus exists. Transition: W2 covers some but not all spending. Distribution: no W2, portfolio draws required. RMD: age ≥ 73/75, mandatory distributions. Retirement Age in person.json is used as a fallback override when it is set." />
+                      </th>
                       <th rowSpan={2} style={{ verticalAlign: "bottom", minWidth: 110 }}><Tip label="Typical balance (median)" tip="Portfolio in future dollars — half of scenarios land above, half below. Primary planning number." /></th>
                       <th rowSpan={2} style={{ verticalAlign: "bottom", minWidth: 110 }}><Tip label="Typical balance today's $" tip="Median balance adjusted for inflation back to today's purchasing power." /></th>
                       <th rowSpan={2} style={{ verticalAlign: "bottom", minWidth: 110 }}><Tip label="Average balance (mean)" tip="Mean across all paths. Skewed upward by exceptional scenarios — use median for planning." /></th>
@@ -6609,7 +7519,7 @@ Re-run simulation to see impact.`)) return;
                       {/* Paired rate groups */}
                       <th colSpan={2} style={{ textAlign: "center", background: "#eff6ff", borderBottom: "1px solid #bfdbfe", fontSize: 11, color: "#1d4ed8" }}>Annual growth — total portfolio</th>
                       <th colSpan={2} style={{ textAlign: "center", background: "#f0fdf4", borderBottom: "1px solid #bbf7d0", fontSize: 11, color: "#15803d" }}>Annual growth — inflation-adjusted</th>
-                      <th rowSpan={2} style={{ verticalAlign: "bottom", minWidth: 90 }}><Tip label="Stress return P10" tip="1-in-10 bad year return. Shows negative years during shocks — the honest downside picture." /></th>
+                      <th rowSpan={2} style={{ verticalAlign: "bottom", minWidth: 90 }}><Tip label="Net portfolio change P10 (incl. all cashflows)" tip="P10 year-over-year change in total portfolio value, including all cashflows (withdrawals, deposits, taxes, RMDs). 1 in 10 years will be at or below this number. Negative means the portfolio shrank that year net of everything — markets down AND spending taken out. Compare with 'Investment return only' columns to the right to isolate pure market performance from your spending drag." /></th>
                       <th colSpan={2} style={{ textAlign: "center", background: "#faf5ff", borderBottom: "1px solid #e9d5ff", fontSize: 11, color: "#7c3aed" }}>Investment return only (nominal)</th>
                       <th colSpan={2} style={{ textAlign: "center", background: "#fff7ed", borderBottom: "1px solid #fed7aa", fontSize: 11, color: "#c2410c" }}>Investment return only (real)</th>
                     </tr>
@@ -6633,11 +7543,11 @@ Re-run simulation to see impact.`)) return;
                       const P = snapshot.portfolio;
                       const R = snapshot.returns;
 
-                      const futMed  = P?.future_median?.[i]  ?? 0;
-                      const curMed  = P?.current_median?.[i] ?? 0;
-                      const futMean = P?.future_mean?.[i]    ?? 0;
-                      const futP10  = P?.future_p10_mean?.[i]?? 0;
-                      const futP90  = P?.future_p90_mean?.[i]?? 0;
+                      const futMed  = P?.future_median?.[i]    ?? 0;   // nominal (future $) = LARGER
+                      const curMed  = P?.current_median?.[i]   ?? 0;   // real (today's $)  = SMALLER
+                      const futMean = P?.future_mean?.[i]      ?? 0;   // nominal mean
+                      const futP10  = P?.future_p10_mean?.[i]  ?? 0;   // nominal P10 = floor  < median
+                      const futP90  = P?.future_p90_mean?.[i]  ?? 0;   // nominal P90 = ceiling > median
 
                       const nomMed  = R?.nom_withdraw_yoy_med_pct?.[i]  ?? 0;
                       const nomMean = R?.nom_withdraw_yoy_mean_pct?.[i] ?? 0;
@@ -6652,6 +7562,17 @@ Re-run simulation to see impact.`)) return;
                       const startAge = snapshot.person?.current_age ?? snapshot.person?.age;
                       const ageDisplay = startAge !== undefined ? Math.floor(startAge + i) : "";
 
+                      // Phase inference badge
+                      const phaseArr = (snapshot as any).phase_by_year ?? [];
+                      const phase = phaseArr[i] as string | undefined;
+                      const phaseMeta: Record<string, { label: string; bg: string; color: string }> = {
+                        accumulation: { label: "📈 Accumulation", bg: "#f0fdf4", color: "#15803d" },
+                        transition:   { label: "🔄 Transition",   bg: "#fffbeb", color: "#b45309" },
+                        distribution: { label: "💳 Distribution", bg: "#eff6ff", color: "#1d4ed8" },
+                        rmd:          { label: "📋 RMD",          bg: "#faf5ff", color: "#7c3aed" },
+                      };
+                      const pm = phase ? (phaseMeta[phase] ?? { label: phase, bg: "#f1f5f9", color: "#64748b" }) : null;
+
                       const pctStyle = (v: number) => ({
                         color: v < 0 ? "#dc2626" : v > 10 ? "#15803d" : "inherit",
                         fontWeight: v < 0 ? 600 : 400,
@@ -6661,6 +7582,11 @@ Re-run simulation to see impact.`)) return;
                         <tr key={y}>
                           <td style={{ position: "sticky", left: 0, background: "#fff", zIndex: 1 }}>{y}</td>
                           <td style={{ position: "sticky", left: 44, background: "#fff", zIndex: 1 }}>{ageDisplay}</td>
+                          <td style={{ background: pm?.bg ?? "transparent", padding: "2px 6px" }}>
+                            {pm
+                              ? <span style={{ fontSize: 10, fontWeight: 600, color: pm.color, whiteSpace: "nowrap" }}>{pm.label}</span>
+                              : <span style={{ color: "#9ca3af" }}>—</span>}
+                          </td>
                           <td>{formatUSD(futMed)}</td>
                           <td>{formatUSD(curMed)}</td>
                           <td>{formatUSD(futMean)}</td>
@@ -6706,85 +7632,114 @@ Re-run simulation to see impact.`)) return;
                     full funding on all paths.
                   </div>
                 )}
-                <table className="table">
+                <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+                <table className="table" style={{ minWidth: 1300, fontSize: 12 }}>
                   <thead>
                     <tr>
-                      <th>Year</th>
-                      <th>Age</th>
-                      <th><Tip label="Planned withdrawal" tip="The full target withdrawal (amount_k) from your withdrawal schedule in today's dollars. In investment and automatic modes, stressed paths may fund only the floor (base_k) — this table shows the median path, which typically funds the full amount when the portfolio is healthy." /></th>
-                      <th><Tip label="For spending (median path)" tip="Amount actually withdrawn for spending on the median path, in today's dollars. A healthy portfolio (like this profile at $9.92M) typically funds the full planned amount even in investment mode — floor-only funding occurs on stressed paths. RMD surplus beyond the plan is reinvested." /></th>
-                      <th><Tip label="Diff vs plan (median path)" tip="Total received minus planned withdrawal. Zero or positive means fully met (including via RMD). Negative means genuine shortfall — the portfolio could not cover the planned amount." /></th>
-                      <th><Tip label="For spending — future $" tip="Spending amount in nominal (future) dollars." /></th>
-                      <th><Tip label="Required minimum distribution" tip="IRS-mandated minimum withdrawal from tax-deferred accounts (TRAD IRA). Begins at age 73 or 75 depending on birth year." /></th>
-                      <th><Tip label="RMD — future $" tip="Required minimum distribution in nominal (future) dollars." /></th>
-                      <th><Tip label="Total withdrawal (today's $)" tip="Larger of planned withdrawal and RMD. This is your effective total outflow each year in today's purchasing power." /></th>
-                      <th><Tip label="Total withdrawal (future $)" tip="Total outflow in nominal dollars — what you physically receive each year." /></th>
-                      <th><Tip label="RMD reinvested (today's $)" tip="Portion of RMD above your spending need that is reinvested into a taxable brokerage account." /></th>
-                      <th><Tip label="RMD reinvested (future $)" tip="Reinvested RMD surplus in nominal dollars." /></th>
-                      <th><Tip label="Roth conversion (today's $)" tip="Amount converted from Traditional IRA to Roth IRA this year, in today's dollars. Taxed as ordinary income in the conversion year." /></th>
-                      <th><Tip label="Conversion tax cost (today's $)" tip="Tax paid on Roth conversion this year, debited from your brokerage account." /></th>
+                      <th style={{ position: "sticky", left: 0, background: "#f8fafc", zIndex: 3, minWidth: 44 }}>Year</th>
+                      <th style={{ position: "sticky", left: 44, background: "#f8fafc", zIndex: 3, minWidth: 44 }}>Age</th>
+                      <th style={{ minWidth: 90 }}><Tip label="Planned withdrawal" tip="The full target withdrawal (amount_k) in today's dollars." /></th>
+                      <th style={{ minWidth: 90 }}><Tip label="For spending (median path)" tip="Amount actually withdrawn on the median path, in today's dollars." /></th>
+                      <th style={{ minWidth: 90 }}><Tip label="Diff vs plan" tip="Received minus planned. Negative = shortfall." /></th>
+                      <th style={{ background: "#f0fdf4", fontWeight: 700, whiteSpace: "nowrap", minWidth: 120 }}>
+                        <Tip label="Recommended" tip="🟢 On track — fully funded at planned level. 🟡 Floor only — constrained to base_k. 🔴 Shortfall/Danger — portfolio cannot fund even the floor. 🔵 Headroom — portfolio could sustain more than planned (P10 SWR)." />
+                      </th>
+                      <th style={{ minWidth: 90 }}><Tip label="For spending — future $" tip="Spending in nominal (future) dollars." /></th>
+                      <th style={{ minWidth: 80 }}><Tip label="Required minimum distribution" tip="IRS-mandated minimum withdrawal from TRAD IRA." /></th>
+                      <th style={{ minWidth: 90 }}><Tip label="RMD — future $" tip="RMD in nominal dollars." /></th>
+                      <th style={{ minWidth: 90 }}><Tip label="Total withdrawal (today's $)" tip="Larger of planned withdrawal and RMD." /></th>
+                      <th style={{ minWidth: 90 }}><Tip label="Total withdrawal (future $)" tip="Total outflow in nominal dollars." /></th>
+                      <th style={{ minWidth: 90 }}><Tip label="RMD reinvested (today's $)" tip="Surplus RMD above spending need reinvested to brokerage." /></th>
+                      <th style={{ minWidth: 90 }}><Tip label="RMD reinvested (future $)" tip="Reinvested RMD surplus in nominal dollars." /></th>
+                      <th style={{ minWidth: 90 }}><Tip label="Roth conversion (today's $)" tip="Amount converted from TRAD IRA to Roth this year." /></th>
+                      <th style={{ minWidth: 110 }}><Tip label="Conversion tax cost (today's $)" tip="Tax paid on Roth conversion, debited from brokerage." /></th>
                     </tr>
                   </thead>
                   <tbody>
-                    {snapshot.years.map((y, i) => {
-                      const W = snapshot.withdrawals;
-                      const planned     = W?.planned_current?.[i] ?? 0;
-                      const rmdCur = W?.rmd_current_median_path?.[i] ?? W?.rmd_current_mean?.[i] ?? 0;
-                      const rmdFut = W?.rmd_future_median_path?.[i] ?? W?.rmd_future_mean?.[i] ?? 0;
+                    {(() => {
+                      const W_t        = snapshot.withdrawals;
+                      const floorArr   = W_t?.base_current ?? [];
+                      const swrP10     = W_t?.safe_withdrawal_rate_p10_pct ?? 0;
+                      const startBal2  = Object.values(snapshot.starting ?? {}).reduce((a: number, b) => a + (b as number), 0);
+                      const swrP10Amt  = swrP10 > 0 ? Math.round(startBal2 * swrP10 / 100) : 0;
+                      // Per-year current balance (median) for headroom calculation
+                      const portCurrentMed2 = snapshot.portfolio?.current_median ?? [];
+                      const YEARS_N3 = snapshot.years.length;
+                      return snapshot.years.map((y, i) => {
+                        const planned     = W_t?.planned_current?.[i] ?? 0;
+                        const floorY      = floorArr[i] ?? 0;
+                        const rmdCur      = W_t?.rmd_current_median_path?.[i] ?? W_t?.rmd_current_mean?.[i] ?? 0;
+                        const rmdFut      = W_t?.rmd_future_median_path?.[i] ?? W_t?.rmd_future_mean?.[i] ?? 0;
+                        const totalCur    = W_t?.total_withdraw_current_median_path?.[i] ?? W_t?.total_withdraw_current_mean?.[i] ?? rmdCur;
+                        const totalFut    = W_t?.total_withdraw_future_median_path?.[i]  ?? W_t?.total_withdraw_future_mean?.[i]  ?? rmdFut;
+                        const spendable   = Math.min(totalCur, planned > 0 ? planned : totalCur);
+                        const deflRatio   = totalCur > 0 ? totalFut / totalCur : 1.0;
+                        const spendableFut= spendable * deflRatio;
+                        const diff        = spendable - planned;
+                        // Shortfall only when >1% of planned AND >$1K — filters out rounding noise
+                        const isShortfall = planned > 0 && diff < -Math.max(1000, planned * 0.01);
+                        const reinvestedCur = W_t?.rmd_extra_current?.[i] ?? 0;
+                        const reinvestedFut = W_t?.rmd_extra_future?.[i] ?? 0;
+                        const convCurWd   = snapshot.conversions?.conversion_cur_median_path_by_year?.[i] ?? snapshot.conversions?.conversion_cur_mean_by_year?.[i] ?? 0;
+                        const convTaxWd   = snapshot.conversions?.conversion_tax_cur_median_path_by_year?.[i] ?? snapshot.conversions?.conversion_tax_cur_mean_by_year?.[i] ?? 0;
+                        const startAge2   = snapshot.person?.current_age ?? snapshot.person?.age ?? undefined;
+                        const ageDisplay  = startAge2 !== undefined ? Math.floor(startAge2 + i) : "";
 
-                      // Total outflow (max of planned or RMD — includes reinvested surplus)
-                      const totalCur = (W?.total_withdraw_current_median_path?.[i] ?? W?.total_withdraw_current_mean?.[i] ?? rmdCur);
-                      const totalFut = (W?.total_withdraw_future_median_path?.[i]  ?? W?.total_withdraw_future_mean?.[i]  ?? rmdFut);
+                        // ── 4-tier classification ──────────────────────────────────────
+                        // sustainable_i = balance_i / remaining_years (0% real, conservative floor)
+                        const balAtI         = portCurrentMed2[i] ?? 0;
+                        const yrsRemaining   = Math.max(1, YEARS_N3 - i);
+                        const sustainableAtI = balAtI > 0 ? balAtI / yrsRemaining : swrP10Amt;
+                        const isDanger    = isShortfall && spendable < floorY * 0.5 && planned > 0;
+                        const atFloorOnly = isShortfall && !isDanger && spendable > 0;
+                        // Headroom: portfolio can sustain 20%+ more than planned.
+                        // Fires even with a small shortfall — over-conservation is the bigger risk
+                        // when a person dies with 5-10x starting portfolio living frugally.
+                        const hasHeadroom = sustainableAtI > 0 && planned > 0
+                          && sustainableAtI > planned * 1.20
+                          && !isDanger;
+                        const headroomAmt = Math.round(sustainableAtI / 1000) * 1000;
 
-                      // Spendable (current $): min(totalCur, planned) in normal years;
-                      // in RMD years where RMD > planned, spendable = planned (surplus reinvested).
-                      const spendable = Math.min(totalCur, planned > 0 ? planned : totalCur);
+                        const tier = isDanger
+                          ? { rowBg:"#fff1f2", border:"#dc2626", badge:"🔴 Danger",    bBg:"#fee2e2", bCol:"#991b1b", rec:`Floor at risk — ~${Math.round(spendable/1000)}K max` }
+                          : hasHeadroom
+                          ? { rowBg:"#f0f9ff", border:"#0284c7", badge:"🔵 Headroom",  bBg:"#e0f2fe", bCol:"#075985",
+                              rec:`Could increase to ~${Math.round(headroomAmt/1000)}K (0% real floor)` }
+                          : atFloorOnly
+                          ? { rowBg:"#fff7ed", border:"#ea580c", badge:"🟡 Floor only", bBg:"#ffedd5", bCol:"#9a3412", rec:`Constrain to ${Math.round(Math.max(floorY,spendable)/1000)}K` }
+                          : isShortfall
+                          ? { rowBg:"#fff1f2", border:"#f43f5e", badge:"🔴 Shortfall",  bBg:"#fee2e2", bCol:"#991b1b", rec:`~${Math.round(spendable/1000)}K available` }
+                          : { rowBg:"",        border:"transparent", badge:"🟢 On track", bBg:"#f0fdf4", bCol:"#166534", rec:`${Math.round(planned/1000)}K ✓` };
 
-                      // Spendable (future $): scale by implicit inflation factor.
-                      // deflatorRatio = totalFut/totalCur — never produces zero in RMD years.
-                      const deflatorRatio = totalCur > 0 ? totalFut / totalCur : 1.0;
-                      const spendableFut  = spendable * deflatorRatio;
-
-                      // Diff: negative only on genuine shortfall
-                      const diff = spendable - planned;
-
-                      const realizedCur = spendable;
-                      const realizedFut = spendableFut;
-                      // Reinvested = surplus RMD actually added to brokerage (0 if cash_out policy)
-                      const reinvestedCur = W?.rmd_extra_current?.[i] ?? 0;
-                      const reinvestedFut = W?.rmd_extra_future?.[i] ?? 0;
-                      const convCurWd  = snapshot.conversions?.conversion_cur_median_path_by_year?.[i] ?? snapshot.conversions?.conversion_cur_mean_by_year?.[i] ?? 0;
-                      const convTaxWd  = snapshot.conversions?.conversion_tax_cur_median_path_by_year?.[i] ?? snapshot.conversions?.conversion_tax_cur_mean_by_year?.[i] ?? 0;
-              
-                      // New: Age = starting age + (year index)
-                      const startAge =
-                        snapshot.person?.current_age ??
-                        snapshot.person?.age ??
-                        undefined;
-                      const ageDisplay =
-                        startAge !== undefined ? Math.floor(startAge + i) : "";
-              
-                      return (
-                        <tr key={y}>
-                          <td>{y}</td>
-                          <td>{ageDisplay}</td>
-                          <td>{formatUSD(planned)}</td>
-                          <td>{formatUSD(realizedCur)}</td>
-                          <td>{formatUSD(diff)}</td>
-                          <td>{formatUSD(realizedFut)}</td>
-                          <td>{formatUSD(rmdCur)}</td>
-                          <td>{formatUSD(rmdFut)}</td>
-                          <td>{formatUSD(totalCur)}</td>
-                          <td>{formatUSD(totalFut)}</td>
-                          <td>{formatUSD(reinvestedCur)}</td>
-                          <td>{formatUSD(reinvestedFut)}</td>
-                          <td>{convCurWd > 0 ? formatUSD(convCurWd) : '0'}</td>
-                          <td>{convTaxWd > 0 ? formatUSD(convTaxWd) : '0'}</td>
-                        </tr>
-                      );
-                    })}
+                        return (
+                          <tr key={y} style={tier.rowBg ? { background: tier.rowBg, borderLeft: `3px solid ${tier.border}` } : {}}>
+                            <td style={{ position: "sticky", left: 0, background: tier.rowBg || "#fff", zIndex: 1 }}>{y}</td>
+                            <td style={{ position: "sticky", left: 44, background: tier.rowBg || "#fff", zIndex: 1 }}>{ageDisplay}</td>
+                            <td>{formatUSD(planned)}</td>
+                            <td style={isShortfall ? { color:"#9ca3af", fontStyle:"italic" } : {}}>{formatUSD(spendable)}</td>
+                            <td style={isShortfall && !hasHeadroom ? { color:"#e11d48", fontWeight:700 } : diff > 1 ? { color:"#16a34a" } : {}}>
+                              {isShortfall && !hasHeadroom ? <span title="Shortfall">⚠ {formatUSD(diff)}</span> : diff > 1 ? `+${formatUSD(diff)}` : formatUSD(diff)}
+                            </td>
+                            <td style={{ background: tier.bBg, padding: "3px 6px" }}>
+                              <div style={{ fontSize:11, fontWeight:600, color:tier.bCol, whiteSpace:"nowrap" }}>{tier.badge}</div>
+                              <div style={{ fontSize:10, color:"#6b7280", marginTop:1 }}>{tier.rec}</div>
+                            </td>
+                            <td>{formatUSD(spendableFut)}</td>
+                            <td>{formatUSD(rmdCur)}</td>
+                            <td>{formatUSD(rmdFut)}</td>
+                            <td>{formatUSD(totalCur)}</td>
+                            <td>{formatUSD(totalFut)}</td>
+                            <td>{formatUSD(reinvestedCur)}</td>
+                            <td>{formatUSD(reinvestedFut)}</td>
+                            <td>{convCurWd > 0 ? formatUSD(convCurWd) : '0'}</td>
+                            <td>{convTaxWd > 0 ? formatUSD(convTaxWd) : '0'}</td>
+                          </tr>
+                        );
+                      });
+                    })()}
                   </tbody>
                 </table>
+                </div>
               </section>
 
 

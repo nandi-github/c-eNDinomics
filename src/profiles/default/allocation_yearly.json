@@ -26,12 +26,12 @@
     }
   ],
   "starting": {
-    "BROKERAGE-1": 500000,
-    "BROKERAGE-2": 250000,
-    "TRAD_IRA-1": 3500000,
-    "TRAD_IRA-2": 2200000,
+    "BROKERAGE-1": 600000,
+    "BROKERAGE-2": 300000,
+    "TRAD_IRA-1": 1200000,
+    "TRAD_IRA-2": 700000,
     "ROTH_IRA-1": 250000,
-    "ROTH_IRA-2": 120000
+    "ROTH_IRA-2": 150000
   },
   "deposits_yearly": [
     {

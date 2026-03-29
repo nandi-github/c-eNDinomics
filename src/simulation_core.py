@@ -105,8 +105,11 @@ def simulate_balances(
     corr = assets_model.get("corr")
 
     # ---- Shocks (per class) ----
+    # shocks_mode="none" suppresses all shock events regardless of what's in the list.
+    # This mirrors the api.py path where "none" zeroes out events before reaching here.
+    _effective_shock_events = [] if (shocks_mode or "").strip().lower() == "none" else (shocks_events or [])
     shock_mats = build_shock_matrix_from_json(
-        shocks_events or [], years, spy, paths, mode=shocks_mode or "augment"
+        _effective_shock_events, years, spy, paths, mode=shocks_mode or "augment"
     )
     shock_logs = shock_yearly_log_adjustments(
         shock_mats, years=years, spy=spy, paths=paths

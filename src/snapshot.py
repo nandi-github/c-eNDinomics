@@ -68,6 +68,23 @@ def _build_portfolio_analysis(
         return None
 
 
+def _sanitize_for_json(obj: Any) -> Any:
+    """
+    Recursively replace float NaN and Inf with None so json.dumps never
+    produces invalid JSON. Called before every snapshot write.
+    """
+    import math
+    if isinstance(obj, dict):
+        return {k: _sanitize_for_json(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_sanitize_for_json(v) for v in obj]
+    if isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        return obj
+    return obj
+
+
 def save_raw_snapshot_accounts(
     out_dir: str,
     res: Dict[str, Any],
@@ -153,6 +170,12 @@ def save_raw_snapshot_accounts(
     snapshot["taxes"] = res.get("taxes", {})
     snapshot["conversions"] = res.get("conversions", {})
 
+    # Lifecycle phase inference — per-year phase labels derived from income + spending
+    _run_params = res.get("meta", {}).get("run_params", {}) or {}
+    if "phase_by_year" in _run_params:
+        snapshot["phase_by_year"]   = _run_params["phase_by_year"]
+        snapshot["weights_by_year"] = _run_params.get("weights_by_year", [])
+
     # Starting balances & account-level data
     snapshot["starting"] = res.get("starting", {})
     snapshot["accounts"] = res.get("accounts", {})
@@ -193,9 +216,9 @@ def save_raw_snapshot_accounts(
     if _pa is not None:
         snapshot["portfolio_analysis"] = _pa
 
-    # 4) Write snapshot JSON
+    # 4) Write snapshot JSON — sanitize NaN/Inf first so JSON is always valid
     out_path = os.path.join(out_dir, "raw_snapshot_accounts.json")
-    _safe_write_json(out_path, snapshot)
+    _safe_write_json(out_path, _sanitize_for_json(snapshot))
 
 
 # --- End of file ---

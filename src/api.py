@@ -1581,6 +1581,7 @@ def run_simulation(payload: Dict[str, Any] = Body(...)):
             qual_div_cur_paths=qual_div_cur_paths,
             cap_gains_cur_paths=cap_gains_cur_paths,
             ytd_income_nom_paths=ytd_income_nom_paths,
+            w2_income_cur_paths=np.broadcast_to(w2_cur[np.newaxis, :], (paths, _n_years)).copy(),
             person_cfg=person_cfg,
             rmd_table_path=rmd_path,
             conversion_per_year_nom=None,

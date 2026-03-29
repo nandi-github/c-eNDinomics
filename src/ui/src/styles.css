@@ -287,6 +287,7 @@ button:hover:not(:disabled) {
   display: flex;
   flex-direction: column;
   max-height: 280px;
+  overflow: hidden;
 }
 
 .config-readme-scroll {
@@ -320,10 +321,27 @@ button:hover:not(:disabled) {
 
 .readme-row {
   display: grid;
-  grid-template-columns: 200px 1fr;
+  grid-template-columns: auto 1fr;
   align-items: baseline;
   padding: 5px 12px;
-  gap: 12px;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Stacked layout for depth >= 2 — key above value, no columns */
+.readme-row-stacked {
+  display: block;
+  padding: 3px 8px;
+}
+
+.readme-val-stacked {
+  display: block;
+  padding-left: 4px;
+  margin-top: 1px;
+  color: #374151;
+  line-height: 1.5;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 .readme-dl.depth-0 > .readme-row {
@@ -342,15 +360,22 @@ button:hover:not(:disabled) {
   white-space: nowrap;
   text-transform: none;
   padding-top: 1px;
+  min-width: 0;
 }
 
 .readme-val {
   color: #374151;
   line-height: 1.5;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  min-width: 0;
 }
 
 .readme-value {
   color: #374151;
+  overflow-wrap: break-word;
+  word-break: break-word;
+  min-width: 0;
 }
 
 /* Nested depth gets slightly indented background */
