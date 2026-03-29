@@ -1,0 +1,69 @@
+{
+  "w2": [
+    {
+      "ages": "47-64",
+      "amount_nom": 350000,
+      "_note": "Gross W2 salary ages 47-64 (working years). ~$318.5K taxable \u2192 24% marginal bracket MFJ."
+    },
+    {
+      "ages": "65-65",
+      "amount_nom": 175000,
+      "_note": "Partial year W2 age 65 (transition to retirement)."
+    }
+  ],
+  "ordinary_other": [
+    {
+      "ages": "66-95",
+      "amount_nom": 51000,
+      "_note": "Social Security taxable portion (85% of ~$60K combined). Spouse SS starts age 70, self SS starts age 70 \u2014 using combined from age 66 (conservative)."
+    }
+  ],
+  "rental": [
+    {
+      "ages": "47-95",
+      "amount_nom": 0
+    }
+  ],
+  "interest": [
+    {
+      "ages": "47-95",
+      "amount_nom": 0
+    }
+  ],
+  "qualified_div": [
+    {
+      "ages": "47-95",
+      "amount_nom": 0
+    }
+  ],
+  "cap_gains": [
+    {
+      "ages": "47-95",
+      "amount_nom": 0
+    }
+  ],
+  "readme": {
+    "purpose": "Income from sources OUTSIDE the simulator accounts. Portfolio accounts handle their own distributions internally \u2014 do NOT re-enter those here.",
+    "format": {
+      "ages": "Recommended. Use age ranges: '47-64' means ages 47 through 64 inclusive. Converted to simulation years using current_age from person.json.",
+      "years": "Legacy format. Year 1 = current_age + 1. Still supported for backward compatibility."
+    },
+    "what_not_to_enter": "Do NOT enter: dividends or gains from accounts in allocation_yearly.json, RMDs (computed automatically), Roth conversion amounts. Entering these causes double-counting.",
+    "gross_amounts": "All amounts are GROSS (pre-tax). The simulator computes federal, state, NIIT taxes.",
+    "tax_stacking_note": "Income here stacks at the BOTTOM of the tax bracket \u2014 below RMDs and Roth conversions. W2 $350K fills to 24% bracket during working years. After retirement, SS-only income ($51K taxable = $19.5K after std deduction) leaves huge headroom for Roth conversions.",
+    "profile_notes": {
+      "ages_47_64": "W2 $350K \u2192 taxable $318.5K \u2192 24% marginal. Roth conversion headroom limited but still valuable vs future 35%+ RMD bracket.",
+      "age_65": "Partial W2 $175K transition year.",
+      "ages_66_74": "SS $51K taxable \u2192 $19.5K after std deduction \u2192 10% bracket. Prime Roth conversion window \u2014 $375K/yr headroom to 24% bracket.",
+      "ages_75_95": "RMDs dominate. SS + RMDs likely push to 35%+ bracket."
+    },
+    "income_types": {
+      "w2": "Gross wages or salary. Ordinary income rates.",
+      "rental": "Net rental income after expenses. Ordinary income rates.",
+      "interest": "Taxable interest from outside accounts.",
+      "ordinary_other": "Social Security (taxable portion 85%), pensions, annuities.",
+      "qualified_div": "Qualified dividends from outside accounts. LTCG rates.",
+      "cap_gains": "Realized capital gains from outside assets. LTCG rates."
+    }
+  }
+}

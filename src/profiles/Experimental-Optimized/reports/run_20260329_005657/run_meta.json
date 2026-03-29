@@ -1,0 +1,28 @@
+{
+  "profile": "Experimental-Optimized",
+  "run_id": "run_20260329_005657",
+  "run_info": {
+    "paths": 200,
+    "steps_per_year": 2,
+    "dollars": "current",
+    "base_year": 2026,
+    "state": "California",
+    "filing": "MFJ",
+    "rmd_table": "uniform_lifetime",
+    "runtime_overrides": {
+      "state": "California",
+      "filing": "MFJ"
+    },
+    "shocks_mode": "none",
+    "flags": {
+      "ignore_withdrawals": false,
+      "ignore_rmds": false,
+      "ignore_conversions": false,
+      "ignore_taxes": false,
+      "simulation_mode": "retirement"
+    }
+  },
+  "config_version": 6,
+  "config_version_ts": "2026-03-29T00:26:57",
+  "config_version_note": "server startup \u2014 auto-checkpoint"
+}

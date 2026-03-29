@@ -1,0 +1,65 @@
+{
+  "floor_k": 100,
+  "schedule": [
+    {
+      "ages": "47-64",
+      "amount_k": 150,
+      "base_k": 100,
+      "_note": "Pre-retirement: brokerage-only before age 59.5 (IRS early withdrawal gate)"
+    },
+    {
+      "ages": "65-74",
+      "amount_k": 200,
+      "base_k": 140,
+      "_note": "Retirement gap: between retirement (65) and RMD start (75)"
+    },
+    {
+      "ages": "75-95",
+      "amount_k": 250,
+      "base_k": 180,
+      "_note": "RMD era: RMDs supplement withdrawals; amount_k is above-RMD discretionary spending"
+    }
+  ],
+  "readme": {
+    "purpose": "Annual take-home withdrawal targets \u2014 the cash deposited to your bank account, post-tax. Taxes (federal, state, NIIT) are computed separately and debited from brokerage on top of this amount. Enter what you want to spend, not a grossed-up number.",
+    "format": {
+      "ages": "Recommended. Use exclusive, non-overlapping age ranges: '47-64' means ages 47 through 64 inclusive. The loader converts to simulation years using current_age from person.json (year N = age N - current_age). Overlapping ranges cause a validation error.",
+      "years": "Legacy format. Year numbers are simulation-relative: year 1 = current_age + 1. Still supported for backward compatibility but not recommended \u2014 ages format is self-documenting.",
+      "exclusive_ranges": "Ranges must not overlap. Use '47-64' and '65-74' (not '47-65' and '65-74'). The validator will raise an error if ranges overlap.",
+      "mixed": "Each row can independently use 'ages' or 'years' \u2014 they can coexist in the same schedule."
+    },
+    "validation_rules": {
+      "no_overlap": "Age ranges must not overlap. Error raised if two rows share any age.",
+      "age_order": "age_end must be > age_start. Error raised if reversed or equal.",
+      "base_k_le_amount_k": "base_k must be <= amount_k. Error raised if floor exceeds target.",
+      "past_ages": "Ages at or before current_age are silently skipped with a log warning."
+    },
+    "fields": {
+      "floor_k": "Global minimum take-home in $K regardless of market conditions. Simulator will not scale below this even in severe downturns. Should be <= all row base_k values.",
+      "amount_k": "Target take-home in $K in today's purchasing power (inflation-adjusted annually). This is what you want deposited to your bank account \u2014 not grossed up for taxes.",
+      "base_k": "Minimum acceptable take-home for this age range in $K. Models spending flexibility. Set lower if you can cut spending in bad markets; set equal to amount_k for fixed spending.",
+      "_note": "Documentation field \u2014 ignored by the simulator. Use to annotate life-stage meaning."
+    },
+    "pre_59_5_rule": "Before age 59.5, ALL withdrawals are automatically sourced from Brokerage only. IRA and Roth withdrawals incur a 10% IRS early withdrawal penalty \u2014 the simulator enforces this hard gate regardless of withdrawal_sequence settings in economic.json.",
+    "example_non_overlapping": {
+      "comment": "Three life stages: working / retirement gap / RMD era",
+      "schedule": [
+        {
+          "ages": "47-64",
+          "amount_k": 150,
+          "base_k": 100
+        },
+        {
+          "ages": "65-74",
+          "amount_k": 200,
+          "base_k": 140
+        },
+        {
+          "ages": "75-95",
+          "amount_k": 250,
+          "base_k": 180
+        }
+      ]
+    }
+  }
+}

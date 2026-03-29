@@ -1,0 +1,167 @@
+[
+  {
+    "v": 1,
+    "ts": "2026-03-28T13:49:36",
+    "note": "server startup \u2014 auto-checkpoint",
+    "source": "auto",
+    "files_changed": [
+      "withdrawal_schedule.json",
+      "person.json",
+      "allocation_yearly.json",
+      "economic.json",
+      "income.json",
+      "shocks_yearly.json",
+      "inflation_yearly.json"
+    ]
+  },
+  {
+    "v": 2,
+    "ts": "2026-03-28T15:49:58",
+    "note": "server startup \u2014 auto-checkpoint",
+    "source": "auto",
+    "files_changed": [
+      "economic.json",
+      "shocks_yearly.json",
+      "income.json",
+      "allocation_yearly.json",
+      "inflation_yearly.json",
+      "withdrawal_schedule.json",
+      "person.json"
+    ]
+  },
+  {
+    "v": 3,
+    "ts": "2026-03-28T20:41:57",
+    "note": "server startup \u2014 auto-checkpoint",
+    "source": "auto",
+    "files_changed": [
+      "withdrawal_schedule.json",
+      "economic.json",
+      "person.json",
+      "inflation_yearly.json",
+      "income.json",
+      "shocks_yearly.json",
+      "allocation_yearly.json"
+    ]
+  },
+  {
+    "v": 4,
+    "ts": "2026-03-28T21:55:55",
+    "note": "server startup \u2014 auto-checkpoint",
+    "source": "auto",
+    "files_changed": [
+      "economic.json",
+      "allocation_yearly.json",
+      "income.json",
+      "shocks_yearly.json",
+      "withdrawal_schedule.json",
+      "person.json",
+      "inflation_yearly.json"
+    ]
+  },
+  {
+    "v": 5,
+    "ts": "2026-03-28T23:14:07",
+    "note": "server startup \u2014 auto-checkpoint",
+    "source": "auto",
+    "files_changed": [
+      "income.json",
+      "person.json",
+      "economic.json",
+      "allocation_yearly.json",
+      "shocks_yearly.json",
+      "inflation_yearly.json",
+      "withdrawal_schedule.json"
+    ]
+  },
+  {
+    "v": 6,
+    "ts": "2026-03-29T00:26:57",
+    "note": "server startup \u2014 auto-checkpoint",
+    "source": "auto",
+    "files_changed": [
+      "shocks_yearly.json",
+      "allocation_yearly.json",
+      "income.json",
+      "person.json",
+      "inflation_yearly.json",
+      "withdrawal_schedule.json",
+      "economic.json"
+    ]
+  },
+  {
+    "v": 7,
+    "ts": "2026-03-29T01:46:22",
+    "note": "server startup \u2014 auto-checkpoint",
+    "source": "auto",
+    "files_changed": [
+      "person.json",
+      "income.json",
+      "shocks_yearly.json",
+      "withdrawal_schedule.json",
+      "allocation_yearly.json",
+      "economic.json",
+      "inflation_yearly.json"
+    ]
+  },
+  {
+    "v": 8,
+    "ts": "2026-03-29T01:59:13",
+    "note": "guided: profile saved",
+    "source": "auto",
+    "files_changed": [
+      "allocation_yearly.json",
+      "inflation_yearly.json",
+      "income.json",
+      "withdrawal_schedule.json",
+      "person.json",
+      "shocks_yearly.json",
+      "economic.json"
+    ]
+  },
+  {
+    "v": 9,
+    "ts": "2026-03-29T10:06:56",
+    "note": "server startup \u2014 auto-checkpoint",
+    "source": "auto",
+    "files_changed": [
+      "person.json",
+      "allocation_yearly.json",
+      "shocks_yearly.json",
+      "inflation_yearly.json",
+      "withdrawal_schedule.json",
+      "income.json",
+      "economic.json"
+    ]
+  },
+  {
+    "v": 10,
+    "ts": "2026-03-29T12:27:07",
+    "note": "server startup \u2014 auto-checkpoint",
+    "source": "auto",
+    "files_changed": [
+      "withdrawal_schedule.json",
+      "economic.json",
+      "person.json",
+      "inflation_yearly.json",
+      "shocks_yearly.json",
+      "allocation_yearly.json",
+      "income.json"
+    ]
+  },
+  {
+    "v": 11,
+    "ts": "2026-03-29T12:27:57",
+    "note": "guided: shocks saved",
+    "source": "auto",
+    "files_changed": [
+      "withdrawal_schedule.json",
+      "economic.json",
+      "person.json",
+      "inflation_yearly.json",
+      "shocks_yearly.json",
+      "allocation_yearly.json",
+      "income.json"
+    ]
+  }
+]
