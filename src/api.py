@@ -147,11 +147,52 @@ def on_startup() -> None:
     global _STARTUP_MANIFEST
     _STARTUP_MANIFEST = _build_manifest()
 
-    # Log manifest summary
-    print("[startup] Source file manifest:")
-    for name, info in _STARTUP_MANIFEST["files"].items():
-        status = info["sha256_short"] if info["exists"] else "⚠ MISSING"
-        print(f"  {name:<30} {status}")
+    # Log manifest summary — grouped, three-column format matching --checkupdates
+    SEP = "=" * 72
+    COL_F = 42   # file column width
+    COL_H = 18   # hash column width
+
+    def _hdr(title: str) -> None:
+        print(f"\n  {title}")
+        print(f"  {'File':<{COL_F}} {'Expected hash':<{COL_H}} {'Disk hash':<{COL_H}} Status")
+        print(f"  {'-'*COL_F} {'-'*COL_H} {'-'*COL_H} {'-'*10}")
+
+    def _row(name: str, info: dict) -> str:
+        expected = _MANIFEST_LOCK_HASHES.get(name, "?")
+        disk     = info["sha256_short"] if info["exists"] else "MISSING"
+        ok       = (disk == expected)
+        status   = "✅ match" if ok else ("⚠ MISSING" if disk == "MISSING" else f"❌ MISMATCH")
+        print(f"  {name:<{COL_F}} {expected:<{COL_H}} {disk:<{COL_H}} {status}")
+        return "ok" if ok else "fail"
+
+    files      = _STARTUP_MANIFEST["files"]
+    py_files   = {k: v for k, v in files.items() if not k.startswith(("ui/", "config/", "profiles/"))}
+    ui_files   = {k: v for k, v in files.items() if k.startswith("ui/")}
+    cfg_files  = {k: v for k, v in files.items() if k.startswith("config/")}
+    prof_files = {k: v for k, v in files.items() if k.startswith("profiles/")}
+
+    results = []
+    print(f"\n{SEP}")
+    print(f"  eNDinomics startup manifest  |  {_STARTUP_MANIFEST['generated_at']}")
+    print(SEP)
+
+    _hdr("Python backend")
+    for k, v in py_files.items():   results.append(_row(k, v))
+    _hdr("UI files")
+    for k, v in ui_files.items():   results.append(_row(k, v))
+    _hdr("Config (system)")
+    for k, v in cfg_files.items():  results.append(_row(k, v))
+    _hdr("Profile configs (default/ only)")
+    for k, v in prof_files.items(): results.append(_row(k, v))
+
+    all_ok = all(r == "ok" for r in results)
+    print()
+    if all_ok:
+        print(f"  ✅ ALL {len(results)} FILES MATCH — server is running the latest code")
+    else:
+        n_fail = sum(1 for r in results if r != "ok")
+        print(f"  ❌ {n_fail} FILE(S) MISMATCHED — deploy missing files and restart")
+    print(SEP + "\n")
 
     # Auto-snapshot all non-default profiles
     profiles_dir = os.path.join(APP_ROOT, "profiles")
