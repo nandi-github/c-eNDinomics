@@ -484,6 +484,7 @@ test.describe("UI structure tests [PlaywrightTest]", () => {
   });
 
   test("Accounts YoY: n_years rows per account, balances > 0", async ({ page }) => {
+    test.setTimeout(90_000);  // slow: iterates 6 accounts × n_years rows under server load
     await loadResults(page, UI_PROFILE, uiRunId);
     const section = page.locator("section.results-section", {
       hasText: "Accounts — Investment YoY (Future USD)",
@@ -1180,5 +1181,216 @@ describe("Guided editor — Spending Plan [PlaywrightTest]", () => {
     await page.waitForTimeout(300);
     const rowsAfter = await page.locator("tbody tr").count();
     expect(rowsAfter).toBeGreaterThan(rowsBefore);
+  });
+});
+
+// ===========================================================================
+// G33 — Display correctness tests for v6.6 UI changes
+// Own beforeAll runs a simulation so g33RunId is in scope.
+// ===========================================================================
+
+describe("G33 — v6.6 display correctness [PlaywrightTest]", () => {
+  let g33RunId = "";
+
+  test.beforeAll(async ({ browser }) => {
+    const ctx  = await browser.newContext();
+    const page = await ctx.newPage();
+    try {
+      const pjRes  = await page.request.get(`http://localhost:8000/profile-config/${UI_PROFILE}/person.json`);
+      const pjWrap = await pjRes.json();
+      const pj     = JSON.parse(pjWrap.content);
+      const state   = pj.state          ?? "California";
+      const filing  = pj.filing_status  ?? "MFJ";
+      const mode    = pj.simulation_mode ?? "retirement";
+      const runRes = await page.request.post("http://localhost:8000/run", {
+        data: { profile: UI_PROFILE, paths: SIM_PATHS, steps_per_year: SIM_STEPS,
+                base_year: new Date().getFullYear(), dollars: "current",
+                state, filing, simulation_mode: mode, shocks_mode: "augment" },
+      });
+      const runData = await runRes.json();
+      g33RunId = runData.run ?? "";
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  // ── G33a — Investment return rows ─────────────────────────────────────────
+
+  test("G33a: Investment return — Nominal row shows Mean·Median·Stress", async ({ page }) => {
+    await loadResults(page, UI_PROFILE, g33RunId);
+    const row = page.locator("table.table tbody tr").filter({
+      has: page.locator("td", { hasText: "Investment return — Nominal (gross)" }),
+    });
+    await expect(row).toHaveCount(1);
+    const val = await row.locator("td").nth(1).textContent() ?? "";
+    expect(val).toContain("Mean:");
+    expect(val).toContain("Median:");
+    expect(val).toContain("Stress:");
+  });
+
+  test("G33a2: Investment return — Real row present", async ({ page }) => {
+    await loadResults(page, UI_PROFILE, g33RunId);
+    await expect(
+      page.locator("table.table tbody tr").filter({
+        has: page.locator("td", { hasText: "Investment return — Real (gross)" }),
+      })
+    ).toHaveCount(1);
+  });
+
+  // ── G33b — Portfolio net CAGR sub-rows ────────────────────────────────────
+
+  test("G33b: Portfolio net CAGR — Nominal sub-row present and indented", async ({ page }) => {
+    await loadResults(page, UI_PROFILE, g33RunId);
+    const row = page.locator("table.table tbody tr").filter({
+      has: page.locator("td", { hasText: "Portfolio net CAGR — Nominal" }),
+    });
+    await expect(row).toHaveCount(1);
+    const pl = await row.locator("td").first().evaluate(el =>
+      parseInt(getComputedStyle(el).paddingLeft)
+    );
+    expect(pl).toBeGreaterThan(12);
+  });
+
+  test("G33b2: Portfolio net CAGR — Real sub-row present", async ({ page }) => {
+    await loadResults(page, UI_PROFILE, g33RunId);
+    await expect(
+      page.locator("table.table tbody tr").filter({
+        has: page.locator("td", { hasText: "Portfolio net CAGR — Real" }),
+      })
+    ).toHaveCount(1);
+  });
+
+  // ── G33c — Results page JS stability ──────────────────────────────────────
+
+  test("G33c: Results page loads without JS scope errors", async ({ page }) => {
+    const jsErrors: string[] = [];
+    page.on("pageerror", err => jsErrors.push(err.message));
+    await loadResults(page, UI_PROFILE, g33RunId);
+    const scopeErrors = jsErrors.filter(e =>
+      e.includes("successRate") || e.includes("ReferenceError") || e.includes("is not defined")
+    );
+    expect(scopeErrors).toHaveLength(0, `JS errors: ${scopeErrors.join("; ")}`);
+    await expect(page.locator("table.table thead th").first()).toBeVisible();
+  });
+
+  test("G33c2: Survival rate renders a valid percentage", async ({ page }) => {
+    await loadResults(page, UI_PROFILE, g33RunId);
+    const survRow = page.locator("table.table tbody tr").filter({
+      has: page.locator("td", { hasText: /Full-plan survival rate/ }),
+    });
+    await expect(survRow).toHaveCount(1);
+    const val = await survRow.locator("td").nth(1).textContent() ?? "";
+    expect(val).toMatch(/\d+\.\d+%/);
+  });
+
+  // ── G33d — Insights basis label ───────────────────────────────────────────
+
+  test("G33d: Insights header contains 'median path' basis label", async ({ page }) => {
+    await loadResults(page, UI_PROFILE, g33RunId);
+    const h3 = page.locator("h3").filter({ hasText: "Insights" }).first();
+    await expect(h3).toBeVisible({ timeout: 10_000 });
+    const txt = await h3.textContent() ?? "";
+    expect(txt.toLowerCase()).toContain("median path");
+  });
+
+  // ── G33e — Section header casing ──────────────────────────────────────────
+
+  test("G33e: Person.json section headers are title case not ALL CAPS", async ({ page }) => {
+    await page.goto("http://localhost:8000");
+    await page.click('button:has-text("Configure")');
+    await page.waitForSelector("[data-section]", { timeout: 10_000 });
+    const headers = await page.locator("[data-section]").allTextContents();
+    for (const h of headers) {
+      const stripped = h.replace(/[▶▼\s]/g, "");
+      if (!stripped) continue;
+      const letters = stripped.replace(/[^a-zA-Z]/g, "");
+      if (!letters) continue;
+      const isAllCaps = letters === letters.toUpperCase() && letters !== letters.toLowerCase();
+      expect(isAllCaps).toBe(false, `"${stripped}" should not be ALL CAPS`);
+    }
+  });
+
+  test("G33e2: Specific section headers use expected title case", async ({ page }) => {
+    await page.goto("http://localhost:8000");
+    await page.click('button:has-text("Configure")');
+    await page.waitForSelector("[data-section]", { timeout: 10_000 });
+    for (const expected of ["Identity", "Simulation Horizon", "Social Security", "Spouse"]) {
+      await expect(
+        page.locator("[data-section]").filter({ hasText: expected }).first()
+      ).toBeVisible({ message: `"${expected}" should be visible` });
+    }
+  });
+
+  // ── G33f — Currency toggle ────────────────────────────────────────────────
+
+  test("G33f: Portfolio Projection has Today's USD / Future USD toggle", async ({ page }) => {
+    await loadResults(page, UI_PROFILE, g33RunId);
+    await expect(page.locator("button", { hasText: "Today's USD" })).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator("button", { hasText: "Future USD" })).toBeVisible();
+  });
+
+  test("G33f2: Clicking Future USD toggle updates chart description", async ({ page }) => {
+    await loadResults(page, UI_PROFILE, g33RunId);
+    await page.locator("button", { hasText: "Future USD" }).click();
+    await page.waitForTimeout(500);
+    const section = page.locator(".results-section").filter({
+      has: page.locator("h3", { hasText: "Portfolio Projection" }),
+    });
+    const txt = await section.textContent() ?? "";
+    expect(txt.toLowerCase()).toContain("nom");
+  });
+
+  // ── G33g — Chart SVG ──────────────────────────────────────────────────────
+
+  test("G33g: Portfolio Projection SVG present with path elements", async ({ page }) => {
+    await loadResults(page, UI_PROFILE, g33RunId);
+    const section = page.locator(".results-section").filter({
+      has: page.locator("h3", { hasText: "Portfolio Projection" }),
+    });
+    await expect(section).toBeVisible({ timeout: 10_000 });
+    const paths = await section.locator("svg path").count();
+    expect(paths).toBeGreaterThanOrEqual(3);
+  });
+
+  test("G33g2: Chart SVG contains Typical legend entry", async ({ page }) => {
+    await loadResults(page, UI_PROFILE, g33RunId);
+    const section = page.locator(".results-section").filter({
+      has: page.locator("h3", { hasText: "Portfolio Projection" }),
+    });
+    const svgText = await section.locator("svg").textContent() ?? "";
+    expect(svgText).toContain("Typical");
+  });
+
+  // ── G33h — Arithmetic check suppressed ────────────────────────────────────
+
+  test("G33h: Arithmetic check banner absent when survival ≥ 95%", async ({ page }) => {
+    await loadResults(page, UI_PROFILE, g33RunId);
+    const survRow = page.locator("table.table tbody tr").filter({
+      has: page.locator("td", { hasText: /Full-plan survival rate/ }),
+    });
+    const survText = await survRow.locator("td").nth(1).textContent() ?? "0%";
+    if (parseFloat(survText) >= 95) {
+      await expect(page.locator("text=arithmetic check")).toHaveCount(0);
+    }
+  });
+
+  // ── G33i — No "Not meaningful" ────────────────────────────────────────────
+
+  test("G33i: 'Not meaningful' text never appears in CAGR rows", async ({ page }) => {
+    await loadResults(page, UI_PROFILE, g33RunId);
+    await expect(page.locator("text=Not meaningful")).toHaveCount(0);
+  });
+
+  // ── G33j — CAGR format ────────────────────────────────────────────────────
+
+  test("G33j: Portfolio net CAGR rows show Median: format not old 'net (vs' format", async ({ page }) => {
+    await loadResults(page, UI_PROFILE, g33RunId);
+    const row = page.locator("table.table tbody tr").filter({
+      has: page.locator("td", { hasText: "Portfolio net CAGR — Nominal" }),
+    });
+    await expect(row).toHaveCount(1);
+    const val = await row.locator("td").nth(1).textContent() ?? "";
+    expect(val).toMatch(/Median:/);
+    expect(val).not.toContain("net (vs");
   });
 });

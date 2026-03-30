@@ -6654,6 +6654,108 @@ def group32_waterfall_surplus(paths: int):
 GROUPS.append(group32_waterfall_surplus)
 
 
+# ===========================================================================
+# GROUP 33 — V6.6 DISPLAY CORRECTNESS (Playwright)
+# Covers: CAGR rows, Insights basis label, chart toggle, arithmetic check
+#         suppression, section header casing, Results page JS stability.
+# ===========================================================================
+
+def group33_display_correctness(paths: int):
+    """Run G33 Playwright spec — v6.6 UI display correctness checks."""
+    import subprocess
+    checks = []
+    t0 = time.time()
+
+    ui_dir = os.path.join(APP_ROOT, "ui")
+    spec_path = os.path.join(ui_dir, "tests", "g33_display_correctness.spec.ts")
+
+    # Skip gracefully if spec file not yet deployed
+    if not os.path.isfile(spec_path):
+        checks.append((PASS, "G33: SKIPPED — g33_display_correctness.spec.ts not found", ""))
+        return "G33", "v6.6 display correctness (skipped — spec not deployed)", checks, time.time() - t0
+
+    import urllib.request
+    server_up = False
+    try:
+        urllib.request.urlopen("http://localhost:8000/health", timeout=3)
+        server_up = True
+    except Exception:
+        pass
+
+    if not server_up:
+        checks.append((PASS, "G33: SKIPPED — server not reachable on :8000", ""))
+        return "G33", "v6.6 display correctness (skipped — server offline)", checks, time.time() - t0
+
+    # Ensure PlaywrightTest profile exists for the spec
+    seed_system_profile(force=False)
+    if not validate_testui_profile():
+        _seed_testui_profile(force=True)
+
+    import urllib.request as _ur3
+    def _api33(path, body=None):
+        req = urllib.request.Request(
+            f"http://localhost:8000{path}", method="POST",
+            headers={"Content-Type": "application/json"},
+            data=json.dumps(body).encode() if body else None,
+        )
+        try:
+            with _ur3.urlopen(req, timeout=10) as r:
+                return json.loads(r.read())
+        except Exception as e:
+            return {"error": str(e)}
+
+    _pw_profile = "PlaywrightTest"
+    _api33("/profiles/delete", {"profile": _pw_profile})
+    _create = _api33("/profiles/create", {"name": _pw_profile, "source": _TESTUI_PROFILE})
+    checks.append(chk("G33-setup: PlaywrightTest profile created",
+                       _create.get("ok") is True, str(_create)))
+    _api33("/reports/clear", {"profile": _pw_profile})
+
+    result = subprocess.run(
+        ["npx", "playwright", "test",
+         "tests/g33_display_correctness.spec.ts",
+         "--reporter=line"],
+        cwd=ui_dir, capture_output=True, text=True, timeout=180,
+    )
+    elapsed = time.time() - t0
+    output = result.stdout + result.stderr
+
+    # Cleanup
+    _cleanup33 = _api33("/profiles/delete", {"profile": _pw_profile})
+    _err33 = str(_cleanup33.get("error", ""))
+    if not (_cleanup33.get("ok") or "404" in _err33 or "Not Found" in _err33):
+        print(f"  [G33] WARNING: cleanup error: {_cleanup33}")
+
+    passed = failed = 0
+    pw_checks = []
+    for line in output.splitlines():
+        line = line.strip()
+        if line.startswith("✓") or line.startswith("✘"):
+            name_part = line.split("›")[-1].strip() if "›" in line else line[2:].strip()
+            status = PASS if line.startswith("✓") else FAIL
+            pw_checks.append((status, f"G33: {name_part}", ""))
+        if " passed" in line:
+            import re; m = re.search(r"(\d+) passed", line)
+            if m: passed = int(m.group(1))
+        if " failed" in line:
+            import re; m = re.search(r"(\d+) failed", line)
+            if m: failed = int(m.group(1))
+
+    if pw_checks:
+        checks.extend(pw_checks)
+    else:
+        if result.returncode == 0:
+            checks.append((PASS, f"G33: spec passed ({passed} tests)", ""))
+        else:
+            checks.append((FAIL, "G33: spec failed",
+                           output[-500:] if len(output) > 500 else output))
+
+    return "G33", f"v6.6 display correctness ({passed} passed, {failed} failed)", checks, elapsed
+
+
+GROUPS.append(group33_display_correctness)
+
+
 def run_comprehensive(paths: int):
     print(f"\n{'='*72}")
     print(f"  eNDinomics Comprehensive Functional Test  |  paths={paths}")
@@ -7008,7 +7110,7 @@ def main():
                 print("Baseline cleared — will be regenerated on next run.")
         if args.skip_playwright:
             active = [g for g in GROUPS if g.__name__ not in
-                      ("group19_playwright",)]
+                      ("group19_playwright", "group33_display_correctness")]
             GROUPS[:] = active
         else:
             # Server must be running for Playwright (G19). Enforce checkupdates

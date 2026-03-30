@@ -105,3 +105,31 @@ Thumbs.db
 *.log
 uvicorn*.log
 server.log
+
+# Transient runtime data — never commit
+src/profiles/*/reports/
+src/profiles/*/.versions/
+src/profiles/Experimental-*/
+src/profiles/Test*/
+src/profiles/__system__*/
+
+# Profiles — only default is source-controlled
+src/profiles/*/reports/
+src/profiles/*/.versions/
+src/profiles/[!d]*/
+src/profiles/d[!e]*/
+
+# Profiles — only default/ is source-controlled, everything else is runtime data
+src/profiles/Experimental-*/
+src/profiles/Test*/
+src/profiles/__system__*/
+src/profiles/*/reports/
+src/profiles/*/.versions/
+
+# Runtime data — never commit
+src/profiles/Experimental-*/
+src/profiles/Test*/
+src/profiles/__system__*/
+src/profiles/__testui__*/
+src/profiles/*/reports/
+src/profiles/*/.versions/
