@@ -148,5 +148,110 @@
       "allocation_yearly.json",
       "income.json"
     ]
+  },
+  {
+    "v": 11,
+    "ts": "2026-03-29T21:03:00",
+    "note": "server startup \u2014 auto-checkpoint",
+    "source": "auto",
+    "files_changed": [
+      "income.json",
+      "inflation_yearly.json",
+      "withdrawal_schedule.json",
+      "shocks_yearly.json",
+      "economic.json",
+      "person.json",
+      "allocation_yearly.json"
+    ]
+  },
+  {
+    "v": 12,
+    "ts": "2026-03-29T22:04:07",
+    "note": "server startup \u2014 auto-checkpoint",
+    "source": "auto",
+    "files_changed": [
+      "income.json",
+      "person.json",
+      "inflation_yearly.json",
+      "economic.json",
+      "shocks_yearly.json",
+      "allocation_yearly.json",
+      "withdrawal_schedule.json"
+    ]
+  },
+  {
+    "v": 13,
+    "ts": "2026-03-29T23:17:22",
+    "note": "server startup \u2014 auto-checkpoint",
+    "source": "auto",
+    "files_changed": [
+      "allocation_yearly.json",
+      "inflation_yearly.json",
+      "income.json",
+      "economic.json",
+      "shocks_yearly.json",
+      "person.json",
+      "withdrawal_schedule.json"
+    ]
+  },
+  {
+    "v": 14,
+    "ts": "2026-03-30T00:17:48",
+    "note": "server startup \u2014 auto-checkpoint",
+    "source": "auto",
+    "files_changed": [
+      "inflation_yearly.json",
+      "economic.json",
+      "income.json",
+      "shocks_yearly.json",
+      "withdrawal_schedule.json",
+      "allocation_yearly.json",
+      "person.json"
+    ]
+  },
+  {
+    "v": 15,
+    "ts": "2026-03-30T10:32:53",
+    "note": "server startup \u2014 auto-checkpoint",
+    "source": "auto",
+    "files_changed": [
+      "inflation_yearly.json",
+      "economic.json",
+      "allocation_yearly.json",
+      "withdrawal_schedule.json",
+      "income.json",
+      "shocks_yearly.json",
+      "person.json"
+    ]
+  },
+  {
+    "v": 16,
+    "ts": "2026-03-30T14:22:27",
+    "note": "server startup \u2014 auto-checkpoint",
+    "source": "auto",
+    "files_changed": [
+      "income.json",
+      "allocation_yearly.json",
+      "economic.json",
+      "inflation_yearly.json",
+      "withdrawal_schedule.json",
+      "person.json",
+      "shocks_yearly.json"
+    ]
+  },
+  {
+    "v": 17,
+    "ts": "2026-03-30T15:28:20",
+    "note": "server startup \u2014 auto-checkpoint",
+    "source": "auto",
+    "files_changed": [
+      "shocks_yearly.json",
+      "inflation_yearly.json",
+      "allocation_yearly.json",
+      "income.json",
+      "withdrawal_schedule.json",
+      "person.json",
+      "economic.json"
+    ]
   }
 ]

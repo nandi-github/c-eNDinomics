@@ -1,0 +1,28 @@
+{
+  "profile": "Experimental-Optimized",
+  "run_id": "run_20260330_152924",
+  "run_info": {
+    "paths": 200,
+    "steps_per_year": 2,
+    "dollars": "current",
+    "base_year": 2026,
+    "state": "California",
+    "filing": "MFJ",
+    "rmd_table": "uniform_lifetime",
+    "runtime_overrides": {
+      "state": "California",
+      "filing": "MFJ"
+    },
+    "shocks_mode": "none",
+    "flags": {
+      "ignore_withdrawals": false,
+      "ignore_rmds": false,
+      "ignore_conversions": false,
+      "ignore_taxes": false,
+      "simulation_mode": "retirement"
+    }
+  },
+  "config_version": 23,
+  "config_version_ts": "2026-03-30T15:22:16",
+  "config_version_note": "Arith floor fix opt1: guarantee floor \u2192 97K/yr (zero-return certainty)"
+}

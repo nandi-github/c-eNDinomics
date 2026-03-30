@@ -1,22 +1,22 @@
 {
-  "floor_k": 100,
+  "floor_k": 97,
   "schedule": [
     {
       "ages": "47-64",
-      "amount_k": 150,
-      "base_k": 100,
+      "amount_k": 97,
+      "base_k": 97,
       "_note": "Pre-retirement: brokerage-only before age 59.5 (IRS early withdrawal gate)"
     },
     {
       "ages": "65-74",
-      "amount_k": 200,
-      "base_k": 140,
+      "amount_k": 97,
+      "base_k": 97,
       "_note": "Retirement gap: between retirement (65) and RMD start (75)"
     },
     {
       "ages": "75-95",
-      "amount_k": 250,
-      "base_k": 180,
+      "amount_k": 97,
+      "base_k": 97,
       "_note": "RMD era: RMDs supplement withdrawals; amount_k is above-RMD discretionary spending"
     }
   ],
