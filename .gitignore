@@ -133,3 +133,4 @@ src/profiles/__system__*/
 src/profiles/__testui__*/
 src/profiles/*/reports/
 src/profiles/*/.versions/
+src/ui/node_modules/
